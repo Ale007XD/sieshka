@@ -1,0 +1,92 @@
+{
+  "project": "sieshka-food-delivery",
+  "architecture_doc": "docs/ARCHITECTURE.md v1.3",
+  "sprints_doc": "docs/SPRINTS_SIESHKA.md",
+  "basis": {
+    "llm_nano_vm": "0.8.6",
+    "nano_vm_mcp": "0.4.5",
+    "nano_vm_dev_agent": "0.2.0"
+  },
+  "current_milestone": "M1 — Foundation",
+  "state_variables": {
+    "sprints_done": ["sprint_m1_scaffold"],
+    "sprints_next": "sprint_m1_inventory_promotions",
+    "ci": "pytest 17/17 PASS (tests/unit/), mypy: not yet run in this session — run before next sprint",
+    "repo_local_path": "~/projects/sieshka (TO BE CREATED — see DEPLOYMENT.md)",
+    "repo_remote": "NOT YET PUSHED — github.com/Ale007XD/sieshka (suggested name, confirm before creating)"
+  },
+  "domain_fsms_status": {
+    "OrderFSM": "DONE — full M1 implementation, 7/7 tests PASS",
+    "KitchenFSM": "DONE — full M1 implementation, 2/2 tests PASS",
+    "DeliveryFSM": "DONE — full M1 implementation, 2/2 tests PASS",
+    "InventoryFSM": "NOT STARTED — sprint_m1_inventory_promotions",
+    "PromotionFSM": "NOT STARTED — sprint_m1_inventory_promotions",
+    "BusinessScheduleFSM": "NOT STARTED — sprint_m1_inventory_promotions",
+    "CustomerDataFSM": "NOT STARTED — sprint_m1_inventory_promotions"
+  },
+  "key_files_done": {
+    "app/fsm/core/base.py": "BaseFSM[StateType, EventType] ABC, TransitionResult frozen dataclass",
+    "app/fsm/core/registry.py": "domain → FSM instance registry",
+    "app/domains/orders/models.py": "OrderState(11 states), OrderEvent(11 events), ORDER_TRANSITIONS graph",
+    "app/domains/orders/fsm.py": "OrderFSM — callback-based (state_reader/state_writer), no DB dependency yet",
+    "app/domains/kitchen/fsm.py": "KitchenFSM — 5 states linear",
+    "app/domains/delivery/fsm.py": "DeliveryFSM — 6 states with FAILED branch",
+    "app/trace.py": "LightweightTrace — in-memory M1/M2, same trace_id field as future nano-vm Trace",
+    "app/config.py": "Settings via pydantic-settings, .env support",
+    "app/main.py": "FastAPI app, /health, yookassa webhook router mounted",
+    "app/webhooks/yookassa.py": "ADR-003 suspend/resume skeleton — 3 safety branches implemented, TODO M2 wire to order_service",
+    "app/programs/order_programs.py": "DRAFT nano-vm Programs for M3 — order_request_payment, payment_confirmation, order_start_cooking",
+    "app/tools/order_tools.py": "DRAFT nano-vm Tools for M3 — stubs with TODO M2/M3 markers, numeric sentinel pattern already applied",
+    "migrations/001_initial_schema.sql": "orders, kitchen_tickets, delivery_tasks, inventory, customers, payments, idempotency_keys + updated_at triggers"
+  },
+  "tests_done": {
+    "tests/unit/fsm/test_order_fsm.py": "8 tests — happy path, rejection, terminal states, frozen dataclass check",
+    "tests/unit/fsm/test_kitchen_delivery_fsm.py": "4 tests — happy path + fail path both domains",
+    "tests/unit/test_trace.py": "5 tests — record/retrieve/metadata"
+  },
+  "constraints_inherited_from_nano_vm_ecosystem": [
+    "NO eval()/exec() anywhere — ASTEngine only (applies to M3+ Program conditions)",
+    "mypy --strict 0 errors obligatory every sprint",
+    "ruff line-length=100, CI check only, no --fix (recursive trigger)",
+    "ASTEngine: string literals NOT supported as RHS in CONDITION — use numeric sentinel (0/1)",
+    "ASTEngine: 'contains' not supported v0.8.6 — use '=='",
+    "LiteLLMAdapter: direct import from nano_vm.adapters.litellm_adapter — not via __init__",
+    "OPENAI_API_KEY + OPENAI_API_BASE set BEFORE litellm import",
+    "Terminal tool = single PG transaction, external calls (HTTP/MQ) FORBIDDEN inside tx block",
+    "GovernanceEnvelope FORBIDDEN to stub in M1/M2 — cargo cult, implement only at M3",
+    "fsm_instances table FORBIDDEN — current_state lives in entity primary table",
+    "Direct state mutation (order.status = X) FORBIDDEN outside terminal tools",
+    "transition() signature: event= parameter only, never new_state=",
+    "Transactional patching for dev-agent: stage_patch → validate_staged_mypy(tmpdir) → commit_patches → run_pytest → git_checkout_files on failure",
+    "S&R |matches|=1 invariant — read current file before patching"
+  ],
+  "sieshka_specific_decisions": [
+    {
+      "point": "LightweightTrace uses same trace_id field name as future nano-vm Trace — chosen deliberately for M3 migration ease, not a coincidence",
+      "classification": "DECISION",
+      "date": "2026-06-17"
+    },
+    {
+      "point": "OrderFSM constructed with injected state_reader/state_writer callbacks rather than direct DB import — keeps FSM unit-testable without database, repository wraps callbacks in sprint_m1_postgres_wiring",
+      "classification": "DECISION",
+      "date": "2026-06-17"
+    },
+    {
+      "point": "order_programs.py and order_tools.py drafted ahead of M3 (in M1 scaffold) as design reference only — NOT wired, NOT executed. Prevents architecture drift between M1 custom FSM and M3 target shape.",
+      "classification": "DECISION",
+      "date": "2026-06-17"
+    },
+    {
+      "point": "ADR-005 (provider fallback via FSM, not gateway) and ADR-006 (YandexGPT primary/GigaChat fallback) added to ARCHITECTURE.md v1.3 based on validated provider-fallback-demo pattern from nano-vm ecosystem DECISIONS.md 2026-06-17 entry",
+      "classification": "DECISION",
+      "date": "2026-06-17"
+    }
+  ],
+  "next_session_instructions": {
+    "step_1": "Run `pytest tests/unit/ -v && mypy app/ --ignore-missing-imports` to confirm M1 scaffold gate still green",
+    "step_2": "Open docs/SPRINTS_SIESHKA.md, locate sprint_m1_inventory_promotions",
+    "step_3": "Feed sprint block to nano-vm-dev-agent via PROGRAM_SPRINT DSL (see DEPLOYMENT.md §4 for exact invocation)",
+    "step_4": "After gate GREEN, update this file: move sprint to sprints_done, update domain_fsms_status, append any new DECISION/CONSTRAINT/LEARNING entries",
+    "step_5": "Classify any new knowledge per lifecycle automaton: PENDING→VALIDATED→{CONSTRAINT|DECISION|LEARNING|EXPIRED}"
+  }
+}
