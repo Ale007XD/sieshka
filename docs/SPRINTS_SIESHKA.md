@@ -35,7 +35,7 @@ gate: pytest GREEN (17/17), mypy 0 errors
 status: DONE
 ```
 
-### sprint_m1_inventory_promotions — NEXT
+### sprint_m1_inventory_promotions — DONE (тест-гэп — см. sprint_m1_1_tests)
 ```
 Deliverables:
   app/domains/inventory/fsm.py   — InventoryFSM (AVAILABLE→LOW_STOCK→CRITICAL→OUT_OF_STOCK)
@@ -51,6 +51,82 @@ constraints:
   - BusinessScheduleFSM: cyclic graph OPEN→CLOSING_SOON→CLOSED→OPEN — verify no false "terminal state" assumption
   - CustomerDataFSM: ANONYMIZED/DELETED states map to future GdprEraseEvent (nano-vm core has this — DO NOT reimplement, just align naming)
 gate: pytest GREEN, mypy 0 errors
+
+ACTUAL RESULT (verified 2026-06-23, прогон runner.py + независимая проверка):
+  4/4 fsm.py — DONE, mypy 0 errors, ProgramValidator N/A (M1, custom FSM)
+  tests/unit/fsm/test_inventory_fsm.py — DONE, 36 tests PASS
+  tests/unit/fsm/test_promotions_fsm.py — NOT GENERATED
+  tests/unit/fsm/test_schedule_fsm.py — NOT GENERATED
+  tests/unit/fsm/test_privacy_fsm.py — NOT GENERATED
+  ROOT CAUSE: build_program_sprint() generate_test step принимает один
+    $test_file за вызов — архитектурное ограничение, не баг исполнения.
+    pytest GREEN не поймал гэп, т.к. отсутствующий файл — не failing test.
+  CLASSIFICATION: LEARNING → промоутить в CONSTRAINTS.md dev-agent при
+    повторении на след. multi-deliverable спринте.
+```
+
+### sprint_m1_1_tests — NEXT (закрывает тест-гэп sprint_m1_inventory_promotions)
+```
+Deliverables:
+  tests/unit/fsm/test_promotions_fsm.py
+  tests/unit/fsm/test_schedule_fsm.py
+  tests/unit/fsm/test_privacy_fsm.py
+
+constraints:
+  # Архитектурное ограничение build_program_sprint(): generate_test принимает
+  # ОДИН $test_file за вызов — JSON с несколькими ключами НЕ генерировать
+  # (multi-file JSON для write_repo_files уже признан ненадёжным, см. DECISIONS.md
+  # 2026-06-06 kyc-demo iter-0..2 finding). Вместо этого — 3 ПОСЛЕДОВАТЕЛЬНЫХ
+  # однофайловых вызова generate_test, по образцу уже работающего паттерна:
+  #   generate_test_0 → write_test_0 → test_promotions_fsm.py
+  #   generate_test_1 → write_test_1 → test_schedule_fsm.py
+  #   generate_test_2 → write_test_2 → test_privacy_fsm.py
+  # Это НЕ новый механизм — тот же generate_test/write_test шаг, вызванный 3 раза
+  # с разным $test_file, как уже было сделано один раз для inventory.
+
+  - REFERENCE для всех трёх: tests/unit/fsm/test_inventory_fsm.py (36 тестов,
+    PASS) — структура классов обязательна для повторения:
+    TestXFSMConstruction, TestGetAllowedEvents, TestTransitionHappyPaths,
+    TestTransitionRejections, TestTransitionResultShape, TestStatePersistence,
+    TestHandleEventAlias. FullDegradationPath — только для доменов с линейным
+    или ветвящимся графом деградации (Promotions — да; Schedule/Privacy — см. ниже).
+
+  - test_promotions_fsm.py:
+    импорт из app.domains.promotions.models (PROMOTION_TRANSITIONS — tuple-key
+    dict[(state,event)] формат, НЕ dict[state][event] — сверить с реальным
+    models.py перед генерацией тестов, не предполагать формат)
+
+  - test_schedule_fsm.py:
+    BusinessScheduleState/Event/SCHEDULE_TRANSITIONS импортируются из
+    app.domains.schedule.fsm, НЕ из models.py — модуль models.py для этого
+    домена НЕ существует (сознательное решение, см. sprint_m1_inventory_promotions,
+    deliverables не включали schedule/models.py)
+    ОБЯЗАТЕЛЬНЫЙ тест на цикличность: полный обход OPEN→CLOSING_SOON→CLOSED→OPEN
+    с проверкой, что после полного цикла FSM возвращается в исходное состояние.
+    НЕ тестировать "terminal state" — у этого домена терминальных состояний нет
+    по конструкции (cyclic graph constraint из исходного спринта)
+
+  - test_privacy_fsm.py:
+    импорт из app.domains.privacy.models (CUSTOMER_DATA_TRANSITIONS — tuple-key)
+    ОБЯЗАТЕЛЬНЫЙ тест на GDPR-необратимость: explicit assert что из DELETED
+    get_allowed_events() возвращает [], И что ни для одного состояния нет
+    события, ведущего "назад" по цепочке ACTIVE→RETAINED→ANONYMIZED→DELETED
+    (test_no_backward_transition_exists — итерация по всем парам state×event,
+    проверка что new_state не предшествует current в линейном порядке)
+
+  - Каждый файл — отдельный stage_patch → validate_staged_mypy → commit_patches
+    цикл (транзакционный паттерн DA-4, без изменений)
+
+gate:
+  pytest tests/unit/ -v   # GREEN, БЕЗ новых failures, ожидаемое количество
+                           # тестов > 53 (текущий baseline) — рост, не просто PASS
+  mypy app/ --ignore-missing-imports   # 0 errors
+  ruff check .                          # clean
+  # ЯВНАЯ проверка существования файлов — НЕ заменяется pytest exit code,
+  # т.к. именно это пропустил sprint_m1_inventory_promotions:
+  test -f tests/unit/fsm/test_promotions_fsm.py
+  test -f tests/unit/fsm/test_schedule_fsm.py
+  test -f tests/unit/fsm/test_privacy_fsm.py
 ```
 
 ### sprint_m1_postgres_wiring
