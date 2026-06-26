@@ -65,14 +65,14 @@ class BusinessScheduleFSM(BaseFSM[BusinessScheduleState, BusinessScheduleEvent])
         self._read = state_reader
         self._write = state_writer
 
-    def get_current_state(self, entity_id: str) -> BusinessScheduleState:
-        return self._read(entity_id)  # type: ignore[no-any-return]
+    async def get_current_state(self, entity_id: str) -> BusinessScheduleState:
+        return await self._read(entity_id)  # type: ignore[no-any-return]
 
     def get_allowed_events(self, state: BusinessScheduleState) -> list[BusinessScheduleEvent]:
         """Graph-level only. Business rules → PolicyProvider."""
         return list(SCHEDULE_TRANSITIONS.get(state, {}).keys())
 
-    def transition(
+    async def transition(
         self,
         entity_id: str,
         event: BusinessScheduleEvent,
@@ -81,7 +81,7 @@ class BusinessScheduleFSM(BaseFSM[BusinessScheduleState, BusinessScheduleEvent])
         Attempt transition. Writes new state via state_writer (terminal tool).
         state_writer is the ONLY place allowed to write schedule.state.
         """
-        current = self._read(entity_id)
+        current = await self._read(entity_id)
         allowed = SCHEDULE_TRANSITIONS.get(current, {})
 
         if event not in allowed:
@@ -99,7 +99,7 @@ class BusinessScheduleFSM(BaseFSM[BusinessScheduleState, BusinessScheduleEvent])
             )
 
         new_state = allowed[event]
-        self._write(entity_id, new_state)  # terminal tool — atomic PG write
+        await self._write(entity_id, new_state)  # terminal tool — atomic PG write
         logger.info(
             "BusinessScheduleFSM: %s %s → %s via %s",
             entity_id,

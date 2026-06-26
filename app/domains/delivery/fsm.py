@@ -45,14 +45,14 @@ class DeliveryFSM(BaseFSM[DeliveryState, DeliveryEvent]):
         self._read = state_reader
         self._write = state_writer
 
-    def get_current_state(self, entity_id: str) -> DeliveryState:
-        return self._read(entity_id)  # type: ignore[no-any-return]
+    async def get_current_state(self, entity_id: str) -> DeliveryState:
+        return await self._read(entity_id)  # type: ignore[no-any-return]
 
     def get_allowed_events(self, state: DeliveryState) -> list[DeliveryEvent]:
         return list(DELIVERY_TRANSITIONS.get(state, {}).keys())
 
-    def transition(self, entity_id: str, event: DeliveryEvent) -> TransitionResult:
-        current = self._read(entity_id)
+    async def transition(self, entity_id: str, event: DeliveryEvent) -> TransitionResult:
+        current = await self._read(entity_id)
         allowed = DELIVERY_TRANSITIONS.get(current, {})
         if event not in allowed:
             return TransitionResult(
@@ -60,5 +60,5 @@ class DeliveryFSM(BaseFSM[DeliveryState, DeliveryEvent]):
                 reason=f"Event {event!r} not allowed from state {current!r}",
             )
         new_state = allowed[event]
-        self._write(entity_id, new_state)  # terminal-tool
+        await self._write(entity_id, new_state)  # terminal-tool
         return TransitionResult(success=True, new_state=new_state, rejected_event=None, reason=None)

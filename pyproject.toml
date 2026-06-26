@@ -30,6 +30,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
+    "testcontainers>=4.0.0",
     "llm-nano-vm>=0.8.6",
     "nano-vm-mcp>=0.4.5",
     "litellm>=1.40.0",

@@ -41,7 +41,7 @@ class BaseFSM(ABC, Generic[StateType, EventType]):
     """
 
     @abstractmethod
-    def transition(
+    async def transition(
         self,
         entity_id: str,
         event: EventType,
@@ -54,7 +54,7 @@ class BaseFSM(ABC, Generic[StateType, EventType]):
         ...
 
     @abstractmethod
-    def get_current_state(self, entity_id: str) -> StateType:
+    async def get_current_state(self, entity_id: str) -> StateType:
         """Retrieve current state from storage (PostgreSQL entity table)."""
         ...
 
@@ -66,10 +66,10 @@ class BaseFSM(ABC, Generic[StateType, EventType]):
         """
         ...
 
-    def handle_event(
+    async def handle_event(
         self,
         entity_id: str,
         event: EventType,
     ) -> TransitionResult:
         """Alias for transition() — typed event variant."""
-        return self.transition(entity_id, event)
+        return await self.transition(entity_id, event)

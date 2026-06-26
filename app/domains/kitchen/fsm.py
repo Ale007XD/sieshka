@@ -39,14 +39,14 @@ class KitchenFSM(BaseFSM[KitchenState, KitchenEvent]):
         self._read = state_reader
         self._write = state_writer
 
-    def get_current_state(self, entity_id: str) -> KitchenState:
-        return self._read(entity_id)  # type: ignore[no-any-return]
+    async def get_current_state(self, entity_id: str) -> KitchenState:
+        return await self._read(entity_id)  # type: ignore[no-any-return]
 
     def get_allowed_events(self, state: KitchenState) -> list[KitchenEvent]:
         return list(KITCHEN_TRANSITIONS.get(state, {}).keys())
 
-    def transition(self, entity_id: str, event: KitchenEvent) -> TransitionResult:
-        current = self._read(entity_id)
+    async def transition(self, entity_id: str, event: KitchenEvent) -> TransitionResult:
+        current = await self._read(entity_id)
         allowed = KITCHEN_TRANSITIONS.get(current, {})
         if event not in allowed:
             return TransitionResult(
@@ -56,5 +56,5 @@ class KitchenFSM(BaseFSM[KitchenState, KitchenEvent]):
                 reason=f"Event {event!r} not allowed from state {current!r}",
             )
         new_state = allowed[event]
-        self._write(entity_id, new_state)  # terminal-tool
+        await self._write(entity_id, new_state)  # terminal-tool
         return TransitionResult(success=True, new_state=new_state, rejected_event=None, reason=None)

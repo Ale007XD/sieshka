@@ -40,8 +40,8 @@ class CustomerDataFSM(BaseFSM[CustomerDataState, CustomerDataEvent]):
         self._read = state_reader
         self._write = state_writer
 
-    def get_current_state(self, entity_id: str) -> CustomerDataState:
-        return self._read(entity_id)  # type: ignore[no-any-return]
+    async def get_current_state(self, entity_id: str) -> CustomerDataState:
+        return await self._read(entity_id)  # type: ignore[no-any-return]
 
     def get_allowed_events(self, state: CustomerDataState) -> list[CustomerDataEvent]:
         """Graph-level only. Business rules → PolicyProvider."""
@@ -51,7 +51,7 @@ class CustomerDataFSM(BaseFSM[CustomerDataState, CustomerDataEvent]):
             if s == state
         ]
 
-    def transition(
+    async def transition(
         self,
         entity_id: str,
         event: CustomerDataEvent,
@@ -60,7 +60,7 @@ class CustomerDataFSM(BaseFSM[CustomerDataState, CustomerDataEvent]):
         Attempt transition. Writes new state via state_writer (terminal tool).
         state_writer is the ONLY place allowed to write customer_data.state.
         """
-        current = self._read(entity_id)
+        current = await self._read(entity_id)
         new_state = CUSTOMER_DATA_TRANSITIONS.get((current, event))
 
         if new_state is None:
@@ -77,7 +77,7 @@ class CustomerDataFSM(BaseFSM[CustomerDataState, CustomerDataEvent]):
                 reason=f"Event {event!r} not allowed from state {current!r}",
             )
 
-        self._write(entity_id, new_state)  # terminal tool — atomic PG write
+        await self._write(entity_id, new_state)  # terminal tool — atomic PG write
         logger.info(
             "CustomerDataFSM: %s %s → %s via %s",
             entity_id,

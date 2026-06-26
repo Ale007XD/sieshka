@@ -32,8 +32,8 @@ class InventoryFSM(BaseFSM[InventoryState, InventoryEvent]):
         self._read = state_reader
         self._write = state_writer
 
-    def get_current_state(self, entity_id: str) -> InventoryState:
-        return self._read(entity_id)  # type: ignore[no-any-return]
+    async def get_current_state(self, entity_id: str) -> InventoryState:
+        return await self._read(entity_id)  # type: ignore[no-any-return]
 
     def get_allowed_events(self, state: InventoryState) -> list[InventoryEvent]:
         """Graph-level only. Business rules → PolicyProvider."""
@@ -43,7 +43,7 @@ class InventoryFSM(BaseFSM[InventoryState, InventoryEvent]):
             if s == state
         ]
 
-    def transition(
+    async def transition(
         self,
         entity_id: str,
         event: InventoryEvent,
@@ -52,7 +52,7 @@ class InventoryFSM(BaseFSM[InventoryState, InventoryEvent]):
         Attempt transition. Writes new state via state_writer (terminal tool).
         state_writer is the ONLY place allowed to write inventory.state.
         """
-        current = self._read(entity_id)
+        current = await self._read(entity_id)
         new_state = INVENTORY_TRANSITIONS.get((current, event))
 
         if new_state is None:
@@ -69,7 +69,7 @@ class InventoryFSM(BaseFSM[InventoryState, InventoryEvent]):
                 reason=f"Event {event!r} not allowed from state {current!r}",
             )
 
-        self._write(entity_id, new_state)  # terminal tool — atomic PG write
+        await self._write(entity_id, new_state)  # terminal tool — atomic PG write
         logger.info(
             "InventoryFSM: %s %s → %s via %s",
             entity_id,

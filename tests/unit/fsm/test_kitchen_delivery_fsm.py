@@ -7,24 +7,32 @@ from app.domains.kitchen.fsm import KitchenEvent, KitchenFSM, KitchenState
 
 def make_kitchen(initial: KitchenState) -> tuple[KitchenFSM, dict[str, KitchenState]]:
     store: dict[str, KitchenState] = {"t1": initial}
-    fsm = KitchenFSM(
-        state_reader=lambda eid: store[eid],
-        state_writer=lambda eid, s: store.update({eid: s}),
-    )
+
+    async def reader(eid: str) -> KitchenState:
+        return store[eid]
+
+    async def writer(eid: str, s: KitchenState) -> None:
+        store[eid] = s
+
+    fsm = KitchenFSM(state_reader=reader, state_writer=writer)
     return fsm, store
 
 
 def make_delivery(initial: DeliveryState) -> tuple[DeliveryFSM, dict[str, DeliveryState]]:
     store: dict[str, DeliveryState] = {"d1": initial}
-    fsm = DeliveryFSM(
-        state_reader=lambda eid: store[eid],
-        state_writer=lambda eid, s: store.update({eid: s}),
-    )
+
+    async def reader(eid: str) -> DeliveryState:
+        return store[eid]
+
+    async def writer(eid: str, s: DeliveryState) -> None:
+        store[eid] = s
+
+    fsm = DeliveryFSM(state_reader=reader, state_writer=writer)
     return fsm, store
 
 
 class TestKitchenFSM:
-    def test_happy_path(self) -> None:
+    async def test_happy_path(self) -> None:
         fsm, store = make_kitchen(KitchenState.NEW)
         events = [
             KitchenEvent.QUEUE,
@@ -33,19 +41,19 @@ class TestKitchenFSM:
             KitchenEvent.HAND_OFF,
         ]
         for event in events:
-            r = fsm.transition("t1", event)
+            r = await fsm.transition("t1", event)
             assert r.success, f"Failed on {event}: {r.reason}"
         assert store["t1"] == KitchenState.HANDED_OFF
 
-    def test_reject_invalid(self) -> None:
+    async def test_reject_invalid(self) -> None:
         fsm, store = make_kitchen(KitchenState.HANDED_OFF)
-        r = fsm.transition("t1", KitchenEvent.QUEUE)
+        r = await fsm.transition("t1", KitchenEvent.QUEUE)
         assert not r.success
         assert store["t1"] == KitchenState.HANDED_OFF
 
 
 class TestDeliveryFSM:
-    def test_happy_path(self) -> None:
+    async def test_happy_path(self) -> None:
         fsm, store = make_delivery(DeliveryState.UNASSIGNED)
         events = [
             DeliveryEvent.ASSIGN,
@@ -54,12 +62,12 @@ class TestDeliveryFSM:
             DeliveryEvent.COMPLETE,
         ]
         for event in events:
-            r = fsm.transition("d1", event)
+            r = await fsm.transition("d1", event)
             assert r.success, f"Failed on {event}: {r.reason}"
         assert store["d1"] == DeliveryState.DELIVERED
 
-    def test_fail_path(self) -> None:
+    async def test_fail_path(self) -> None:
         fsm, store = make_delivery(DeliveryState.ON_ROUTE)
-        r = fsm.transition("d1", DeliveryEvent.FAIL)
+        r = await fsm.transition("d1", DeliveryEvent.FAIL)
         assert r.success
         assert store["d1"] == DeliveryState.FAILED
