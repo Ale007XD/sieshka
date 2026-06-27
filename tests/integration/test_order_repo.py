@@ -4,13 +4,11 @@ Requires Docker (testcontainers). Skipped if not available.
 """
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
 
 import asyncpg
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
