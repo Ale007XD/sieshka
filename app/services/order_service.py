@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db import async_session_factory
 from app.domains.orders.fsm import OrderFSM
@@ -14,7 +14,7 @@ class OrderService:
 
     def __init__(
         self,
-        session_factory: async_sessionmaker = async_session_factory,
+        session_factory: async_sessionmaker[AsyncSession] = async_session_factory,
     ) -> None:
         self._session_factory = session_factory
 
