@@ -5,7 +5,7 @@ Requires Docker (testcontainers). Skipped if not available.
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import asyncpg
@@ -17,38 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.api.routes.admin import router as admin_router
 from app.api.routes.orders import router as orders_router
 from app.services.order_service import OrderService
-
-
-def _is_docker_available() -> bool:
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not _is_docker_available(),
-        reason="Docker required for testcontainers",
-    ),
-]
-
-
-@pytest.fixture
-def postgres_dsn() -> Generator[str, None, None]:
-    from testcontainers.postgres import PostgresContainer
-
-    with PostgresContainer("postgres:16-alpine") as pg:
-        dsn = pg.get_connection_url().replace("psycopg2", "asyncpg")
-        yield dsn
 
 
 @pytest.fixture
