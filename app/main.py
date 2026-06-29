@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.api.routes.admin import router as admin_router
+from app.api.routes.delivery import router as delivery_router
+from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.orders import router as orders_router
 from app.config import settings
 from app.webhooks.yookassa import router as yookassa_router
@@ -22,6 +24,8 @@ app = FastAPI(
 
 app.include_router(orders_router)
 app.include_router(admin_router)
+app.include_router(kitchen_router)
+app.include_router(delivery_router)
 app.include_router(yookassa_router)
 
 

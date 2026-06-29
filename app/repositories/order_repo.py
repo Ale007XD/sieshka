@@ -35,5 +35,4 @@ class OrderRepository:
             text("UPDATE orders SET state = :state WHERE id = :id"),
             {"id": UUID(entity_id), "state": state.value},
         )
-        await self._session.commit()
         logger.info("OrderRepository: wrote state %s for order %s", state, entity_id)

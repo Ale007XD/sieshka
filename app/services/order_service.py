@@ -10,6 +10,7 @@ from app.db import async_session_factory
 from app.domains.orders.fsm import OrderFSM
 from app.domains.orders.models import OrderCreate, OrderEvent, OrderRead, OrderState
 from app.fsm.core.base import TransitionResult
+from app.repositories.kitchen_repo import KitchenRepository
 from app.repositories.order_repo import OrderRepository
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,23 @@ class OrderService:
                     reason="Blocked by policy",
                 )
 
-            return await fsm.handle_event(order_id, event)
+            result = await fsm.handle_event(order_id, event)
+            if result.success and result.new_state == OrderState.COOKING:
+                await self._on_cooking(session, order_id)
+            await session.commit()
+            return result
+
+    async def _on_cooking(
+        self,
+        session: AsyncSession,
+        order_id: str,
+    ) -> None:
+        """Cross-domain orchestration: order COOKING → auto-create kitchen_ticket (NEW state).
+
+        Single PG transaction — same session, commit handled by caller.
+        """
+        kitchen_repo = KitchenRepository(session)
+        await kitchen_repo.create(order_id)
 
     async def list_orders(
         self,
@@ -143,4 +160,6 @@ class OrderService:
                 state_reader=repo.get_state,
                 state_writer=repo.write_state,
             )
-            return await fsm.handle_event(order_id, event)
+            result = await fsm.handle_event(order_id, event)
+            await session.commit()
+            return result
