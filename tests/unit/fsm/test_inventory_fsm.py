@@ -330,7 +330,7 @@ class TestChainedTransitions:
 
         r2 = await fsm.transition("item", InventoryEvent.STOCK_DEPLETED)
         assert r2.success is True
-        assert store["item"] == InventoryState.OUT_OF_STOCK
+        assert r2.new_state == InventoryState.OUT_OF_STOCK
 
     async def test_available_to_out_of_stock_via_critical(self) -> None:
         fsm, store = make_fsm(InventoryState.AVAILABLE)
@@ -340,7 +340,7 @@ class TestChainedTransitions:
 
         r2 = await fsm.transition("item", InventoryEvent.STOCK_DEPLETED)
         assert r2.success is True
-        assert store["item"] == InventoryState.OUT_OF_STOCK
+        assert r2.new_state == InventoryState.OUT_OF_STOCK
 
     async def test_replenish_from_out_of_stock_and_degrade_again(self) -> None:
         fsm, store = make_fsm(InventoryState.OUT_OF_STOCK)
@@ -350,7 +350,7 @@ class TestChainedTransitions:
 
         r2 = await fsm.transition("item", InventoryEvent.STOCK_LOW)
         assert r2.success is True
-        assert store["item"] == InventoryState.LOW_STOCK
+        assert r2.new_state == InventoryState.LOW_STOCK
 
     async def test_full_degradation_path(self) -> None:
         fsm, store = make_fsm(InventoryState.AVAILABLE)
@@ -358,11 +358,13 @@ class TestChainedTransitions:
         await fsm.transition("item", InventoryEvent.STOCK_LOW)  # AVAILABLE -> LOW_STOCK
         assert store["item"] == InventoryState.LOW_STOCK
 
-        await fsm.transition("item", InventoryEvent.STOCK_CRITICAL)  # LOW_STOCK -> CRITICAL
-        assert store["item"] == InventoryState.CRITICAL
+        r = await fsm.transition("item", InventoryEvent.STOCK_CRITICAL)  # LOW_STOCK -> CRITICAL
+        assert r.success
+        assert r.new_state == InventoryState.CRITICAL
 
-        await fsm.transition("item", InventoryEvent.STOCK_DEPLETED)  # CRITICAL -> OUT_OF_STOCK
-        assert store["item"] == InventoryState.OUT_OF_STOCK
+        r = await fsm.transition("item", InventoryEvent.STOCK_DEPLETED)  # CRITICAL -> OUT_OF_STOCK
+        assert r.success
+        assert r.new_state == InventoryState.OUT_OF_STOCK
 
     async def test_rejected_transition_does_not_advance_state(self) -> None:
         fsm, store = make_fsm(InventoryState.AVAILABLE)
@@ -394,6 +396,7 @@ class TestMultipleEntities:
         assert store["item-a"] == InventoryState.LOW_STOCK
         assert store["item-b"] == InventoryState.OUT_OF_STOCK  # unchanged
 
-        await fsm.transition("item-b", InventoryEvent.STOCK_REPLENISHED)
-        assert store["item-b"] == InventoryState.AVAILABLE
+        r = await fsm.transition("item-b", InventoryEvent.STOCK_REPLENISHED)
+        assert r.success
+        assert r.new_state == InventoryState.AVAILABLE
         assert store["item-a"] == InventoryState.LOW_STOCK  # unchanged

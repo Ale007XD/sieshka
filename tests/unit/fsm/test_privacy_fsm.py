@@ -223,14 +223,17 @@ class TestChainedTransitions:
     async def test_full_degradation_path(self) -> None:
         fsm, store = make_fsm(CustomerDataState.ACTIVE)
 
-        await fsm.transition("customer", CustomerDataEvent.RETAIN)
-        assert store["customer"] == CustomerDataState.RETAINED
+        r = await fsm.transition("customer", CustomerDataEvent.RETAIN)
+        assert r.success
+        assert r.new_state == CustomerDataState.RETAINED
 
-        await fsm.transition("customer", CustomerDataEvent.ANONYMIZE)
-        assert store["customer"] == CustomerDataState.ANONYMIZED
+        r = await fsm.transition("customer", CustomerDataEvent.ANONYMIZE)
+        assert r.success
+        assert r.new_state == CustomerDataState.ANONYMIZED
 
-        await fsm.transition("customer", CustomerDataEvent.GDPR_ERASE)
-        assert store["customer"] == CustomerDataState.DELETED
+        r = await fsm.transition("customer", CustomerDataEvent.GDPR_ERASE)
+        assert r.success
+        assert r.new_state == CustomerDataState.DELETED
 
     async def test_rejected_transition_does_not_advance_state(self) -> None:
         fsm, store = make_fsm(CustomerDataState.ACTIVE)

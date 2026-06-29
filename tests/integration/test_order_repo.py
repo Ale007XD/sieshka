@@ -5,6 +5,7 @@ Requires Docker (testcontainers). Skipped if not available.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
 import asyncpg
@@ -16,19 +17,22 @@ from app.domains.orders.fsm import OrderFSM
 from app.domains.orders.models import OrderEvent, OrderState
 from app.repositories.order_repo import OrderRepository
 
-pytestmark = pytest.mark.integration
-
 
 def _is_docker_available() -> bool:
     try:
         import subprocess
-        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
+        result = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            timeout=10,
+        )
         return result.returncode == 0
     except Exception:
         return False
 
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.skipif(
         not _is_docker_available(),
         reason="Docker required for testcontainers",
@@ -37,7 +41,7 @@ pytestmark = [
 
 
 @pytest.fixture
-def postgres_dsn() -> str:
+def postgres_dsn() -> Generator[str, None, None]:
     from testcontainers.postgres import PostgresContainer
 
     with PostgresContainer("postgres:16-alpine") as pg:
@@ -46,7 +50,7 @@ def postgres_dsn() -> str:
 
 
 @pytest.fixture
-async def repo(postgres_dsn: str) -> OrderRepository:
+async def repo(postgres_dsn: str) -> AsyncGenerator[OrderRepository, None]:
     engine = create_async_engine(postgres_dsn)
     schema_path = Path(__file__).resolve().parents[2] / "migrations" / "001_initial_schema.sql"
     schema = schema_path.read_text()

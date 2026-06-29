@@ -198,14 +198,17 @@ class TestChainedTransitions:
     async def test_full_degradation_path(self) -> None:
         fsm, store = make_fsm(PromotionState.CREATED)
 
-        await fsm.transition("promo", PromotionEvent.ACTIVATE)
-        assert store["promo"] == PromotionState.ACTIVE
+        r = await fsm.transition("promo", PromotionEvent.ACTIVATE)
+        assert r.success
+        assert r.new_state == PromotionState.ACTIVE
 
-        await fsm.transition("promo", PromotionEvent.EXPIRE)
-        assert store["promo"] == PromotionState.EXPIRED
+        r = await fsm.transition("promo", PromotionEvent.EXPIRE)
+        assert r.success
+        assert r.new_state == PromotionState.EXPIRED
 
-        await fsm.transition("promo", PromotionEvent.ARCHIVE)
-        assert store["promo"] == PromotionState.ARCHIVED
+        r = await fsm.transition("promo", PromotionEvent.ARCHIVE)
+        assert r.success
+        assert r.new_state == PromotionState.ARCHIVED
 
     async def test_rejected_transition_does_not_advance_state(self) -> None:
         fsm, store = make_fsm(PromotionState.CREATED)

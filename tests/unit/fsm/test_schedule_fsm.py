@@ -183,14 +183,17 @@ class TestChainedTransitions:
     async def test_cyclic_path_returns_to_open(self) -> None:
         fsm, store = make_fsm(BusinessScheduleState.OPEN)
 
-        await fsm.transition("schedule", BusinessScheduleEvent.CLOSING_WARNING)
-        assert store["schedule"] == BusinessScheduleState.CLOSING_SOON
+        r = await fsm.transition("schedule", BusinessScheduleEvent.CLOSING_WARNING)
+        assert r.success
+        assert r.new_state == BusinessScheduleState.CLOSING_SOON
 
-        await fsm.transition("schedule", BusinessScheduleEvent.CLOSE)
-        assert store["schedule"] == BusinessScheduleState.CLOSED
+        r = await fsm.transition("schedule", BusinessScheduleEvent.CLOSE)
+        assert r.success
+        assert r.new_state == BusinessScheduleState.CLOSED
 
-        await fsm.transition("schedule", BusinessScheduleEvent.OPEN)
-        assert store["schedule"] == BusinessScheduleState.OPEN
+        r = await fsm.transition("schedule", BusinessScheduleEvent.OPEN)
+        assert r.success
+        assert r.new_state == BusinessScheduleState.OPEN
 
     async def test_rejected_transition_does_not_advance_state(self) -> None:
         fsm, store = make_fsm(BusinessScheduleState.OPEN)
@@ -218,6 +221,7 @@ class TestMultipleEntities:
         assert store["venue-a"] == BusinessScheduleState.CLOSING_SOON
         assert store["venue-b"] == BusinessScheduleState.CLOSED
 
-        await fsm.transition("venue-b", BusinessScheduleEvent.OPEN)
-        assert store["venue-b"] == BusinessScheduleState.OPEN
+        r = await fsm.transition("venue-b", BusinessScheduleEvent.OPEN)
+        assert r.success
+        assert r.new_state == BusinessScheduleState.OPEN
         assert store["venue-a"] == BusinessScheduleState.CLOSING_SOON
