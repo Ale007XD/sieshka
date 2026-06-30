@@ -14,6 +14,7 @@ from app.domains.orders.models import OrderState
 from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
+from app.services.idempotency import IdempotencyService
 from app.services.payment_service import PaymentService, YooKassaClient
 
 
@@ -80,7 +81,7 @@ class TestPaymentService:
     async def test_confirm_payment_success(self) -> None:
         order_id = str(uuid4())
         payment_id = str(uuid4())
-        event_id = str(uuid4())
+        trace_id_val = str(uuid4())
 
         session = AsyncMock()
 
@@ -90,8 +91,7 @@ class TestPaymentService:
         )
 
         with (
-            patch.object(PaymentRepository, "idempotency_key_exists", return_value=False),
-            patch.object(PaymentRepository, "try_set_idempotency_key", return_value=True),
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
             patch.object(
                 PaymentRepository,
                 "get_by_provider_id",
@@ -110,7 +110,7 @@ class TestPaymentService:
             result = await svc.confirm_payment(
                 order_id=order_id,
                 provider_id=payment_id,
-                event_id=event_id,
+                trace_id=trace_id_val,
             )
 
         assert isinstance(result, TransitionResult)
@@ -120,7 +120,7 @@ class TestPaymentService:
     async def test_confirm_payment_duplicate(self) -> None:
         order_id = str(uuid4())
         payment_id = str(uuid4())
-        event_id = str(uuid4())
+        trace_id_val = str(uuid4())
 
         session = AsyncMock()
         svc = PaymentService(
@@ -128,46 +128,21 @@ class TestPaymentService:
             yookassa=MagicMock(spec=YooKassaClient),
         )
 
-        with patch.object(PaymentRepository, "idempotency_key_exists", return_value=True):
+        with patch.object(IdempotencyService, "check_and_record", return_value=False):
             result = await svc.confirm_payment(
                 order_id=order_id,
                 provider_id=payment_id,
-                event_id=event_id,
+                trace_id=trace_id_val,
             )
 
         assert isinstance(result, TransitionResult)
         assert result.success is False
         assert result.reason == "Duplicate webhook event"
 
-    async def test_confirm_payment_concurrent(self) -> None:
-        order_id = str(uuid4())
-        payment_id = str(uuid4())
-        event_id = str(uuid4())
-
-        session = AsyncMock()
-        svc = PaymentService(
-            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
-            yookassa=MagicMock(spec=YooKassaClient),
-        )
-
-        with (
-            patch.object(PaymentRepository, "idempotency_key_exists", return_value=False),
-            patch.object(PaymentRepository, "try_set_idempotency_key", return_value=False),
-        ):
-            result = await svc.confirm_payment(
-                order_id=order_id,
-                provider_id=payment_id,
-                event_id=event_id,
-            )
-
-        assert isinstance(result, TransitionResult)
-        assert result.success is False
-        assert result.reason == "Concurrent webhook event"
-
     async def test_confirm_payment_already_paid(self) -> None:
         order_id = str(uuid4())
         payment_id = str(uuid4())
-        event_id = str(uuid4())
+        trace_id_val = str(uuid4())
 
         session = AsyncMock()
         svc = PaymentService(
@@ -176,8 +151,7 @@ class TestPaymentService:
         )
 
         with (
-            patch.object(PaymentRepository, "idempotency_key_exists", return_value=False),
-            patch.object(PaymentRepository, "try_set_idempotency_key", return_value=True),
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
             patch.object(
                 PaymentRepository,
                 "get_by_provider_id",
@@ -193,7 +167,7 @@ class TestPaymentService:
             result = await svc.confirm_payment(
                 order_id=order_id,
                 provider_id=payment_id,
-                event_id=event_id,
+                trace_id=trace_id_val,
             )
 
         assert isinstance(result, TransitionResult)

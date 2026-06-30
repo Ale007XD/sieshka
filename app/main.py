@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -11,15 +13,24 @@ from app.api.routes.delivery import router as delivery_router
 from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.orders import router as orders_router
 from app.config import settings
+from app.startup import validate_all_programs
 from app.webhooks.yookassa import router as yookassa_router
 
 logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    validate_all_programs()
+    yield
+
+
 app = FastAPI(
     title="Sieshka Food Delivery",
     description="nano-vm governed food delivery platform",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.include_router(orders_router)

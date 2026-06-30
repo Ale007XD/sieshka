@@ -15,6 +15,7 @@ from app.domains.orders.models import OrderEvent, OrderState
 from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
+from app.services.idempotency import IdempotencyService
 from app.trace import trace
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,14 @@ class PaymentService:
         self,
         session_factory: async_sessionmaker[AsyncSession] = async_session_factory,
         yookassa: YooKassaClient | None = None,
+        idempotency: IdempotencyService | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._yookassa = yookassa or YooKassaClient(
             shop_id=settings.YOOKASSA_SHOP_ID,
             secret_key=settings.YOOKASSA_SECRET_KEY,
         )
+        self._idempotency = idempotency or IdempotencyService(session_factory=session_factory)
 
     async def create_payment(
         self,
@@ -140,32 +143,24 @@ class PaymentService:
         self,
         order_id: str,
         provider_id: str,
-        event_id: str,
+        trace_id: str,
     ) -> TransitionResult:
+        idem_key = f"{trace_id}:payment_confirmation"
+        inserted = await self._idempotency.check_and_record(
+            idem_key,
+            {"provider_id": provider_id, "order_id": order_id},
+        )
+        if not inserted:
+            logger.info("PaymentService: duplicate webhook trace_id=%s — skipping", trace_id)
+            return TransitionResult(
+                success=False,
+                new_state=None,
+                rejected_event=None,
+                reason="Duplicate webhook event",
+            )
+
         async with self._session_factory() as session:
             repo = PaymentRepository(session)
-
-            if await repo.idempotency_key_exists(event_id):
-                logger.info("PaymentService: duplicate webhook event %s — skipping", event_id)
-                return TransitionResult(
-                    success=False,
-                    new_state=None,
-                    rejected_event=None,
-                    reason="Duplicate webhook event",
-                )
-
-            inserted = await repo.try_set_idempotency_key(
-                event_id,
-                {"provider_id": provider_id, "order_id": order_id},
-            )
-            if not inserted:
-                logger.info("PaymentService: concurrent webhook event %s — skipping", event_id)
-                return TransitionResult(
-                    success=False,
-                    new_state=None,
-                    rejected_event=None,
-                    reason="Concurrent webhook event",
-                )
 
             try:
                 payment = await repo.get_by_provider_id(provider_id)

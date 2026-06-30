@@ -81,7 +81,7 @@ async def yookassa_webhook(
     result = await payment_service.confirm_payment(
         order_id=event.entity_id,
         provider_id=str(payment_id),
-        event_id=str(event_id),
+        trace_id=str(trace_id),
     )
 
     if not result.success:

@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 COPY app ./app
 
-RUN pip install --no-cache-dir --break-system-packages -e .
+RUN pip install --no-cache-dir --break-system-packages -e ".[nano]"
 
 EXPOSE 8000
 
