@@ -1,3 +1,15 @@
+from app.tools.inventory_tools import (
+    check_inventory_stock,
+    decrement_inventory,
+    increment_inventory,
+    set_inventory_state,
+)
+from app.tools.kitchen_tools import (
+    write_kitchen_state_handed_off,
+    write_kitchen_state_preparing,
+    write_kitchen_state_queued,
+    write_kitchen_state_ready,
+)
 from app.tools.notification_tools import (
     notify_order_confirmed,
     notify_order_cooking,
@@ -20,7 +32,10 @@ from app.tools.order_tools import (
 )
 
 __all__ = [
+    "check_inventory_stock",
     "create_kitchen_ticket",
+    "decrement_inventory",
+    "increment_inventory",
     "log_validation_failure",
     "notify_inventory_insufficient",
     "notify_order_confirmed",
@@ -29,7 +44,12 @@ __all__ = [
     "notify_order_failed",
     "notify_payment_received",
     "reserve_inventory_items",
+    "set_inventory_state",
     "validate_order_items",
+    "write_kitchen_state_handed_off",
+    "write_kitchen_state_preparing",
+    "write_kitchen_state_queued",
+    "write_kitchen_state_ready",
     "write_order_state_cooking",
     "write_order_state_paid",
     "write_order_state_payment_failed",

@@ -9,7 +9,13 @@ CONSTRAINTS:
 """
 from __future__ import annotations
 
+import json
 import logging
+from uuid import UUID
+
+import httpx
+
+from app.db import async_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +27,23 @@ logger = logging.getLogger(__name__)
 
 async def validate_order_items(order_id: str, **kwargs: object) -> int:
     """Returns 1 if valid, 0 if invalid. Numeric sentinel for ASTEngine."""
-    # TODO M2: query PG orders + menu items
-    logger.info("validate_order_items: order_id=%s", order_id)
-    return 1
+    async with async_session_factory() as session:
+        from sqlalchemy import text as sql_text
+
+        result = await session.execute(
+            sql_text("SELECT items FROM orders WHERE id = :id"),
+            {"id": UUID(order_id)},
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            logger.warning("validate_order_items: order %s not found", order_id)
+            return 0
+        items = row if isinstance(row, list) else json.loads(row)
+        if not items:
+            logger.warning("validate_order_items: order %s has no items", order_id)
+            return 0
+        logger.info("validate_order_items: order_id=%s valid (%d items)", order_id, len(items))
+        return 1
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +62,39 @@ async def yookassa_create_payment(
     Creates YooKassa payment. Returns payment_id.
     metadata contains trace_id for webhook resume (ADR-003).
     """
-    # TODO M2: call YooKassa API
-    # Include trace_id in metadata from kwargs["trace_id"]
-    logger.info("yookassa_create_payment: order_id=%s amount=%s", order_id, amount)
-    return "payment_placeholder_id"
+    from app.config import settings
+
+    shop_id = settings.YOOKASSA_SHOP_ID
+    secret_key = settings.YOOKASSA_SECRET_KEY
+    return_url = settings.YOOKASSA_RETURN_URL
+    trace_id = str(kwargs.get("trace_id", ""))
+
+    if not shop_id or not secret_key:
+        logger.warning("YOOKASSA_SHOP_ID or YOOKASSA_SECRET_KEY not set — using placeholder")
+        return "payment_placeholder_id"
+
+    payload = {
+        "amount": {"value": amount, "currency": currency},
+        "confirmation": {"type": "redirect", "return_url": return_url},
+        "capture": True,
+        "description": f"Order {order_id}",
+        "metadata": {"order_id": order_id, "trace_id": trace_id},
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.yookassa.ru/v3/payments",
+            json=payload,
+            auth=(shop_id, secret_key),
+            headers={"Idempotence-Key": f"order_{order_id}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        payment_id = data.get("id", "payment_placeholder_id")
+        logger.info(
+            "yookassa_create_payment: order_id=%s payment_id=%s", order_id, payment_id
+        )
+        return str(payment_id)
 
 
 async def yookassa_verify_payment(
@@ -54,8 +103,28 @@ async def yookassa_verify_payment(
     **kwargs: object,
 ) -> int:
     """Returns 1 if confirmed, 0 if failed. Numeric sentinel."""
-    logger.info("yookassa_verify_payment: order_id=%s payment_id=%s", order_id, payment_id)
-    return 1
+    from app.config import settings
+
+    shop_id = settings.YOOKASSA_SHOP_ID
+    secret_key = settings.YOOKASSA_SECRET_KEY
+
+    if not shop_id or not secret_key:
+        logger.warning("YOOKASSA credentials not set — returning 1 (stub)")
+        return 1
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://api.yookassa.ru/v3/payments/{payment_id}",
+            auth=(shop_id, secret_key),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        status = data.get("status", "")
+        if status == "succeeded":
+            logger.info("yookassa_verify_payment: order_id=%s CONFIRMED", order_id)
+            return 1
+        logger.info("yookassa_verify_payment: order_id=%s status=%s", order_id, status)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -72,19 +141,93 @@ async def write_order_state_payment_pending(
     **kwargs: object,
 ) -> str:
     """Terminal tool: CONFIRMED → PAYMENT_PENDING. Atomic PG write."""  # terminal-tool
-    # TODO M2: db.execute("UPDATE orders SET state='PAYMENT_PENDING', payment_id=... WHERE id=...")
+    from sqlalchemy import text as sql_text
+
+    from app.domains.orders.models import OrderState
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
+            {"id": UUID(order_id)},
+        )
+        current = row.scalar_one_or_none()
+        if current is None:
+            logger.error("write_order_state_payment_pending: order %s not found", order_id)
+            return "ERROR"
+        if current != OrderState.CONFIRMED.value:
+            logger.warning(
+                "write_order_state_payment_pending: expected CONFIRMED, got %s", current
+            )
+            return "ERROR"
+        await session.execute(
+            sql_text(
+                "UPDATE orders SET state = :state, payment_id = :payment_id WHERE id = :id"
+            ),
+            {
+                "id": UUID(order_id),
+                "state": OrderState.PAYMENT_PENDING.value,
+                "payment_id": payment_id,
+            },
+        )
+        await session.commit()
     logger.info("write_order_state_payment_pending: order_id=%s", order_id)
     return "OK"
 
 
 async def write_order_state_paid(order_id: str, **kwargs: object) -> str:
     """Terminal tool: PAYMENT_PENDING → PAID. Atomic PG write."""  # terminal-tool
+    from sqlalchemy import text as sql_text
+
+    from app.domains.orders.models import OrderState
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
+            {"id": UUID(order_id)},
+        )
+        current = row.scalar_one_or_none()
+        if current is None:
+            logger.error("write_order_state_paid: order %s not found", order_id)
+            return "ERROR"
+        if current != OrderState.PAYMENT_PENDING.value:
+            logger.warning(
+                "write_order_state_paid: expected PAYMENT_PENDING, got %s", current
+            )
+            return "ERROR"
+        await session.execute(
+            sql_text("UPDATE orders SET state = :state WHERE id = :id"),
+            {"id": UUID(order_id), "state": OrderState.PAID.value},
+        )
+        await session.commit()
     logger.info("write_order_state_paid: order_id=%s", order_id)
     return "OK"
 
 
 async def write_order_state_payment_failed(order_id: str, **kwargs: object) -> str:
     """Terminal tool: PAYMENT_PENDING → CONFIRMED (rollback). Atomic PG write."""  # terminal-tool
+    from sqlalchemy import text as sql_text
+
+    from app.domains.orders.models import OrderState
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
+            {"id": UUID(order_id)},
+        )
+        current = row.scalar_one_or_none()
+        if current is None:
+            logger.error("write_order_state_payment_failed: order %s not found", order_id)
+            return "ERROR"
+        if current != OrderState.PAYMENT_PENDING.value:
+            logger.warning(
+                "write_order_state_payment_failed: expected PAYMENT_PENDING, got %s", current
+            )
+            return "ERROR"
+        await session.execute(
+            sql_text("UPDATE orders SET state = :state WHERE id = :id"),
+            {"id": UUID(order_id), "state": OrderState.CONFIRMED.value},
+        )
+        await session.commit()
     logger.info("write_order_state_payment_failed: order_id=%s", order_id)
     return "OK"
 
@@ -95,6 +238,35 @@ async def write_order_state_cooking(
     **kwargs: object,
 ) -> str:
     """Terminal tool: PAID → COOKING. Writes order + ticket in single PG tx."""  # terminal-tool
+    from sqlalchemy import text as sql_text
+
+    from app.domains.orders.models import OrderState
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
+            {"id": UUID(order_id)},
+        )
+        current = row.scalar_one_or_none()
+        if current is None:
+            logger.error("write_order_state_cooking: order %s not found", order_id)
+            return "ERROR"
+        if current != OrderState.PAID.value:
+            logger.warning(
+                "write_order_state_cooking: expected PAID, got %s", current
+            )
+            return "ERROR"
+        await session.execute(
+            sql_text("UPDATE orders SET state = :state WHERE id = :id"),
+            {"id": UUID(order_id), "state": OrderState.COOKING.value},
+        )
+        await session.execute(
+            sql_text(
+                "UPDATE kitchen_tickets SET order_id = :order_id WHERE id = :id"
+            ),
+            {"id": UUID(ticket_id), "order_id": UUID(order_id)},
+        )
+        await session.commit()
     logger.info("write_order_state_cooking: order_id=%s ticket_id=%s", order_id, ticket_id)
     return "OK"
 
@@ -106,14 +278,61 @@ async def write_order_state_cooking(
 
 async def reserve_inventory_items(order_id: str, **kwargs: object) -> int:
     """Returns 1 if reserved, 0 if insufficient. Numeric sentinel."""
-    logger.info("reserve_inventory_items: order_id=%s", order_id)
+    from sqlalchemy import text as sql_text
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT items FROM orders WHERE id = :id"),
+            {"id": UUID(order_id)},
+        )
+        row_data = row.scalar_one_or_none()
+        if row_data is None:
+            logger.warning("reserve_inventory_items: order %s not found", order_id)
+            return 0
+        items = row_data if isinstance(row_data, list) else json.loads(row_data)
+        for item in items:
+            sku = item.get("sku") if isinstance(item, dict) else ""
+            qty = int(item.get("qty", 1)) if isinstance(item, dict) else 1
+            if not sku:
+                continue
+            stock = await session.execute(
+                sql_text("SELECT quantity FROM inventory WHERE sku = :sku FOR UPDATE"),
+                {"sku": sku},
+            )
+            stock_row = stock.scalar_one_or_none()
+            if stock_row is None or int(stock_row) < qty:
+                logger.warning(
+                    "reserve_inventory_items: insufficient stock for sku=%s", sku
+                )
+                return 0
+            await session.execute(
+                sql_text(
+                    "UPDATE inventory SET quantity = quantity - :qty WHERE sku = :sku"
+                ),
+                {"sku": sku, "qty": qty},
+            )
+        await session.commit()
+    logger.info("reserve_inventory_items: order_id=%s reserved", order_id)
     return 1
 
 
 async def create_kitchen_ticket(order_id: str, **kwargs: object) -> str:
     """Creates kitchen_ticket record. Returns ticket_id."""
-    logger.info("create_kitchen_ticket: order_id=%s", order_id)
-    return "ticket_placeholder_id"
+    from sqlalchemy import text as sql_text
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            sql_text(
+                "INSERT INTO kitchen_tickets (order_id, state) "
+                "VALUES (:order_id, 'NEW') RETURNING id"
+            ),
+            {"order_id": UUID(order_id)},
+        )
+        ticket_row = result.one()
+        ticket_id = str(ticket_row._mapping["id"])
+        await session.commit()
+    logger.info("create_kitchen_ticket: order_id=%s ticket_id=%s", order_id, ticket_id)
+    return ticket_id
 
 
 # ---------------------------------------------------------------------------
