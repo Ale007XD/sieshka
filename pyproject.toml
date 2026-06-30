@@ -20,8 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 nano = [
-    "llm-nano-vm>=0.8.6",
-    "nano-vm-mcp>=0.4.5",
+    "llm-nano-vm>=0.8.7",
+    "nano-vm-mcp>=0.4.6",
     "litellm>=1.40.0",
 ]
 dev = [
@@ -31,8 +31,8 @@ dev = [
     "mypy>=1.10.0",
     "ruff>=0.4.0",
     "testcontainers>=4.0.0",
-    "llm-nano-vm>=0.8.6",
-    "nano-vm-mcp>=0.4.5",
+    "llm-nano-vm>=0.8.7",
+    "nano-vm-mcp>=0.4.6",
     "litellm>=1.40.0",
     "httpx>=0.27.0",
 ]
