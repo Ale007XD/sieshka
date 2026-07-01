@@ -46,9 +46,6 @@ jobs:
       - name: pytest unit
         run: pytest tests/unit/ -v --tb=short
 
-      # M1 gate: zero direct state assignments outside terminal tools
-      - name: check no direct state mutations
-        run: |
-          count=$(grep -r 'status = \|state = ' --include='*.py' app/ | grep -v '# terminal-tool' | grep -v '\.py:.*#' | grep -v 'DEFAULT\|str,\|Enum\|None\|dict\|list\|bool\|int\|str =' | wc -l)
-          echo "Direct state mutations found: $count"
-          # In M3: this must be 0. In M1/M2: informational only.
+      # M3 migration gate: zero direct status mutations outside terminal tools
+      - name: check no direct mutations
+        run: bash scripts/check_no_direct_mutation.sh
