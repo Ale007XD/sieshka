@@ -340,6 +340,40 @@ async def create_kitchen_ticket(order_id: str, **kwargs: object) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def transition_order_state(
+    order_id: str,
+    from_state: str,
+    to_state: str,
+    **kwargs: object,
+) -> str:
+    """Generic terminal tool: validates current == from_state, writes to_state.
+    Used by simple transition programs (CONFIRM, CANCEL, etc.)."""
+    from sqlalchemy import text as sql_text
+
+    async with async_session_factory() as session:
+        row = await session.execute(
+            sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
+            {"id": UUID(order_id)},
+        )
+        current = row.scalar_one_or_none()
+        if current is None:
+            logger.error("transition_order_state: order %s not found", order_id)
+            return "ERROR"
+        if current != from_state:
+            logger.warning(
+                "transition_order_state: expected %s, got %s for order %s",
+                from_state, current, order_id,
+            )
+            return "ERROR"
+        await session.execute(
+            sql_text("UPDATE orders SET state = :state WHERE id = :id"),
+            {"id": UUID(order_id), "state": to_state},
+        )
+        await session.commit()
+    logger.info("transition_order_state: order_id=%s %s → %s", order_id, from_state, to_state)
+    return "OK"
+
+
 async def log_validation_failure(order_id: str, **kwargs: object) -> str:
     logger.warning("log_validation_failure: order_id=%s", order_id)
     return "LOGGED"

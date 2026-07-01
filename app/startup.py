@@ -7,7 +7,10 @@ import logging
 from nano_vm.validator import IssueSeverity, ProgramValidator
 
 from app.programs.order_programs import (
+    PROGRAM_CANCEL,
+    PROGRAM_CONFIRM,
     PROGRAM_PAYMENT_CONFIRMATION,
+    PROGRAM_PAYMENT_FAILED,
     PROGRAM_REQUEST_PAYMENT,
     PROGRAM_START_COOKING,
 )
@@ -18,6 +21,9 @@ _ALL_PROGRAMS = [
     PROGRAM_REQUEST_PAYMENT,
     PROGRAM_PAYMENT_CONFIRMATION,
     PROGRAM_START_COOKING,
+    PROGRAM_CONFIRM,
+    PROGRAM_PAYMENT_FAILED,
+    PROGRAM_CANCEL,
 ]
 
 

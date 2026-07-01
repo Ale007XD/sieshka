@@ -9,7 +9,8 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://sieshka:sieshka@localhost:5432/sieshka"
-    SQLITE_PATH: str = "data/nano_vm.db"  # nano-vm-mcp SQLite WAL
+    SQLITE_PATH: str = "C:/Users/alexd/AppData/Local/Temp/sieshka_nano_vm.db"
+    # nano-vm-mcp SQLite WAL
 
     # LLM Providers (M4+)
     YANDEX_API_KEY: str = ""

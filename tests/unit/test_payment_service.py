@@ -23,6 +23,16 @@ async def _session_factory(session: AsyncMock) -> AsyncGenerator[AsyncMock, None
     yield session
 
 
+def _mock_tool_session(state_val: str) -> AsyncMock:
+    """Create a mock session for transition_order_state tool."""
+    session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = state_val
+    session.execute.return_value = mock_result
+    session.commit = AsyncMock()
+    return session
+
+
 class TestPaymentService:
     @pytest.fixture
     def service(self) -> PaymentService:
@@ -63,16 +73,22 @@ class TestPaymentService:
             yookassa=yookassa_mock,
         )
 
-        with patch("app.services.payment_service.trace.record", return_value=trace_id_val):
-            with patch.object(PaymentRepository, "create", AsyncMock(return_value=str(uuid4()))):
-                with patch.object(OrderRepository, "get_state", return_value=OrderState.CONFIRMED):
-                    with patch.object(OrderRepository, "write_state", AsyncMock()):
-                        result = await svc.create_payment(
-                            order_id=order_id,
-                            amount=amount,
-                            currency="RUB",
-                            description="Test order",
-                        )
+        tool_session = _mock_tool_session(OrderState.CONFIRMED.value)
+
+        with (
+            patch("app.services.payment_service.trace.record", return_value=trace_id_val),
+            patch.object(PaymentRepository, "create", AsyncMock(return_value=str(uuid4()))),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.CONFIRMED),
+            patch.object(OrderRepository, "write_state", AsyncMock()),
+            patch("app.tools.order_tools.async_session_factory") as mock_tool_sf,
+        ):
+            mock_tool_sf.return_value.__aenter__.return_value = tool_session
+            result = await svc.create_payment(
+                order_id=order_id,
+                amount=amount,
+                currency="RUB",
+                description="Test order",
+            )
 
         assert result["confirmation_url"] == confirmation_url
         assert result["payment_id"] == provider_id
@@ -90,6 +106,8 @@ class TestPaymentService:
             yookassa=MagicMock(spec=YooKassaClient),
         )
 
+        tool_session = _mock_tool_session(OrderState.PAYMENT_PENDING.value)
+
         with (
             patch.object(IdempotencyService, "check_and_record", return_value=True),
             patch.object(
@@ -105,8 +123,9 @@ class TestPaymentService:
             ),
             patch.object(PaymentRepository, "write_state", AsyncMock()),
             patch.object(OrderRepository, "get_state", return_value=OrderState.PAYMENT_PENDING),
-            patch.object(OrderRepository, "write_state", AsyncMock()),
+            patch("app.tools.order_tools.async_session_factory") as mock_tool_sf,
         ):
+            mock_tool_sf.return_value.__aenter__.return_value = tool_session
             result = await svc.confirm_payment(
                 order_id=order_id,
                 provider_id=payment_id,

@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import decimal
 import logging
+from collections.abc import Mapping
+from typing import Any, Protocol
 from uuid import uuid4
 
 import httpx
+from nano_vm.models import Trace, TraceStatus
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.db import async_session_factory
-from app.domains.orders.fsm import OrderFSM
-from app.domains.orders.models import OrderEvent, OrderState
+from app.domains.orders.models import ORDER_TRANSITIONS, OrderEvent, OrderState
 from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
@@ -19,6 +21,11 @@ from app.services.idempotency import IdempotencyService
 from app.trace import trace
 
 logger = logging.getLogger(__name__)
+
+
+class _VMProtocol(Protocol):
+    """Minimal protocol for ExecutionVM duck-typing."""
+    async def run(self, program: object, context: Mapping[str, Any] | None = None) -> Trace: ...
 
 
 class YooKassaClient:
@@ -67,6 +74,70 @@ class PaymentService:
             secret_key=settings.YOOKASSA_SECRET_KEY,
         )
         self._idempotency = idempotency or IdempotencyService(session_factory=session_factory)
+        self._vm: _VMProtocol | None = None
+
+    def _get_vm(self) -> _VMProtocol:
+        if self._vm is None:
+            from app.services.order_service import _build_vm
+
+            self._vm = _build_vm()
+        return self._vm
+
+    async def _run_simple_transition(
+        self,
+        order_id: str,
+        event: OrderEvent,
+        current_state: OrderState,
+    ) -> TransitionResult:
+        """Execute a simple state transition via ExecutionVM.
+        
+        Used instead of OrderFSM.handle_event() — simple state write programs
+        (no YooKassa or other external logic duplicated from the service layer).
+        """
+        from nano_vm.models import Program, Step, StepType
+
+        allowed = ORDER_TRANSITIONS.get(current_state, {})
+        if event not in allowed:
+            return TransitionResult(
+                success=False,
+                new_state=None,
+                rejected_event=event,
+                reason=f"Event {event!r} not allowed from state {current_state!r}",
+            )
+        new_state = allowed[event]
+
+        program = Program(
+            name=f"order_{event.value.lower()}",
+            steps=[
+                Step(
+                    id="write_state",
+                    type=StepType.TOOL,
+                    tool="transition_order_state",
+                    args={
+                        "order_id": "$order_id",
+                        "from_state": current_state.value,
+                        "to_state": new_state.value,
+                    },
+                    output_key="write_result",
+                    is_terminal=True,
+                ),
+            ],
+        )
+        trace_result = await self._get_vm().run(program, context={"order_id": order_id})
+
+        if trace_result.status == TraceStatus.SUCCESS:
+            return TransitionResult(
+                success=True,
+                new_state=new_state,
+                rejected_event=None,
+                reason=None,
+            )
+        return TransitionResult(
+            success=False,
+            new_state=None,
+            rejected_event=event,
+            reason=trace_result.error or "Execution failed",
+        )
 
     async def create_payment(
         self,
@@ -118,12 +189,10 @@ class PaymentService:
                 raw_response=data,
             )
 
-            order_repo = OrderRepository(session)
-            fsm = OrderFSM(
-                state_reader=order_repo.get_state,
-                state_writer=order_repo.write_state,
+            current_state = await OrderRepository(session).get_state(order_id)
+            result = await self._run_simple_transition(
+                order_id, OrderEvent.REQUEST_PAYMENT, current_state,
             )
-            result = await fsm.handle_event(order_id, OrderEvent.REQUEST_PAYMENT)
             await session.commit()
 
         if not result.success:
@@ -185,11 +254,9 @@ class PaymentService:
 
             await repo.write_state(payment_id, "SUCCESS")
 
-            order_repo = OrderRepository(session)
-            fsm = OrderFSM(
-                state_reader=order_repo.get_state,
-                state_writer=order_repo.write_state,
+            current_state = await OrderRepository(session).get_state(order_id)
+            result = await self._run_simple_transition(
+                order_id, OrderEvent.PAYMENT_CONFIRMED, current_state,
             )
-            result = await fsm.handle_event(order_id, OrderEvent.PAYMENT_CONFIRMED)
             await session.commit()
             return result

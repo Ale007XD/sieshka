@@ -145,3 +145,91 @@ PROGRAM_START_COOKING = Program(
         ),
     ],
 )
+
+# ---------------------------------------------------------------------------
+# Simple transition programs (single-step state writes)
+# ---------------------------------------------------------------------------
+
+PROGRAM_CONFIRM = Program(
+    name="order_confirm",
+    steps=[
+        Step(
+            id="write_confirmed",
+            type=StepType.TOOL,
+            tool="transition_order_state",
+            args={"order_id": "$order_id", "from_state": "DRAFT", "to_state": "CONFIRMED"},
+            output_key="write_result",
+            is_terminal=True,
+        ),
+    ],
+)
+
+PROGRAM_PAYMENT_FAILED = Program(
+    name="order_payment_failed",
+    steps=[
+        Step(
+            id="write_rollback",
+            type=StepType.TOOL,
+            tool="transition_order_state",
+            args={
+                "order_id": "$order_id",
+                "from_state": "PAYMENT_PENDING",
+                "to_state": "CONFIRMED",
+            },
+            output_key="write_result",
+            is_terminal=True,
+        ),
+    ],
+)
+
+PROGRAM_CANCEL = Program(
+    name="order_cancel",
+    steps=[
+        Step(
+            id="write_cancelled",
+            type=StepType.TOOL,
+            tool="transition_order_state",
+            args={"order_id": "$order_id", "from_state": "$from_state", "to_state": "CANCELLED"},
+            output_key="write_result",
+            is_terminal=True,
+        ),
+    ],
+)
+
+# ---------------------------------------------------------------------------
+# Program registry — dispatch by OrderEvent
+# ---------------------------------------------------------------------------
+
+EVENT_PROGRAM_MAP: dict[str, Program] = {
+    "CONFIRM": PROGRAM_CONFIRM,
+    "REQUEST_PAYMENT": PROGRAM_REQUEST_PAYMENT,
+    "PAYMENT_CONFIRMED": PROGRAM_PAYMENT_CONFIRMATION,
+    "PAYMENT_FAILED": PROGRAM_PAYMENT_FAILED,
+    "START_COOKING": PROGRAM_START_COOKING,
+    "CANCEL": PROGRAM_CANCEL,
+}
+
+
+def build_simple_program(event_name: str, from_state: str, to_state: str) -> Program:
+    """Build a single-step transition program for any basic event.
+    
+    Used when EVENT_PROGRAM_MAP does not contain a pre-built Program
+    (e.g. START_PACKING, ASSIGN_COURIER, PICKUP, DELIVER, CLOSE).
+    """
+    return Program(
+        name=f"order_{event_name.lower()}",
+        steps=[
+            Step(
+                id="write_state",
+                type=StepType.TOOL,
+                tool="transition_order_state",
+                args={
+                    "order_id": "$order_id",
+                    "from_state": from_state,
+                    "to_state": to_state,
+                },
+                output_key="write_result",
+                is_terminal=True,
+            ),
+        ],
+    )

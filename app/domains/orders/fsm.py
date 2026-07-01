@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 class OrderFSM(BaseFSM[OrderState, OrderEvent]):
     """
+    DEPRECATED: replaced by ExecutionVM + nano-vm-mcp (M3+).
+    Retained for rollback safety — do not use in new code.
+
     In-memory + callback-based OrderFSM for M1.
     state_reader/state_writer: callables injected by Application Service.
-    This keeps FSM testable without a database.
+    This kept FSM testable without a database.
     """
 
     def __init__(
