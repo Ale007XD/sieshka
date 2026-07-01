@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from nano_vm.models import Program, Trace, TraceStatus
+from nano_vm.validator import ProgramValidator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -152,6 +153,12 @@ class OrderService:
             if event == OrderEvent.CANCEL:
                 context["from_state"] = current_state.value
 
+            _report = ProgramValidator(program).validate()
+            if not _report.is_valid():
+                raise RuntimeError(
+                    f"Program '{program.name}' validation failed: {_report.summary()}"
+                )
+
             trace = await self._get_vm().run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
@@ -273,6 +280,12 @@ class OrderService:
             context = {"order_id": order_id}
             if event == OrderEvent.CANCEL:
                 context["from_state"] = current_state.value
+
+            _report = ProgramValidator(program).validate()
+            if not _report.is_valid():
+                raise RuntimeError(
+                    f"Program '{program.name}' validation failed: {_report.summary()}"
+                )
 
             trace = await self._get_vm().run(program, context=context)
 
