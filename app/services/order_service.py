@@ -179,7 +179,7 @@ class OrderService:
         event: OrderEvent,
         current_state: OrderState,
         new_state: OrderState,
-    ) -> object:
+    ) -> Program:
         """Select the appropriate Program for the transition.
         
         Uses full business-logic programs for complex transitions (START_COOKING),
@@ -304,10 +304,10 @@ def _build_vm() -> _VMProtocol:
     )
     for name, fn in _ORDER_TOOLS.items():
         vm.register_tool(name, fn)
-    return vm  # type: ignore[no-any-return]  # ExecutionVM type obscured by --follow-imports=skip
+    return vm
 
 
-_ORDER_TOOLS = {
+_ORDER_TOOLS: dict[str, Callable[..., Any]] = {
     "validate_order_items": validate_order_items,
     "yookassa_create_payment": yookassa_create_payment,
     "yookassa_verify_payment": yookassa_verify_payment,
