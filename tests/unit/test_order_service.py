@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from nano_vm.models import Trace, TraceStatus
 
 from app.domains.orders.models import OrderCreate, OrderEvent, OrderState
 from app.fsm.core.base import TransitionResult
@@ -71,7 +72,10 @@ class TestOrderService:
         order_id = str(uuid4())
         session = AsyncMock()
 
-        svc = OrderService(session_factory=_session_factory)  # type: ignore[arg-type]
+        mock_vm = AsyncMock()
+        mock_vm.run.return_value = Trace(program_name="order_confirm", status=TraceStatus.SUCCESS)
+
+        svc = OrderService(session_factory=_session_factory, vm=mock_vm)  # type: ignore[arg-type]
         svc._session_factory = lambda: _session_factory(session)  # type: ignore[assignment]
 
         with (
@@ -83,6 +87,7 @@ class TestOrderService:
         assert isinstance(result, TransitionResult)
         assert result.success is True
         assert result.new_state == OrderState.CONFIRMED
+        mock_vm.run.assert_awaited_once()
 
     async def test_transition_order_rejected(self) -> None:
         order_id = str(uuid4())
