@@ -78,15 +78,14 @@ class PaymentService:
         self._idempotency = idempotency or IdempotencyService(session_factory=session_factory)
         self._vm: _VMProtocol | None = None
 
-    def _get_vm(self) -> _VMProtocol:
-        if self._vm is None:
-            from app.services.order_service import _build_vm
+    def _get_vm(self, session: AsyncSession) -> _VMProtocol:
+        from app.services.order_service import _build_vm
 
-            self._vm = _build_vm()
-        return self._vm
+        return _build_vm(session)
 
     async def _run_simple_transition(
         self,
+        session: AsyncSession,
         order_id: str,
         event: OrderEvent,
         current_state: OrderState,
@@ -125,7 +124,7 @@ class PaymentService:
                 ),
             ],
         )
-        trace_result = await self._get_vm().run(program, context={"order_id": order_id})
+        trace_result = await self._get_vm(session).run(program, context={"order_id": order_id})
 
         if trace_result.status == TraceStatus.SUCCESS:
             return TransitionResult(
@@ -193,7 +192,7 @@ class PaymentService:
 
             current_state = await OrderRepository(session).get_state(order_id)
             result = await self._run_simple_transition(
-                order_id, OrderEvent.REQUEST_PAYMENT, current_state,
+                session, order_id, OrderEvent.REQUEST_PAYMENT, current_state,
             )
             await session.commit()
 
@@ -258,7 +257,7 @@ class PaymentService:
 
             current_state = await OrderRepository(session).get_state(order_id)
             result = await self._run_simple_transition(
-                order_id, OrderEvent.PAYMENT_CONFIRMED, current_state,
+                session, order_id, OrderEvent.PAYMENT_CONFIRMED, current_state,
             )
             await session.commit()
             return result

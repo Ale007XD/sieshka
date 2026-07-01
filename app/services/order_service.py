@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from collections.abc import Callable
@@ -80,10 +81,16 @@ class OrderService:
         self._session_factory = session_factory
         self._vm = vm
 
-    def _get_vm(self) -> _VMProtocol:
-        if self._vm is None:
-            self._vm = _build_vm()
-        return self._vm
+    def _transition_vm(self, session: AsyncSession) -> _VMProtocol:
+        """Return a VM per-transition, bound to the given session.
+        
+        If a test VM was injected via constructor, return it as-is
+        (the test is responsible for its session wiring).
+        Otherwise build a fresh VM with session-bound tools.
+        """
+        if self._vm is not None:
+            return self._vm
+        return _build_vm(session)
 
     async def create_order(self, data: OrderCreate) -> OrderRead:
         async with self._session_factory() as session:
@@ -159,7 +166,7 @@ class OrderService:
                     f"Program '{program.name}' validation failed: {_report.summary()}"
                 )
 
-            trace = await self._get_vm().run(program, context=context)
+            trace = await self._transition_vm(session).run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
                 if new_state == OrderState.COOKING and event == OrderEvent.START_COOKING:
@@ -287,7 +294,7 @@ class OrderService:
                     f"Program '{program.name}' validation failed: {_report.summary()}"
                 )
 
-            trace = await self._get_vm().run(program, context=context)
+            trace = await self._transition_vm(session).run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
                 await session.commit()
@@ -306,7 +313,19 @@ class OrderService:
             )
 
 
-def _build_vm() -> _VMProtocol:
+_SESSION_TOOLS = frozenset({
+    "validate_order_items",
+    "write_order_state_payment_pending",
+    "write_order_state_paid",
+    "write_order_state_payment_failed",
+    "write_order_state_cooking",
+    "reserve_inventory_items",
+    "create_kitchen_ticket",
+    "transition_order_state",
+})
+
+
+def _build_vm(session: AsyncSession) -> _VMProtocol:
     from nano_vm.adapters import MockLLMAdapter
     from nano_vm.vm import ExecutionVM
 
@@ -316,7 +335,10 @@ def _build_vm() -> _VMProtocol:
         cursor_repository=cursor,
     )
     for name, fn in _ORDER_TOOLS.items():
-        vm.register_tool(name, fn)
+        if name in _SESSION_TOOLS:
+            vm.register_tool(name, functools.partial(fn, session=session))
+        else:
+            vm.register_tool(name, fn)
     return vm
 
 
