@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable
 from typing import Any, Protocol
 
-from nano_vm.models import Trace, TraceStatus
+from nano_vm.models import Program, Trace, TraceStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 
 class _VMProtocol(Protocol):
     """Minimal protocol for ExecutionVM duck-typing."""
-    async def run(self, program: object, context: Mapping[str, Any] | None = None) -> Trace: ...
+    async def run(self, program: Program, context: dict[str, Any] | None = None) -> Trace: ...
+
+    def register_tool(self, name: str, fn: Callable[..., Any]) -> None: ...
 
 
 class PolicyProvider:
@@ -302,7 +304,7 @@ def _build_vm() -> _VMProtocol:
     )
     for name, fn in _ORDER_TOOLS.items():
         vm.register_tool(name, fn)
-    return vm  # type: ignore[no-any-return]
+    return vm  # type: ignore[no-any-return]  # ExecutionVM type obscured by --follow-imports=skip
 
 
 _ORDER_TOOLS = {

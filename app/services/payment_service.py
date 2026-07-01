@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import decimal
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable
 from typing import Any, Protocol
 from uuid import uuid4
 
 import httpx
-from nano_vm.models import Trace, TraceStatus
+from nano_vm.models import Program, Trace, TraceStatus
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 class _VMProtocol(Protocol):
     """Minimal protocol for ExecutionVM duck-typing."""
-    async def run(self, program: object, context: Mapping[str, Any] | None = None) -> Trace: ...
+    async def run(self, program: Program, context: dict[str, Any] | None = None) -> Trace: ...
+
+    def register_tool(self, name: str, fn: Callable[..., Any]) -> None: ...
 
 
 class YooKassaClient:
