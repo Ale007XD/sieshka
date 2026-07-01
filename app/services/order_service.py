@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from nano_vm.models import Program, Trace, TraceStatus
 from nano_vm.validator import ProgramValidator
+from nano_vm_mcp.handlers import GovernedToolExecutor
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -21,6 +22,7 @@ from app.domains.orders.models import (
     OrderState,
 )
 from app.fsm.core.base import TransitionResult
+from app.policy.policy_snapshot import ORDERS_POLICY_SNAPSHOT
 from app.programs.order_programs import (
     EVENT_PROGRAM_MAP,
     build_simple_program,
@@ -334,12 +336,25 @@ def _build_vm(session: AsyncSession) -> _VMProtocol:
         llm=MockLLMAdapter(""),
         cursor_repository=cursor,
     )
+    executor = GovernedToolExecutor(policy=ORDERS_POLICY_SNAPSHOT)
     for name, fn in _ORDER_TOOLS.items():
+        governed = _governed_tool(fn, name, executor)
         if name in _SESSION_TOOLS:
-            vm.register_tool(name, functools.partial(fn, session=session))
+            vm.register_tool(name, functools.partial(governed, session=session))
         else:
-            vm.register_tool(name, fn)
+            vm.register_tool(name, governed)
     return vm
+
+
+def _governed_tool(
+    fn: Callable[..., Any],
+    tool_name: str,
+    executor: GovernedToolExecutor,
+) -> Callable[..., Any]:
+    async def wrapper(**kwargs: object) -> Any:
+        executor.check(tool_name)
+        return await fn(**kwargs)
+    return wrapper
 
 
 _ORDER_TOOLS: dict[str, Callable[..., Any]] = {
