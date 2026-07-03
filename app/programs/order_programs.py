@@ -47,7 +47,7 @@ PROGRAM_REQUEST_PAYMENT = Program(
             id="write_payment_state",
             type=StepType.TOOL,
             tool="write_order_state_payment_pending",  # terminal tool — writes PG
-            args={"order_id": "$order_id", "payment_id": "$payment_result.output"},
+            args={"order_id": "$order_id", "payment_id": "$create_payment.output"},
             output_key="write_result",
             is_terminal=True,
         ),
@@ -131,7 +131,7 @@ PROGRAM_START_COOKING = Program(
             id="write_cooking_state",
             type=StepType.TOOL,
             tool="write_order_state_cooking",  # terminal-tool
-            args={"order_id": "$order_id", "ticket_id": "$ticket_id.output"},
+            args={"order_id": "$order_id", "ticket_id": "$create_kitchen_ticket.output"},
             output_key="write_result",
             is_terminal=True,
         ),

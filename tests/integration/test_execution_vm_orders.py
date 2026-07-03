@@ -73,11 +73,20 @@ async def repo(postgres_dsn: str) -> AsyncGenerator[OrderRepository, None]:
 
 
 @pytest.fixture
-async def nano_vm() -> AsyncGenerator[object, None]:
-    """Builds a fresh ExecutionVM for each test with temp nano store."""
+async def nano_vm(repo: OrderRepository) -> AsyncGenerator[object, None]:
+    """Builds a fresh ExecutionVM for each test with temp nano store.
+
+    Tool registration mirrors app.services.order_service._SESSION_TOOLS:
+    since sprint_m3_session_boundary_fix (2026-07-01) removed each tool's own
+    independent session_factory(), DB-writing tools require session
+    closure-injected at registration time — same pattern as _build_vm().
+    """
+    import functools
+
     from nano_vm.adapters import MockLLMAdapter
     from nano_vm.vm import ExecutionVM
 
+    from app.services.order_service import _SESSION_TOOLS
     from app.tools.order_tools import (
         create_kitchen_ticket,
         log_validation_failure,
@@ -116,7 +125,10 @@ async def nano_vm() -> AsyncGenerator[object, None]:
             notify_inventory_insufficient,
             transition_order_state,
         ):
-            vm.register_tool(fn.__name__, fn)
+            if fn.__name__ in _SESSION_TOOLS:
+                vm.register_tool(fn.__name__, functools.partial(fn, session=repo._session))
+            else:
+                vm.register_tool(fn.__name__, fn)
         yield vm
         store.close()
 
@@ -265,6 +277,18 @@ class TestOrderLifecycleViaExecutionVM:
         from app.programs.order_programs import PROGRAM_START_COOKING
 
         order_id = await _insert_order(repo, OrderState.PAID)
+        # inventory table is never seeded by migrations/other fixtures — without this,
+        # reserve_inventory_items correctly finds no "coffee" row (stock_row is None) and
+        # takes the insufficient-stock branch (notify_inventory_insufficient), which is
+        # then structurally SUCCESS (not a bug) but never reaches write_cooking_state.
+        await repo._session.execute(
+            text(
+                "INSERT INTO inventory (sku, name, quantity) VALUES (:sku, :name, :qty) "
+                "ON CONFLICT (sku) DO UPDATE SET quantity = EXCLUDED.quantity"
+            ),
+            {"sku": "coffee", "name": "Coffee", "qty": 10},
+        )
+        await repo._session.commit()
 
         trace: Trace = await nano_vm.run(
             PROGRAM_START_COOKING,
@@ -276,6 +300,11 @@ class TestOrderLifecycleViaExecutionVM:
     async def test_invalid_event_rejected(
         self, repo: OrderRepository, nano_vm: object,
     ) -> None:
+        """transition_order_state's only guarantee is current==from_state (race guard via
+        FOR UPDATE re-check) — it has no access to ORDER_TRANSITIONS and does not (and should
+        not) validate graph edges; that lives exclusively in OrderService.transition_order
+        (see test_service_rejects_invalid_event). This test exercises the actual contract:
+        a stale/wrong from_state precondition is rejected."""
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 
         order_id = await _insert_order(repo, OrderState.DRAFT)
@@ -289,7 +318,7 @@ class TestOrderLifecycleViaExecutionVM:
                     tool="transition_order_state",
                     args={
                         "order_id": "$order_id",
-                        "from_state": "DRAFT",
+                        "from_state": "CONFIRMED",  # actual state is DRAFT — stale precondition
                         "to_state": "PAID",
                     },
                     output_key="write_result",
@@ -298,8 +327,9 @@ class TestOrderLifecycleViaExecutionVM:
             ],
         )
         trace: Trace = await nano_vm.run(program, context={"order_id": order_id})
-        # DRAFT → PAID is not a valid graph transition — tool should fail
         assert trace.status == TraceStatus.FAILED
+        # write must not have happened — state stays DRAFT
+        assert await repo.get_state(order_id) == OrderState.DRAFT
 
     async def test_unknown_order_rejected(
         self, repo: OrderRepository, nano_vm: object,

@@ -230,6 +230,28 @@ class OrderService:
         kitchen_repo = KitchenRepository(session)
         await kitchen_repo.create(order_id)
 
+    async def get_order(self, order_id: str) -> OrderRead | None:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
+                    "FROM orders WHERE id = :id"
+                ),
+                {"id": order_id},
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            items_val = row._mapping["items"]
+            return OrderRead(
+                id=row._mapping["id"],
+                customer_id=row._mapping["customer_id"],
+                state=OrderState(row._mapping["state"]),
+                items=items_val if isinstance(items_val, list) else json.loads(items_val),
+                delivery_address=row._mapping["delivery_address"],
+                trace_id=row._mapping.get("trace_id"),
+            )
+
     async def list_orders(
         self,
         state_filter: OrderState | None = None,

@@ -102,20 +102,18 @@ class TestWriteOrderStatePaymentPending:
     async def test_wrong_state(self, mock_session):
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
-        result = await write_order_state_payment_pending(
-            mock_session, order_id=str(uuid4()), payment_id="pi_123"
-        )
-
-        assert result == "ERROR"
+        with pytest.raises(ValueError, match="invalid state transition"):
+            await write_order_state_payment_pending(
+                mock_session, order_id=str(uuid4()), payment_id="pi_123"
+            )
 
     async def test_order_not_found(self, mock_session):
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
-        result = await write_order_state_payment_pending(
-            mock_session, order_id=str(uuid4()), payment_id="pi_123"
-        )
-
-        assert result == "ERROR"
+        with pytest.raises(ValueError, match="order not found"):
+            await write_order_state_payment_pending(
+                mock_session, order_id=str(uuid4()), payment_id="pi_123"
+            )
 
 
 class TestWriteOrderStatePaid:
@@ -130,9 +128,8 @@ class TestWriteOrderStatePaid:
     async def test_wrong_state(self, mock_session):
         mock_session.execute.return_value.scalar_one_or_none.return_value = "CONFIRMED"
 
-        result = await write_order_state_paid(mock_session, order_id=str(uuid4()))
-
-        assert result == "ERROR"
+        with pytest.raises(ValueError, match="invalid state transition"):
+            await write_order_state_paid(mock_session, order_id=str(uuid4()))
 
 
 class TestWriteOrderStatePaymentFailed:
@@ -147,9 +144,8 @@ class TestWriteOrderStatePaymentFailed:
     async def test_wrong_state(self, mock_session):
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
-        result = await write_order_state_payment_failed(mock_session, order_id=str(uuid4()))
-
-        assert result == "ERROR"
+        with pytest.raises(ValueError, match="invalid state transition"):
+            await write_order_state_payment_failed(mock_session, order_id=str(uuid4()))
 
 
 class TestWriteOrderStateCooking:
@@ -166,11 +162,10 @@ class TestWriteOrderStateCooking:
     async def test_wrong_state(self, mock_session):
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
-        result = await write_order_state_cooking(
-            mock_session, order_id=str(uuid4()), ticket_id=str(uuid4())
-        )
-
-        assert result == "ERROR"
+        with pytest.raises(ValueError, match="invalid state transition"):
+            await write_order_state_cooking(
+                mock_session, order_id=str(uuid4()), ticket_id=str(uuid4())
+            )
 
 
 class TestReserveInventoryItems:

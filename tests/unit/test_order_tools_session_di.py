@@ -55,6 +55,15 @@ _SESSION_TOOLS: list[tuple[str, object, list[object], dict[str, object]]] = [
     ("transition_order_state", transition_order_state, [_ID, "DRAFT", "CONFIRMED"], {}),
 ]
 
+# Tools that raise ValueError when order row is None
+_RAISE_ON_NONE = frozenset({
+    "write_order_state_payment_pending",
+    "write_order_state_paid",
+    "write_order_state_payment_failed",
+    "write_order_state_cooking",
+    "transition_order_state",
+})
+
 
 class TestSessionInjection:
     """Every DB-writing tool receives session as first positional arg (not **kwargs)."""
@@ -66,9 +75,23 @@ class TestSessionInjection:
         self, mock_session, name, tool, args, kwargs,
     ):
         mock_session.execute.return_value = MagicMock()
-        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value.one.return_value = MagicMock()
+        mock_session.execute.return_value.one.return_value._mapping = {"id": _ID}
 
-        await tool(mock_session, *args, **kwargs)
+        if name in _RAISE_ON_NONE:
+            mock_session.execute.return_value.scalar_one_or_none.return_value = None
+            with pytest.raises(ValueError):
+                await tool(mock_session, *args, **kwargs)
+        else:
+            scalar = mock_session.execute.return_value.scalar_one_or_none
+            if name == "reserve_inventory_items":
+                scalar.side_effect = [
+                    '[{"sku": "coffee", "qty": 2}]',   # items query
+                    10,                                  # stock query
+                ]
+            else:
+                scalar.return_value = '[{"sku": "coffee", "qty": 2}]'
+            await tool(mock_session, *args, **kwargs)
 
     @pytest.mark.parametrize(
         "name,tool,args,kwargs", _SESSION_TOOLS, ids=[t[0] for t in _SESSION_TOOLS],
@@ -77,9 +100,23 @@ class TestSessionInjection:
         self, mock_session, name, tool, args, kwargs,
     ):
         mock_session.execute.return_value = MagicMock()
-        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value.one.return_value = MagicMock()
+        mock_session.execute.return_value.one.return_value._mapping = {"id": _ID}
 
-        await tool(mock_session, *args, **kwargs)
+        if name in _RAISE_ON_NONE:
+            mock_session.execute.return_value.scalar_one_or_none.return_value = None
+            with pytest.raises(ValueError):
+                await tool(mock_session, *args, **kwargs)
+        else:
+            scalar = mock_session.execute.return_value.scalar_one_or_none
+            if name == "reserve_inventory_items":
+                scalar.side_effect = [
+                    '[{"sku": "coffee", "qty": 2}]',   # items query
+                    10,                                  # stock query
+                ]
+            else:
+                scalar.return_value = '[{"sku": "coffee", "qty": 2}]'
+            await tool(mock_session, *args, **kwargs)
 
         mock_session.commit.assert_not_called()
 

@@ -156,12 +156,14 @@ async def write_order_state_payment_pending(
     current = row.scalar_one_or_none()
     if current is None:
         logger.error("write_order_state_payment_pending: order %s not found", order_id)
-        return "ERROR"
+        raise ValueError(f"order not found: {order_id}")
     if current != OrderState.CONFIRMED.value:
         logger.warning(
             "write_order_state_payment_pending: expected CONFIRMED, got %s", current
         )
-        return "ERROR"
+        raise ValueError(
+            f"invalid state transition: expected CONFIRMED, got {current}"
+        )
     await session.execute(
         sql_text(
             "UPDATE orders SET state = :state, payment_id = :payment_id WHERE id = :id"
@@ -189,12 +191,14 @@ async def write_order_state_paid(session: AsyncSession, order_id: str, **kwargs:
     current = row.scalar_one_or_none()
     if current is None:
         logger.error("write_order_state_paid: order %s not found", order_id)
-        return "ERROR"
+        raise ValueError(f"order not found: {order_id}")
     if current != OrderState.PAYMENT_PENDING.value:
         logger.warning(
             "write_order_state_paid: expected PAYMENT_PENDING, got %s", current
         )
-        return "ERROR"
+        raise ValueError(
+            f"invalid state transition: expected PAYMENT_PENDING, got {current}"
+        )
     await session.execute(
         sql_text("UPDATE orders SET state = :state WHERE id = :id"),
         {"id": UUID(order_id), "state": OrderState.PAID.value},
@@ -218,12 +222,14 @@ async def write_order_state_payment_failed(
     current = row.scalar_one_or_none()
     if current is None:
         logger.error("write_order_state_payment_failed: order %s not found", order_id)
-        return "ERROR"
+        raise ValueError(f"order not found: {order_id}")
     if current != OrderState.PAYMENT_PENDING.value:
         logger.warning(
             "write_order_state_payment_failed: expected PAYMENT_PENDING, got %s", current
         )
-        return "ERROR"
+        raise ValueError(
+            f"invalid state transition: expected PAYMENT_PENDING, got {current}"
+        )
     await session.execute(
         sql_text("UPDATE orders SET state = :state WHERE id = :id"),
         {"id": UUID(order_id), "state": OrderState.CONFIRMED.value},
@@ -250,12 +256,14 @@ async def write_order_state_cooking(
     current = row.scalar_one_or_none()
     if current is None:
         logger.error("write_order_state_cooking: order %s not found", order_id)
-        return "ERROR"
+        raise ValueError(f"order not found: {order_id}")
     if current != OrderState.PAID.value:
         logger.warning(
             "write_order_state_cooking: expected PAID, got %s", current
         )
-        return "ERROR"
+        raise ValueError(
+            f"invalid state transition: expected PAID, got {current}"
+        )
     await session.execute(
         sql_text("UPDATE orders SET state = :state WHERE id = :id"),
         {"id": UUID(order_id), "state": OrderState.COOKING.value},
@@ -353,13 +361,15 @@ async def transition_order_state(
     current = row.scalar_one_or_none()
     if current is None:
         logger.error("transition_order_state: order %s not found", order_id)
-        return "ERROR"
+        raise ValueError(f"order not found: {order_id}")
     if current != from_state:
         logger.warning(
             "transition_order_state: expected %s, got %s for order %s",
             from_state, current, order_id,
         )
-        return "ERROR"
+        raise ValueError(
+            f"invalid state transition: expected {from_state}, got {current}"
+        )
     await session.execute(
         sql_text("UPDATE orders SET state = :state WHERE id = :id"),
         {"id": UUID(order_id), "state": to_state},
