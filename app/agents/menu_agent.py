@@ -76,7 +76,7 @@ class MenuAgent:
         for name, fn in _AGENT_TOOLS.items():
             governed = _governed_tool(fn, name, executor)
             vm.register_tool(name, governed)
-        return vm  # type: ignore[no-any-return]
+        return vm
 
     async def collect_menu(self, input_data: dict[str, Any]) -> MenuAgentResult:
         """Process raw menu input and return a structured command.
