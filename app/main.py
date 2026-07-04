@@ -14,6 +14,7 @@ from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.orders import router as orders_router
 from app.config import settings
 from app.startup import validate_all_programs
+from app.telemetry import configure_otel
 from app.webhooks.yookassa import router as yookassa_router
 
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    configure_otel()
     validate_all_programs()
     yield
 

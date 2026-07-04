@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nano_vm.models import StepStatus, Trace, TraceStatus
+from nano_vm.models import StepMetrics, StepStatus, Trace, TraceStatus
 from nano_vm_mcp.store import ProgramStore
 from pydantic import BaseModel
 
@@ -31,6 +31,7 @@ class ExecutionReceipt(BaseModel):
     escalations: int = 0
     rejected_transitions: tuple[RejectedTransition, ...]
     health: TraceHealthReport
+    step_metrics: StepMetrics | None = None
 
 
 class TraceAnalyzer:
@@ -80,4 +81,5 @@ class TraceAnalyzer:
             escalations=0,
             rejected_transitions=tuple(rejected),
             health=health,
+            step_metrics=trace.step_metrics,
         )

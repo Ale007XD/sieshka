@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from nano_vm.models import Program, Trace, TraceStatus
 from nano_vm.validator import ProgramValidator
 from nano_vm_mcp.handlers import GovernedToolExecutor
+from opentelemetry import trace as otel_trace
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -45,6 +46,7 @@ from app.tools.order_tools import (
 )
 
 logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("sieshka")
 
 
 class _VMProtocol(Protocol):
@@ -168,7 +170,15 @@ class OrderService:
                     f"Program '{program.name}' validation failed: {_report.summary()}"
                 )
 
-            trace = await self._transition_vm(session).run(program, context=context)
+            with _tracer.start_as_current_span(
+                "sieshka.order_transition",
+                attributes={
+                    "order_id": order_id,
+                    "event_type": event.value,
+                    "program_name": program.name,
+                },
+            ):
+                trace = await self._transition_vm(session).run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
                 if new_state == OrderState.COOKING and event == OrderEvent.START_COOKING:
@@ -318,7 +328,15 @@ class OrderService:
                     f"Program '{program.name}' validation failed: {_report.summary()}"
                 )
 
-            trace = await self._transition_vm(session).run(program, context=context)
+            with _tracer.start_as_current_span(
+                "sieshka.order_transition",
+                attributes={
+                    "order_id": order_id,
+                    "event_type": event.value,
+                    "program_name": program.name,
+                },
+            ):
+                trace = await self._transition_vm(session).run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
                 await session.commit()
