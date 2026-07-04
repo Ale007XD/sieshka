@@ -57,8 +57,38 @@ ORDER_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_collect_failure": ["orders:read"],
 }
 
+MENU_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_menu_command": ["menu:read"],
+    "collect_menu_command": ["menu:write"],
+    "report_collect_failure": ["menu:read"],
+}
+
+PROMOTION_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_promotion_command": ["promotion:read"],
+    "collect_promotion_command": ["promotion:write"],
+    "report_collect_failure": ["promotion:read"],
+}
+
+SUPPORT_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_support_command": ["support:read"],
+    "collect_support_command": ["support:write"],
+    "report_collect_failure": ["support:read"],
+}
+
 ORDER_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": ORDER_AGENT_TOOL_CAPABILITIES,
+}
+
+MENU_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": MENU_AGENT_TOOL_CAPABILITIES,
+}
+
+PROMOTION_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": PROMOTION_AGENT_TOOL_CAPABILITIES,
+}
+
+SUPPORT_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": SUPPORT_AGENT_TOOL_CAPABILITIES,
 }
 
 ORDER_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
@@ -84,3 +114,22 @@ DELIVERY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     policy_id="delivery-v1",
     version="1.0.0",
 )
+
+MENU_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    MENU_AGENT_POLICY_CONFIG,
+    policy_id="menu-agent-v1",
+    version="1.0.0",
+)
+
+PROMOTION_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    PROMOTION_AGENT_POLICY_CONFIG,
+    policy_id="promotion-agent-v1",
+    version="1.0.0",
+)
+
+SUPPORT_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    SUPPORT_AGENT_POLICY_CONFIG,
+    policy_id="support-agent-v1",
+    version="1.0.0",
+)
+

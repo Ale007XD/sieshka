@@ -16,6 +16,10 @@ from app.tools.llm_fallback_tools import (
     attempt_yandexgpt,
     finalize_success,
 )
+from app.tools.menu_agent_tools import (
+    collect_menu_command,
+    validate_menu_command,
+)
 from app.tools.notification_tools import (
     notify_order_confirmed,
     notify_order_cooking,
@@ -42,13 +46,24 @@ from app.tools.order_tools import (
     yookassa_create_payment,
     yookassa_verify_payment,
 )
+from app.tools.promotion_agent_tools import (
+    collect_promotion_command,
+    validate_promotion_command,
+)
+from app.tools.support_agent_tools import (
+    collect_support_command,
+    validate_support_command,
+)
 
 __all__ = [
     "attempt_gigachat",
     "attempt_openrouter",
     "attempt_yandexgpt",
     "check_inventory_stock",
+    "collect_menu_command",
     "collect_order_command",
+    "collect_promotion_command",
+    "collect_support_command",
     "finalize_success",
     "create_kitchen_ticket",
     "report_collect_failure",
@@ -64,7 +79,10 @@ __all__ = [
     "reserve_inventory_items",
     "set_inventory_state",
     "transition_order_state",
+    "validate_menu_command",
     "validate_order_command",
+    "validate_promotion_command",
+    "validate_support_command",
     "validate_order_items",
     "write_kitchen_state_handed_off",
     "write_kitchen_state_preparing",
