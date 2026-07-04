@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # nano-vm-mcp SQLite WAL
 
     # LLM Providers (M4+)
+    OPENAI_API_KEY: str = ""
+    OPENAI_API_BASE: str = "https://openrouter.ai/api/v1"
+
     YANDEX_API_KEY: str = ""
     YANDEX_API_BASE: str = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     YANDEX_MODEL: str = "openai/yandexgpt-pro"
