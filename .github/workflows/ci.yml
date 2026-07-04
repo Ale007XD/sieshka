@@ -49,3 +49,19 @@ jobs:
       # M3 migration gate: zero direct status mutations outside terminal tools
       - name: check no direct mutations
         run: bash scripts/check_no_direct_mutation.sh
+
+  validate-programs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install deps (dev + nano)
+        run: pip install -e ".[dev]" --upgrade
+
+      - name: validate all programs
+        run: python scripts/validate_all_programs.py
