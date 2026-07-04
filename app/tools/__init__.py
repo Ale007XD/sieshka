@@ -10,6 +10,12 @@ from app.tools.kitchen_tools import (
     write_kitchen_state_queued,
     write_kitchen_state_ready,
 )
+from app.tools.llm_fallback_tools import (
+    attempt_gigachat,
+    attempt_openrouter,
+    attempt_yandexgpt,
+    finalize_success,
+)
 from app.tools.notification_tools import (
     notify_order_confirmed,
     notify_order_cooking,
@@ -33,7 +39,11 @@ from app.tools.order_tools import (
 )
 
 __all__ = [
+    "attempt_gigachat",
+    "attempt_openrouter",
+    "attempt_yandexgpt",
     "check_inventory_stock",
+    "finalize_success",
     "create_kitchen_ticket",
     "decrement_inventory",
     "increment_inventory",
