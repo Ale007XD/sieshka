@@ -51,6 +51,22 @@ DELIVERY_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": DELIVERY_TOOL_CAPABILITIES,
 }
 
+ORDER_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_order_command": ["orders:read"],
+    "collect_order_command": ["orders:write"],
+    "report_collect_failure": ["orders:read"],
+}
+
+ORDER_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": ORDER_AGENT_TOOL_CAPABILITIES,
+}
+
+ORDER_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    ORDER_AGENT_POLICY_CONFIG,
+    policy_id="order-agent-v1",
+    version="1.0.0",
+)
+
 ORDERS_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     ORDERS_POLICY_CONFIG,
     policy_id="orders-v1",

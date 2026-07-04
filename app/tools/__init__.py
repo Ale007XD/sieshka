@@ -23,6 +23,11 @@ from app.tools.notification_tools import (
     notify_order_failed,
     notify_payment_received,
 )
+from app.tools.order_agent_tools import (
+    collect_order_command,
+    report_collect_failure,
+    validate_order_command,
+)
 from app.tools.order_tools import (
     create_kitchen_ticket,
     log_validation_failure,
@@ -43,8 +48,10 @@ __all__ = [
     "attempt_openrouter",
     "attempt_yandexgpt",
     "check_inventory_stock",
+    "collect_order_command",
     "finalize_success",
     "create_kitchen_ticket",
+    "report_collect_failure",
     "decrement_inventory",
     "increment_inventory",
     "log_validation_failure",
@@ -57,6 +64,7 @@ __all__ = [
     "reserve_inventory_items",
     "set_inventory_state",
     "transition_order_state",
+    "validate_order_command",
     "validate_order_items",
     "write_kitchen_state_handed_off",
     "write_kitchen_state_preparing",
