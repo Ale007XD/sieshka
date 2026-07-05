@@ -19,9 +19,9 @@ _ensure("GIGACHAT_API_KEY", "test-gigachat-key")
 _ensure("GIGACHAT_API_BASE", "https://gigachat.devices.sberbank.ru/api/v1")
 _ensure("GIGACHAT_MODEL", "openai/GigaChat-Pro")
 
-from nano_vm.adapters.litellm_adapter import LiteLLMAdapter
+from nano_vm.adapters.litellm_adapter import LiteLLMAdapter  # noqa: E402
 
-from app.llm.providers import (
+from app.llm.providers import (  # noqa: E402
     gigachat_adapter,
     openrouter_adapter,
     yandexgpt_adapter,
