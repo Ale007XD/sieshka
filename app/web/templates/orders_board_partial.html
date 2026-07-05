@@ -12,6 +12,8 @@
           <div class="text-sm font-medium text-gray-900 truncate">{{ order.id|string|truncate(8, True, '…') }}</div>
           <div class="text-xs text-gray-500 mt-1">{{ order.items|length }} item{% if order.items|length != 1 %}s{% endif %}</div>
           <div class="text-xs text-gray-500 truncate">{{ order.delivery_address }}</div>
+          <a href="/admin/ui/orders/{{ order.id }}/receipt"
+             class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">Receipt →</a>
         </div>
         {% else %}
         <p class="text-xs text-gray-400 text-center py-8">No orders</p>
