@@ -4,9 +4,11 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.templating import Jinja2Templates
 
 from app.api.routes.admin import router as admin_router
 from app.api.routes.delivery import router as delivery_router
@@ -15,6 +17,7 @@ from app.api.routes.orders import router as orders_router
 from app.config import settings
 from app.startup import validate_all_programs
 from app.telemetry import configure_otel
+from app.web.routes import router as web_router
 from app.webhooks.yookassa import router as yookassa_router
 
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -35,10 +38,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+templates_dir = Path(__file__).resolve().parent / "web" / "templates"
+app.state.templates = Jinja2Templates(directory=str(templates_dir))
+
 app.include_router(orders_router)
 app.include_router(admin_router)
 app.include_router(kitchen_router)
 app.include_router(delivery_router)
+app.include_router(web_router)
 app.include_router(yookassa_router)
 
 

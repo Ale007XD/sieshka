@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sieshka Dashboard</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav class="bg-white shadow-sm border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex space-x-8 h-14 items-center">
+        <a href="/admin/ui/" class="text-indigo-600 font-bold text-lg">Sieshka</a>
+        <a href="/admin/ui/" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Dashboard</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Orders</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Kitchen</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Inventory</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Promotions</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Stats</a>
+        <a href="#" class="text-gray-600 hover:text-indigo-600 text-sm font-medium">Receipts</a>
+      </div>
+    </div>
+  </nav>
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
