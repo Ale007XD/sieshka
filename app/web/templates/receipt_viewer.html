@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6 max-w-3xl mx-auto">
+  <h1 class="text-xl font-bold text-gray-900 mb-6">Execution Receipt</h1>
+
+  <dl class="grid grid-cols-2 gap-4 mb-6 text-sm">
+    <div>
+      <dt class="text-gray-500">Trace Hash</dt>
+      <dd class="font-mono text-gray-900 break-all">{{ receipt.trace_hash }}</dd>
+    </div>
+    <div>
+      <dt class="text-gray-500">Final Status</dt>
+      <dd>
+        <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold
+          {%- if receipt.final_status == 'success' %} bg-green-100 text-green-800
+          {%- elif receipt.final_status == 'failed' %} bg-red-100 text-red-800
+          {%- elif receipt.final_status == 'suspended' %} bg-amber-100 text-amber-800
+          {%- else %} bg-gray-100 text-gray-800{% endif %}">
+          {{ receipt.final_status }}
+        </span>
+        {% if receipt.resumable %}
+        <span class="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Resumable</span>
+        {% endif %}
+        {% if receipt.replayable %}
+        <span class="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">Replayable</span>
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+
+  {% if receipt.rejected_transitions %}
+  <section class="mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Rejected Transitions</h2>
+    <div class="space-y-2">
+      {% for rt in receipt.rejected_transitions %}
+      <div class="border-l-4 border-red-400 bg-red-50 p-3 rounded">
+        <div class="text-sm font-medium text-gray-900">
+          Step {{ rt.step_index }} &mdash; {{ rt.step_id }}
+        </div>
+        <div class="text-xs text-gray-600 mt-1">{{ rt.error|truncate(200, True) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Trace Health</h2>
+    {% set total = receipt.health.total_steps %}
+    {% if total > 0 %}
+    {% set success_rate = (receipt.health.successful_steps / total) * 100 %}
+    {% set fail_rate = (receipt.health.failed_steps / total) * 100 %}
+    {% else %}
+    {% set success_rate = 0 %}
+    {% set fail_rate = 0 %}
+    {% endif %}
+
+    <div class="space-y-4">
+      <div>
+        <div class="flex justify-between text-sm text-gray-600 mb-1">
+          <span>Steps</span>
+          <span>{{ receipt.health.successful_steps }} / {{ total }} successful</span>
+        </div>
+        <svg width="100%" height="20" viewBox="0 0 200 20" class="block">
+          <rect x="0" y="0" width="200" height="20" fill="#e5e7eb" rx="4"/>
+          <rect x="0" y="0" width="{{ success_rate * 2 }}" height="20" fill="#22c55e" rx="4"/>
+          <line x1="160" y1="0" x2="160" y2="20" stroke="#dc2626" stroke-width="2" stroke-dasharray="2 2"/>
+        </svg>
+      </div>
+
+      <div>
+        <div class="flex justify-between text-sm text-gray-600 mb-1">
+          <span>Failed</span>
+          <span>{{ receipt.health.failed_steps }} / {{ total }}</span>
+        </div>
+        <svg width="100%" height="20" viewBox="0 0 200 20" class="block">
+          <rect x="0" y="0" width="200" height="20" fill="#e5e7eb" rx="4"/>
+          <rect x="0" y="0" width="{{ fail_rate * 2 }}" height="20" fill="#ef4444" rx="4"/>
+          <line x1="40" y1="0" x2="40" y2="20" stroke="#dc2626" stroke-width="2" stroke-dasharray="2 2"/>
+        </svg>
+      </div>
+
+      {% if receipt.health.total_duration_ms is not none %}
+      <div class="flex justify-between text-sm text-gray-600">
+        <span>Duration</span>
+        <span>{{ "%.0f"|format(receipt.health.total_duration_ms) }} ms</span>
+      </div>
+      {% endif %}
+
+      {% if receipt.health.total_cost_usd is not none %}
+      <div class="flex justify-between text-sm text-gray-600">
+        <span>Cost</span>
+        <span>${{ "%.4f"|format(receipt.health.total_cost_usd) }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if receipt.step_metrics is not none and (receipt.step_metrics.llm_calls > 0 or receipt.step_metrics.tool_calls > 0 or receipt.step_metrics.condition_evals > 0 or receipt.step_metrics.retries_total > 0) %}
+  <section>
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Step Metrics</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-blue-50 p-3 rounded text-center">
+        <div class="text-2xl font-bold text-blue-700">{{ receipt.step_metrics.llm_calls }}</div>
+        <div class="text-xs text-blue-600 mt-1">LLM Calls</div>
+      </div>
+      <div class="bg-purple-50 p-3 rounded text-center">
+        <div class="text-2xl font-bold text-purple-700">{{ receipt.step_metrics.tool_calls }}</div>
+        <div class="text-xs text-purple-600 mt-1">Tool Calls</div>
+      </div>
+      <div class="bg-cyan-50 p-3 rounded text-center">
+        <div class="text-2xl font-bold text-cyan-700">{{ receipt.step_metrics.condition_evals }}</div>
+        <div class="text-xs text-cyan-600 mt-1">Condition Evals</div>
+      </div>
+      <div class="bg-amber-50 p-3 rounded text-center">
+        <div class="text-2xl font-bold text-amber-700">{{ receipt.step_metrics.retries_total }}</div>
+        <div class="text-xs text-amber-600 mt-1">Retries Total</div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

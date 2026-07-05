@@ -1,7 +1,9 @@
 """app/web/routes.py — dashboard UI routes, mounted at /admin/ui/*."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import Response
 
 from app.domains.kitchen.fsm import KitchenState
@@ -10,6 +12,7 @@ from app.services.inventory_service import InventoryService
 from app.services.kitchen_service import KitchenService, KitchenTicketRead
 from app.services.order_service import OrderService
 from app.services.promotion_service import PromotionService
+from app.services.trace_analyzer import TraceAnalyzer
 from app.web.helpers import INVENTORY_STATE_COLOR, PROMOTION_STATE_COLOR
 
 router = APIRouter(prefix="/admin/ui")
@@ -71,6 +74,10 @@ def get_inventory_service() -> InventoryService:
 
 def get_promotion_service() -> PromotionService:
     return PromotionService()
+
+
+def get_trace_analyzer() -> TraceAnalyzer:
+    return TraceAnalyzer()
 
 
 @router.get("/", response_class=Response)
@@ -154,4 +161,23 @@ async def promotions_panel_partial(
         request,
         "promotions_panel_partial.html",
         {"promotions": promotions, "PROMOTION_STATE_COLOR": PROMOTION_STATE_COLOR},
+    )
+
+
+@router.get("/orders/{order_id}/receipt", response_class=Response)
+async def order_receipt_viewer(
+    request: Request,
+    order_id: UUID,
+    service: OrderService = Depends(get_order_service),
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> Response:
+    order = await service.get_order(str(order_id))
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.trace_id is None:
+        raise HTTPException(status_code=404, detail="No trace for this order")
+    receipt = await analyzer.receipt(order.trace_id)
+    templates = request.app.state.templates
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request, "receipt_viewer.html", {"receipt": receipt}
     )
