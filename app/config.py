@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Telegram (M2+)
     TELEGRAM_BOT_TOKEN: str = ""
 
+    # Dashboard auth (M6+)
+    DASHBOARD_USER: str = "admin"
+    DASHBOARD_PASSWORD_HASH: str = ""
+
     # App
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
