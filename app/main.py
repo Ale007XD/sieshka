@@ -61,10 +61,12 @@ async def root() -> JSONResponse:
         "service": "Sieshka",
         "architecture": "nano-vm governed FSM",
         "milestones": {
-            "M1": "Foundation — CURRENT",
-            "M2": "Business Operations",
-            "M3": "nano-vm Integration",
-            "M4": "AI Layer",
-            "M5": "Observability",
+            "M1": "Foundation — DONE",
+            "M2": "Business Operations — DONE",
+            "M3": "nano-vm Integration — DONE",
+            "M4": "AI Layer — DONE",
+            "M5": "Observability — DONE",
+            "M6": "Restaurateur Dashboard — DONE",
         },
+        "dashboard": "/admin/ui/ (auth required)",
     })
