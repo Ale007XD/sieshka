@@ -18,7 +18,7 @@ from app.tools.kitchen_tools import (
 
 
 @pytest.fixture
-def mock_session():
+def mock_session() -> AsyncMock:
     session = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
@@ -29,7 +29,7 @@ def mock_session():
 
 
 class TestWriteKitchenStateQueued:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "NEW"
 
         result = await write_kitchen_state_queued(mock_session, ticket_id=str(uuid4()))
@@ -37,13 +37,13 @@ class TestWriteKitchenStateQueued:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PREPARING"
 
         with pytest.raises(ValueError, match="invalid state transition"):
             await write_kitchen_state_queued(mock_session, ticket_id=str(uuid4()))
 
-    async def test_ticket_not_found(self, mock_session):
+    async def test_ticket_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="ticket not found"):
@@ -51,7 +51,7 @@ class TestWriteKitchenStateQueued:
 
 
 class TestWriteKitchenStatePreparing:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "QUEUED"
 
         result = await write_kitchen_state_preparing(mock_session, ticket_id=str(uuid4()))
@@ -59,13 +59,13 @@ class TestWriteKitchenStatePreparing:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "NEW"
 
         with pytest.raises(ValueError, match="invalid state transition"):
             await write_kitchen_state_preparing(mock_session, ticket_id=str(uuid4()))
 
-    async def test_ticket_not_found(self, mock_session):
+    async def test_ticket_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="ticket not found"):
@@ -73,7 +73,7 @@ class TestWriteKitchenStatePreparing:
 
 
 class TestWriteKitchenStateReady:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PREPARING"
 
         result = await write_kitchen_state_ready(mock_session, ticket_id=str(uuid4()))
@@ -81,13 +81,13 @@ class TestWriteKitchenStateReady:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "QUEUED"
 
         with pytest.raises(ValueError, match="invalid state transition"):
             await write_kitchen_state_ready(mock_session, ticket_id=str(uuid4()))
 
-    async def test_ticket_not_found(self, mock_session):
+    async def test_ticket_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="ticket not found"):
@@ -95,7 +95,7 @@ class TestWriteKitchenStateReady:
 
 
 class TestWriteKitchenStateHandedOff:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "READY"
 
         result = await write_kitchen_state_handed_off(mock_session, ticket_id=str(uuid4()))
@@ -103,13 +103,13 @@ class TestWriteKitchenStateHandedOff:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PREPARING"
 
         with pytest.raises(ValueError, match="invalid state transition"):
             await write_kitchen_state_handed_off(mock_session, ticket_id=str(uuid4()))
 
-    async def test_ticket_not_found(self, mock_session):
+    async def test_ticket_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="ticket not found"):

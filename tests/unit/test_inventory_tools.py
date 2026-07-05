@@ -19,7 +19,7 @@ from app.tools.inventory_tools import (
 
 
 @pytest.fixture
-def mock_session():
+def mock_session() -> AsyncMock:
     session = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
@@ -30,14 +30,14 @@ def mock_session():
 
 
 class TestCheckInventoryStock:
-    async def test_returns_quantity(self, mock_session):
+    async def test_returns_quantity(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "42"
 
         result = await check_inventory_stock(mock_session, sku="coffee")
 
         assert result == 42
 
-    async def test_sku_not_found_returns_zero(self, mock_session):
+    async def test_sku_not_found_returns_zero(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         result = await check_inventory_stock(mock_session, sku="coffee")
@@ -46,7 +46,7 @@ class TestCheckInventoryStock:
 
 
 class TestDecrementInventory:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
 
         result = await decrement_inventory(mock_session, sku="coffee", quantity=2)
@@ -54,14 +54,14 @@ class TestDecrementInventory:
         assert result == 1
         mock_session.commit.assert_not_called()
 
-    async def test_insufficient_stock_returns_zero(self, mock_session):
+    async def test_insufficient_stock_returns_zero(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "1"
 
         result = await decrement_inventory(mock_session, sku="coffee", quantity=2)
 
         assert result == 0
 
-    async def test_sku_not_found_returns_zero(self, mock_session):
+    async def test_sku_not_found_returns_zero(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         result = await decrement_inventory(mock_session, sku="coffee", quantity=2)
@@ -70,7 +70,7 @@ class TestDecrementInventory:
 
 
 class TestIncrementInventory:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "some-id"
 
         result = await increment_inventory(mock_session, sku="coffee", quantity=5)
@@ -78,7 +78,7 @@ class TestIncrementInventory:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_sku_not_found(self, mock_session):
+    async def test_sku_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="sku not found"):
@@ -95,7 +95,9 @@ class TestSetInventoryState:
             (25, "AVAILABLE"),
         ],
     )
-    async def test_state_thresholds(self, mock_session, quantity, expected_state):
+    async def test_state_thresholds(
+        self, mock_session: AsyncMock, quantity: int, expected_state: str,
+    ) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = str(quantity)
 
         result = await set_inventory_state(mock_session, sku="coffee")
@@ -105,7 +107,7 @@ class TestSetInventoryState:
         update_call = mock_session.execute.call_args_list[-1]
         assert update_call.args[1]["state"] == expected_state
 
-    async def test_sku_not_found(self, mock_session):
+    async def test_sku_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="sku not found"):

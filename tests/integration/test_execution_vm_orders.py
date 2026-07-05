@@ -12,6 +12,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
+from nano_vm.vm import ExecutionVM
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -73,7 +74,7 @@ async def repo(postgres_dsn: str) -> AsyncGenerator[OrderRepository, None]:
 
 
 @pytest.fixture
-async def nano_vm(repo: OrderRepository) -> AsyncGenerator[object, None]:
+async def nano_vm(repo: OrderRepository) -> AsyncGenerator[ExecutionVM, None]:
     """Builds a fresh ExecutionVM for each test with temp nano store.
 
     Tool registration mirrors app.services.order_service._SESSION_TOOLS:
@@ -157,7 +158,7 @@ class TestOrderLifecycleViaExecutionVM:
     """Full order lifecycle through ExecutionVM, NOT OrderFSM."""
 
     async def test_draft_to_cancelled(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 
@@ -185,7 +186,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.CANCELLED
 
     async def test_draft_to_confirmed(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 
@@ -213,7 +214,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.CONFIRMED
 
     async def test_confirmed_to_payment_pending_simple(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 
@@ -241,7 +242,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.PAYMENT_PENDING
 
     async def test_payment_pending_to_paid_simple(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 
@@ -269,7 +270,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.PAID
 
     async def test_paid_to_cooking_via_full_program(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         """Uses the full PROGRAM_START_COOKING (inventory + ticket + state write)."""
         from nano_vm.models import Trace, TraceStatus
@@ -298,7 +299,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.COOKING
 
     async def test_invalid_event_rejected(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         """transition_order_state's only guarantee is current==from_state (race guard via
         FOR UPDATE re-check) — it has no access to ORDER_TRANSITIONS and does not (and should
@@ -332,7 +333,7 @@ class TestOrderLifecycleViaExecutionVM:
         assert await repo.get_state(order_id) == OrderState.DRAFT
 
     async def test_unknown_order_rejected(
-        self, repo: OrderRepository, nano_vm: object,
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
     ) -> None:
         from nano_vm.models import Program, Step, StepType, Trace, TraceStatus
 

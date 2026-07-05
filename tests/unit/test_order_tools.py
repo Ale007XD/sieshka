@@ -23,7 +23,7 @@ from app.tools.order_tools import (
 
 
 @pytest.fixture
-def mock_session():
+def mock_session() -> AsyncMock:
     session = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
@@ -36,7 +36,7 @@ def mock_session():
 
 
 class TestValidateOrderItems:
-    async def test_valid_order(self, mock_session):
+    async def test_valid_order(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = (
             '[{"sku": "coffee", "qty": 2}]'
         )
@@ -45,14 +45,14 @@ class TestValidateOrderItems:
 
         assert result == 1
 
-    async def test_no_items(self, mock_session):
+    async def test_no_items(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "[]"
 
         result = await validate_order_items(mock_session, str(uuid4()))
 
         assert result == 0
 
-    async def test_order_not_found(self, mock_session):
+    async def test_order_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         result = await validate_order_items(mock_session, str(uuid4()))
@@ -61,7 +61,7 @@ class TestValidateOrderItems:
 
 
 class TestYookassaCreatePayment:
-    async def test_placeholder_when_no_credentials(self):
+    async def test_placeholder_when_no_credentials(self) -> None:
         with pytest.MonkeyPatch.context() as mp:
             import app.config
             mp.setattr(app.config.settings, "YOOKASSA_SHOP_ID", "")
@@ -75,7 +75,7 @@ class TestYookassaCreatePayment:
 
 
 class TestYookassaVerifyPayment:
-    async def test_stub_when_no_credentials(self):
+    async def test_stub_when_no_credentials(self) -> None:
         with pytest.MonkeyPatch.context() as mp:
             import app.config
             mp.setattr(app.config.settings, "YOOKASSA_SHOP_ID", "")
@@ -89,7 +89,7 @@ class TestYookassaVerifyPayment:
 
 
 class TestWriteOrderStatePaymentPending:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "CONFIRMED"
 
         result = await write_order_state_payment_pending(
@@ -99,7 +99,7 @@ class TestWriteOrderStatePaymentPending:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
         with pytest.raises(ValueError, match="invalid state transition"):
@@ -107,7 +107,7 @@ class TestWriteOrderStatePaymentPending:
                 mock_session, order_id=str(uuid4()), payment_id="pi_123"
             )
 
-    async def test_order_not_found(self, mock_session):
+    async def test_order_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         with pytest.raises(ValueError, match="order not found"):
@@ -117,7 +117,7 @@ class TestWriteOrderStatePaymentPending:
 
 
 class TestWriteOrderStatePaid:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PAYMENT_PENDING"
 
         result = await write_order_state_paid(mock_session, order_id=str(uuid4()))
@@ -125,7 +125,7 @@ class TestWriteOrderStatePaid:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "CONFIRMED"
 
         with pytest.raises(ValueError, match="invalid state transition"):
@@ -133,7 +133,7 @@ class TestWriteOrderStatePaid:
 
 
 class TestWriteOrderStatePaymentFailed:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PAYMENT_PENDING"
 
         result = await write_order_state_payment_failed(mock_session, order_id=str(uuid4()))
@@ -141,7 +141,7 @@ class TestWriteOrderStatePaymentFailed:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
         with pytest.raises(ValueError, match="invalid state transition"):
@@ -149,7 +149,7 @@ class TestWriteOrderStatePaymentFailed:
 
 
 class TestWriteOrderStateCooking:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "PAID"
 
         result = await write_order_state_cooking(
@@ -159,7 +159,7 @@ class TestWriteOrderStateCooking:
         assert result == "OK"
         mock_session.commit.assert_not_called()
 
-    async def test_wrong_state(self, mock_session):
+    async def test_wrong_state(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = "DRAFT"
 
         with pytest.raises(ValueError, match="invalid state transition"):
@@ -169,7 +169,7 @@ class TestWriteOrderStateCooking:
 
 
 class TestReserveInventoryItems:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.side_effect = [
             '[{"sku": "coffee", "qty": 2}]',  # items
             "10",  # stock
@@ -180,7 +180,7 @@ class TestReserveInventoryItems:
         assert result == 1
         mock_session.commit.assert_not_called()
 
-    async def test_insufficient_stock(self, mock_session):
+    async def test_insufficient_stock(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.side_effect = [
             '[{"sku": "coffee", "qty": 2}]',  # items
             "1",  # stock
@@ -190,7 +190,7 @@ class TestReserveInventoryItems:
 
         assert result == 0
 
-    async def test_order_not_found(self, mock_session):
+    async def test_order_not_found(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
@@ -199,7 +199,7 @@ class TestReserveInventoryItems:
 
 
 class TestCreateKitchenTicket:
-    async def test_success(self, mock_session):
+    async def test_success(self, mock_session: AsyncMock) -> None:
         ticket_id = str(uuid4())
 
         class FakeRow:
@@ -215,7 +215,7 @@ class TestCreateKitchenTicket:
 
 
 class TestLogValidationFailure:
-    async def test_logs_and_returns(self):
+    async def test_logs_and_returns(self) -> None:
         with patch("app.tools.order_tools.logger") as mock_logger:
             result = await log_validation_failure(order_id=str(uuid4()))
             assert result == "LOGGED"
@@ -223,7 +223,7 @@ class TestLogValidationFailure:
 
 
 class TestNotifyInventoryInsufficient:
-    async def test_notifies_and_returns(self):
+    async def test_notifies_and_returns(self) -> None:
         with patch("app.tools.order_tools.logger") as mock_logger:
             result = await notify_inventory_insufficient(order_id=str(uuid4()))
             assert result == "NOTIFIED"

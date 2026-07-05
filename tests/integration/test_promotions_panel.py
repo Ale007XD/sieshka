@@ -83,6 +83,7 @@ async def session_factory(
         )
         await conn.execute(schema_path.read_text())
         await conn.execute(PROMOTIONS_SCHEMA)
+        await conn.execute("TRUNCATE TABLE promotions")
     finally:
         await conn.close()
 
@@ -90,6 +91,16 @@ async def session_factory(
     yield factory
 
     await engine.dispose()
+
+
+@pytest.fixture
+async def db(postgres_dsn: str) -> AsyncGenerator[asyncpg.Connection, None]:
+    raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(raw_dsn)
+    try:
+        yield conn
+    finally:
+        await conn.close()
 
 
 @pytest.fixture
@@ -124,36 +135,26 @@ class TestPromotionsPanel:
         resp = await client.get("/admin/ui/promotions/partial")
         assert "No promotions found" in resp.text
 
-    async def test_partial_shows_seeded_promotion(self, client: AsyncClient) -> None:
-        conn = await asyncpg.connect(
-            "postgresql://sieshka:sieshka@localhost:5432/sieshka"
+    async def test_partial_shows_seeded_promotion(
+        self, client: AsyncClient, db: asyncpg.Connection,
+    ) -> None:
+        await db.execute(
+            "INSERT INTO promotions (name, discount, state) "
+            "VALUES ($1, $2, $3)",
+            "Summer Sale", 15.0, PromotionState.ACTIVE.value,
         )
-        try:
-            await conn.execute(
-                "INSERT INTO promotions (name, discount, state) "
-                "VALUES ($1, $2, $3)",
-                "Summer Sale", 15.0, PromotionState.ACTIVE.value,
-            )
-        finally:
-            await conn.close()
-
         resp = await client.get("/admin/ui/promotions/partial")
         assert "Summer Sale" in resp.text
         assert "15.0%" in resp.text or "15%" in resp.text
         assert PromotionState.ACTIVE.value in resp.text
 
-    async def test_active_promotion_has_green_class(self, client: AsyncClient) -> None:
-        conn = await asyncpg.connect(
-            "postgresql://sieshka:sieshka@localhost:5432/sieshka"
+    async def test_active_promotion_has_green_class(
+        self, client: AsyncClient, db: asyncpg.Connection,
+    ) -> None:
+        await db.execute(
+            "INSERT INTO promotions (name, discount, state) "
+            "VALUES ($1, $2, $3)",
+            "Weekend Deal", 20.0, PromotionState.ACTIVE.value,
         )
-        try:
-            await conn.execute(
-                "INSERT INTO promotions (name, discount, state) "
-                "VALUES ($1, $2, $3)",
-                "Weekend Deal", 20.0, PromotionState.ACTIVE.value,
-            )
-        finally:
-            await conn.close()
-
         resp = await client.get("/admin/ui/promotions/partial")
         assert "text-green-600" in resp.text

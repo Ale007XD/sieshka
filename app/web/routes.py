@@ -1,13 +1,17 @@
 """app/web/routes.py — dashboard UI routes, mounted at /admin/ui/*."""
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from nano_vm_mcp.store import ProgramStore
 from starlette.responses import Response
 
+from app.api.routes.admin import get_transitions_store
 from app.domains.kitchen.fsm import KitchenState
 from app.domains.orders.models import OrderRead, OrderState
+from app.programs.order_programs import EVENT_PROGRAM_MAP
 from app.services.inventory_service import InventoryService
 from app.services.kitchen_service import KitchenService, KitchenTicketRead
 from app.services.order_service import OrderService
@@ -161,6 +165,44 @@ async def promotions_panel_partial(
         request,
         "promotions_panel_partial.html",
         {"promotions": promotions, "PROMOTION_STATE_COLOR": PROMOTION_STATE_COLOR},
+    )
+
+
+@router.get("/stats", response_class=Response)
+async def stats_dashboard(
+    request: Request,
+    service: OrderService = Depends(get_order_service),
+    store: ProgramStore = Depends(get_transitions_store),
+) -> Response:
+    orders = await service.list_orders()
+    raw_counts: dict[str, int] = {}
+    for order in orders:
+        raw_counts[order.state.value] = raw_counts.get(order.state.value, 0) + 1
+
+    state_counts: list[dict[str, object]] = []
+    for state in OrderState:
+        state_counts.append({"state": state.value, "count": raw_counts.get(state.value, 0)})
+
+    all_transitions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for p in EVENT_PROGRAM_MAP.values():
+        for t in store.get_transitions(p.name):
+            key = (t["program_name"], t["from_step"], t["to_step"], t["model_id"])
+            if key not in seen:
+                seen.add(key)
+                all_transitions.append(t)
+
+    max_count = max((t["count"] for t in all_transitions), default=0)
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "stats_dashboard.html",
+        {
+            "state_counts": state_counts,
+            "transitions": all_transitions,
+            "max_transition_count": max_count,
+        },
     )
 
 

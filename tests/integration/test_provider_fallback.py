@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+from collections.abc import Generator
+from typing import cast
 from unittest.mock import patch
 
 import pytest
+from nano_vm.adapters import MockLLMAdapter
 from nano_vm.models import StepStatus, Trace, TraceStatus
 from nano_vm.vm import ExecutionVM
 from nano_vm_mcp.store import ProgramStore
@@ -30,14 +33,14 @@ pytestmark = [pytest.mark.integration]
 
 
 @pytest.fixture
-def nano_vm():
+def nano_vm() -> Generator[ExecutionVM, None, None]:
     """Build an ExecutionVM with fallback tools registered (no session, no PG)."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         path = tmp.name
     try:
         store = ProgramStore(path)
         cursor = StoreCursorRepository(store)
-        vm = ExecutionVM(llm=None, cursor_repository=cursor)
+        vm = ExecutionVM(llm=cast(MockLLMAdapter, None), cursor_repository=cursor)
         for fn in (attempt_openrouter, attempt_yandexgpt, attempt_gigachat, finalize_success):
             vm.register_tool(fn.__name__, fn)
         yield vm

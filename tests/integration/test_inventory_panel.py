@@ -70,6 +70,7 @@ async def session_factory(
     conn = await asyncpg.connect(raw_dsn)
     try:
         await conn.execute(schema)
+        await conn.execute("TRUNCATE TABLE inventory")
     finally:
         await conn.close()
 
@@ -77,6 +78,16 @@ async def session_factory(
     yield factory
 
     await engine.dispose()
+
+
+@pytest.fixture
+async def db(postgres_dsn: str) -> AsyncGenerator[asyncpg.Connection, None]:
+    raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(raw_dsn)
+    try:
+        yield conn
+    finally:
+        await conn.close()
 
 
 @pytest.fixture
@@ -111,37 +122,27 @@ class TestInventoryPanel:
         resp = await client.get("/admin/ui/inventory/partial")
         assert "No inventory items found" in resp.text
 
-    async def test_partial_shows_seeded_item(self, client: AsyncClient) -> None:
-        conn = await asyncpg.connect(
-            "postgresql://sieshka:sieshka@localhost:5432/sieshka"
+    async def test_partial_shows_seeded_item(
+        self, client: AsyncClient, db: asyncpg.Connection,
+    ) -> None:
+        await db.execute(
+            "INSERT INTO inventory (sku, name, quantity, state) "
+            "VALUES ($1, $2, $3, $4)",
+            "BURGER-001", "Classic Burger", 50, InventoryState.AVAILABLE.value,
         )
-        try:
-            await conn.execute(
-                "INSERT INTO inventory (sku, name, quantity, state) "
-                "VALUES ($1, $2, $3, $4)",
-                "BURGER-001", "Classic Burger", 50, InventoryState.AVAILABLE.value,
-            )
-        finally:
-            await conn.close()
-
         resp = await client.get("/admin/ui/inventory/partial")
         assert "BURGER-001" in resp.text
         assert "Classic Burger" in resp.text
         assert "50" in resp.text
         assert InventoryState.AVAILABLE.value in resp.text
 
-    async def test_low_stock_row_has_amber_class(self, client: AsyncClient) -> None:
-        conn = await asyncpg.connect(
-            "postgresql://sieshka:sieshka@localhost:5432/sieshka"
+    async def test_low_stock_row_has_amber_class(
+        self, client: AsyncClient, db: asyncpg.Connection,
+    ) -> None:
+        await db.execute(
+            "INSERT INTO inventory (sku, name, quantity, state) "
+            "VALUES ($1, $2, $3, $4)",
+            "FRIES-001", "French Fries", 10, InventoryState.LOW_STOCK.value,
         )
-        try:
-            await conn.execute(
-                "INSERT INTO inventory (sku, name, quantity, state) "
-                "VALUES ($1, $2, $3, $4)",
-                "FRIES-001", "French Fries", 10, InventoryState.LOW_STOCK.value,
-            )
-        finally:
-            await conn.close()
-
         resp = await client.get("/admin/ui/inventory/partial")
         assert "bg-amber-50" in resp.text

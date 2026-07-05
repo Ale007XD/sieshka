@@ -6,6 +6,8 @@ commit НЕ вызывается внутри tool (caller owns transaction boun
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -25,14 +27,14 @@ from app.tools.order_tools import (
 
 
 @pytest.fixture
-def mock_session():
+def mock_session() -> AsyncMock:
     session = AsyncMock()
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     return session
 
 
-_SESSION_TOOL_NAMES = [
+_SESSION_TOOL_NAMES: list[str] = [
     "validate_order_items",
     "write_order_state_payment_pending",
     "write_order_state_paid",
@@ -43,8 +45,8 @@ _SESSION_TOOL_NAMES = [
     "transition_order_state",
 ]
 
-_ID = str(uuid4())
-_SESSION_TOOLS: list[tuple[str, object, list[object], dict[str, object]]] = [
+_ID: str = str(uuid4())
+_SESSION_TOOLS: list[tuple[str, Callable[..., Any], list[object], dict[str, object]]] = [
     ("validate_order_items", validate_order_items, [_ID], {}),
     ("write_order_state_payment_pending", write_order_state_payment_pending, [_ID, "pi_123"], {}),
     ("write_order_state_paid", write_order_state_paid, [_ID], {}),
@@ -56,7 +58,7 @@ _SESSION_TOOLS: list[tuple[str, object, list[object], dict[str, object]]] = [
 ]
 
 # Tools that raise ValueError when order row is None
-_RAISE_ON_NONE = frozenset({
+_RAISE_ON_NONE: frozenset[str] = frozenset({
     "write_order_state_payment_pending",
     "write_order_state_paid",
     "write_order_state_payment_failed",
@@ -72,8 +74,10 @@ class TestSessionInjection:
         "name,tool,args,kwargs", _SESSION_TOOLS, ids=[t[0] for t in _SESSION_TOOLS],
     )
     async def test_accepts_session_as_first_arg(
-        self, mock_session, name, tool, args, kwargs,
-    ):
+        self, mock_session: AsyncMock, name: str,
+        tool: Callable[..., Any], args: list[object],
+        kwargs: dict[str, object],
+    ) -> None:
         mock_session.execute.return_value = MagicMock()
         mock_session.execute.return_value.one.return_value = MagicMock()
         mock_session.execute.return_value.one.return_value._mapping = {"id": _ID}
@@ -97,8 +101,10 @@ class TestSessionInjection:
         "name,tool,args,kwargs", _SESSION_TOOLS, ids=[t[0] for t in _SESSION_TOOLS],
     )
     async def test_does_not_commit(
-        self, mock_session, name, tool, args, kwargs,
-    ):
+        self, mock_session: AsyncMock, name: str,
+        tool: Callable[..., Any], args: list[object],
+        kwargs: dict[str, object],
+    ) -> None:
         mock_session.execute.return_value = MagicMock()
         mock_session.execute.return_value.one.return_value = MagicMock()
         mock_session.execute.return_value.one.return_value._mapping = {"id": _ID}
@@ -124,14 +130,14 @@ class TestSessionInjection:
 class TestSessionNotInKwargs:
     """Session is NOT passed through **kwargs — only as explicit first param."""
 
-    async def test_validate_order_items_no_session_in_kwargs(self):
+    async def test_validate_order_items_no_session_in_kwargs(self) -> None:
         import inspect
 
         sig = inspect.signature(validate_order_items)
         params = list(sig.parameters.keys())
         assert params[0] == "session", f"Expected 'session' as first param, got {params}"
 
-    async def test_session_not_swallowed_by_kwargs(self):
+    async def test_session_not_swallowed_by_kwargs(self) -> None:
         """session is an explicit first param, never swallowed by **kwargs."""
         for name in _SESSION_TOOL_NAMES:
             fn = getattr(ot, name)

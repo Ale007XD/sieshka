@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6 max-w-4xl mx-auto">
+  <h1 class="text-xl font-bold text-gray-900 mb-6">Stats Dashboard</h1>
+
+  <section class="mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Orders by State</h2>
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for row in state_counts %}
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ row.state }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">{{ row.count }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="2" class="px-6 py-12 text-center text-sm text-gray-400">No orders found.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Transition Stats</h2>
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+      {% if transitions %}
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">From</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Program</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bar</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for t in transitions %}
+          <tr>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ t.from_step }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ t.to_step }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{{ t.program_name }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">{{ t.count }}</td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              <svg width="100" height="16" viewBox="0 0 100 16">
+                <rect x="0" y="0" width="100" height="16" fill="#e5e7eb" rx="3"/>
+                <rect x="0" y="0" width="{{ (t.count / max_transition_count) * 100 }}" height="16" fill="#6366f1" rx="3"/>
+              </svg>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="px-6 py-12 text-center text-sm text-gray-400">No transition data available.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
