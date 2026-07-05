@@ -266,36 +266,7 @@ class OrderService:
         self,
         state_filter: OrderState | None = None,
     ) -> list[OrderRead]:
-        async with self._session_factory() as session:
-            if state_filter is not None:
-                result = await session.execute(
-                    text(
-                        "SELECT id, customer_id, state, items, delivery_address, trace_id "
-                        "FROM orders WHERE state = :state ORDER BY created_at DESC"
-                    ),
-                    {"state": state_filter.value},
-                )
-            else:
-                result = await session.execute(
-                    text(
-                        "SELECT id, customer_id, state, items, delivery_address, trace_id "
-                        "FROM orders ORDER BY created_at DESC"
-                    ),
-                )
-            rows = result.fetchall()
-            return [
-                OrderRead(
-                    id=row._mapping["id"],
-                    customer_id=row._mapping["customer_id"],
-                    state=OrderState(row._mapping["state"]),
-                    items=row._mapping["items"]
-                    if isinstance(row._mapping["items"], list)
-                    else json.loads(row._mapping["items"]),
-                    delivery_address=row._mapping["delivery_address"],
-                    trace_id=row._mapping.get("trace_id"),
-                )
-                for row in rows
-            ]
+        return await fetch_orders(self._session_factory, state_filter)
 
     async def handle_event(
         self,
@@ -353,6 +324,42 @@ class OrderService:
                 rejected_event=event,
                 reason=trace.error or "Execution failed",
             )
+
+
+async def fetch_orders(
+    session_factory: async_sessionmaker[AsyncSession],
+    state_filter: OrderState | None = None,
+) -> list[OrderRead]:
+    async with session_factory() as session:
+        if state_filter is not None:
+            result = await session.execute(
+                text(
+                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
+                    "FROM orders WHERE state = :state ORDER BY created_at DESC"
+                ),
+                {"state": state_filter.value},
+            )
+        else:
+            result = await session.execute(
+                text(
+                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
+                    "FROM orders ORDER BY created_at DESC"
+                ),
+            )
+        rows = result.fetchall()
+        return [
+            OrderRead(
+                id=row._mapping["id"],
+                customer_id=row._mapping["customer_id"],
+                state=OrderState(row._mapping["state"]),
+                items=row._mapping["items"]
+                if isinstance(row._mapping["items"], list)
+                else json.loads(row._mapping["items"]),
+                delivery_address=row._mapping["delivery_address"],
+                trace_id=row._mapping.get("trace_id"),
+            )
+            for row in rows
+        ]
 
 
 _SESSION_TOOLS = frozenset({

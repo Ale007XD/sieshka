@@ -1,0 +1,23 @@
+<div class="flex gap-4 overflow-x-auto pb-4">
+  {% for column_name, col_orders in columns.items() %}
+  <div class="flex-shrink-0 w-72">
+    <div class="bg-white rounded-lg shadow">
+      <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="font-semibold text-gray-900">{{ column_name }}</h3>
+        <span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{{ col_orders|length }}</span>
+      </div>
+      <div class="p-3 space-y-3 min-h-[200px]">
+        {% for order in col_orders %}
+        <div class="bg-gray-50 rounded p-3 border border-gray-200">
+          <div class="text-sm font-medium text-gray-900 truncate">{{ order.id|string|truncate(8, True, '…') }}</div>
+          <div class="text-xs text-gray-500 mt-1">{{ order.items|length }} item{% if order.items|length != 1 %}s{% endif %}</div>
+          <div class="text-xs text-gray-500 truncate">{{ order.delivery_address }}</div>
+        </div>
+        {% else %}
+        <p class="text-xs text-gray-400 text-center py-8">No orders</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
