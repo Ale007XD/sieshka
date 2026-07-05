@@ -6,8 +6,11 @@ from starlette.responses import Response
 
 from app.domains.kitchen.fsm import KitchenState
 from app.domains.orders.models import OrderRead, OrderState
+from app.services.inventory_service import InventoryService
 from app.services.kitchen_service import KitchenService, KitchenTicketRead
 from app.services.order_service import OrderService
+from app.services.promotion_service import PromotionService
+from app.web.helpers import INVENTORY_STATE_COLOR, PROMOTION_STATE_COLOR
 
 router = APIRouter(prefix="/admin/ui")
 
@@ -62,6 +65,14 @@ def get_kitchen_service() -> KitchenService:
     return KitchenService()
 
 
+def get_inventory_service() -> InventoryService:
+    return InventoryService()
+
+
+def get_promotion_service() -> PromotionService:
+    return PromotionService()
+
+
 @router.get("/", response_class=Response)
 async def dashboard_home(request: Request) -> Response:
     templates = request.app.state.templates
@@ -103,4 +114,44 @@ async def kitchen_board_partial(
     templates = request.app.state.templates
     return templates.TemplateResponse(  # type: ignore[no-any-return]
         request, "kitchen_board_partial.html", {"columns": columns}
+    )
+
+
+@router.get("/inventory", response_class=Response)
+async def inventory_panel(request: Request) -> Response:
+    templates = request.app.state.templates
+    return templates.TemplateResponse(request, "inventory_panel.html")  # type: ignore[no-any-return]
+
+
+@router.get("/inventory/partial", response_class=Response)
+async def inventory_panel_partial(
+    request: Request,
+    service: InventoryService = Depends(get_inventory_service),
+) -> Response:
+    items = await service.list_inventory()
+    templates = request.app.state.templates
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "inventory_panel_partial.html",
+        {"items": items, "INVENTORY_STATE_COLOR": INVENTORY_STATE_COLOR},
+    )
+
+
+@router.get("/promotions", response_class=Response)
+async def promotions_panel(request: Request) -> Response:
+    templates = request.app.state.templates
+    return templates.TemplateResponse(request, "promotions_panel.html")  # type: ignore[no-any-return]
+
+
+@router.get("/promotions/partial", response_class=Response)
+async def promotions_panel_partial(
+    request: Request,
+    service: PromotionService = Depends(get_promotion_service),
+) -> Response:
+    promotions = await service.list_promotions()
+    templates = request.app.state.templates
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "promotions_panel_partial.html",
+        {"promotions": promotions, "PROMOTION_STATE_COLOR": PROMOTION_STATE_COLOR},
     )

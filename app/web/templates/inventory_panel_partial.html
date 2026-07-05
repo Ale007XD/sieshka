@@ -1,0 +1,26 @@
+<div class="bg-white rounded-lg shadow overflow-hidden">
+  <table class="min-w-full divide-y divide-gray-200">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">State</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200">
+      {% for item in items %}
+      <tr class="{{ INVENTORY_STATE_COLOR.get(item.state, '') }}">
+        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">{{ item.sku }}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{{ item.name }}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">{{ item.quantity }}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{{ item.state.value }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="px-6 py-12 text-center text-sm text-gray-400">No inventory items found.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
