@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.api.routes.admin import router as admin_router
 from app.api.routes.delivery import router as delivery_router
 from app.api.routes.kitchen import router as kitchen_router
+from app.api.routes.menu import router as menu_router
 from app.api.routes.orders import router as orders_router
 from app.config import settings
 from app.startup import validate_all_programs
@@ -46,6 +47,7 @@ app.include_router(orders_router)
 app.include_router(admin_router, dependencies=[Depends(get_current_username)])
 app.include_router(kitchen_router)
 app.include_router(delivery_router)
+app.include_router(menu_router)
 app.include_router(web_router, dependencies=[Depends(get_current_username)])
 app.include_router(yookassa_router)
 

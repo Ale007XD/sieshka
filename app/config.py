@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://sieshka:sieshka@localhost:5432/sieshka"
+    POSTGRES_USER: str = "sieshka"
+    POSTGRES_PASSWORD: str = "sieshka"
     SQLITE_PATH: str = "C:/Users/alexd/AppData/Local/Temp/sieshka_nano_vm.db"
     # nano-vm-mcp SQLite WAL
 
@@ -39,6 +41,9 @@ class Settings(BaseSettings):
     # Dashboard auth (M6+)
     DASHBOARD_USER: str = "admin"
     DASHBOARD_PASSWORD_HASH: str = ""
+
+    # Delivery
+    DELIVERY_FEE: int = 99
 
     # App
     DEBUG: bool = False
