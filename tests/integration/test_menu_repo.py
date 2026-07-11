@@ -34,6 +34,9 @@ async def session_factory(
         for sp in schema_paths:
             schema = sp.read_text()
             await conn.execute(schema)
+        # products.category_id → categories(id) FK — CASCADE обязателен,
+        # иначе TRUNCATE categories падает на "referenced by table products"
+        await conn.execute("TRUNCATE TABLE products, categories CASCADE")
     finally:
         await conn.close()
 
