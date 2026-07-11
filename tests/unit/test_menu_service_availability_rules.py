@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.domains.menu.models import MenuResponse
 from app.services.menu_service import MenuService
 
 

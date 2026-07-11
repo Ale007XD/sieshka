@@ -14,8 +14,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.api.routes.menu import router as menu_router
 from app.api.routes.menu import get_menu_service
+from app.api.routes.menu import router as menu_router
 from app.services.menu_service import MenuService
 
 

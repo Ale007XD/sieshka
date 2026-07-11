@@ -4,7 +4,6 @@ import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

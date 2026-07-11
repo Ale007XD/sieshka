@@ -5,6 +5,7 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+
 from app.config import settings
 
 
