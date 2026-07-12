@@ -117,6 +117,29 @@ class TestMenuServiceAvailability:
         assert p.cta_type == "unavailable"
         assert p.reason_code == "OUTSIDE_WINDOW"
 
+    async def test_inactive_product_shows_unavailable(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", menu_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Старый бургер", price_rub=199,
+                menu_period_override=None, description=None, image_url=None,
+                is_active=False,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        assert len(result.categories) == 1
+        assert len(result.categories[0].products) == 1
+        p = result.categories[0].products[0]
+        assert p.available is False
+        assert p.cta_type == "unavailable"
+        assert p.reason_code == "INACTIVE"
+
 
 @asynccontextmanager
 async def _asession(session: AsyncMock) -> AsyncGenerator[AsyncMock, None]:

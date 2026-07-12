@@ -120,11 +120,9 @@ async def client(
 @pytest.mark.skipif(not docker_available, reason="Docker required for testcontainers")
 class TestStatsDashboard:
     async def _seed_order(
-        self, state: OrderState, payment_id: str | None = None,
+        self, raw_dsn: str, state: OrderState, payment_id: str | None = None,
     ) -> str:
-        conn = await asyncpg.connect(
-            "postgresql://sieshka:sieshka@localhost:5432/sieshka"
-        )
+        conn = await asyncpg.connect(raw_dsn)
         try:
             order_id = str(uuid.uuid4())
             await conn.execute(
@@ -147,11 +145,14 @@ class TestStatsDashboard:
         for state in OrderState:
             assert state.value in resp.text
 
-    async def test_shows_seeded_order_counts(self, client: AsyncClient) -> None:
-        await self._seed_order(OrderState.DRAFT)
-        await self._seed_order(OrderState.DRAFT)
-        await self._seed_order(OrderState.CONFIRMED)
-        await self._seed_order(OrderState.COOKING)
+    async def test_shows_seeded_order_counts(
+        self, client: AsyncClient, postgres_dsn: str,
+    ) -> None:
+        raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
+        await self._seed_order(raw_dsn, OrderState.DRAFT)
+        await self._seed_order(raw_dsn, OrderState.DRAFT)
+        await self._seed_order(raw_dsn, OrderState.CONFIRMED)
+        await self._seed_order(raw_dsn, OrderState.COOKING)
 
         resp = await client.get("/admin/ui/stats")
         html = resp.text

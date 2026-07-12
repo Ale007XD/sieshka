@@ -81,7 +81,6 @@ class MenuService:
                 "  description, image_url, is_active "
                 "FROM products "
                 "WHERE category_id = :category_id "
-                "AND is_active = TRUE "
                 "AND price_rub IS NOT NULL "
                 "ORDER BY name"
             ),
@@ -94,14 +93,21 @@ class MenuService:
             effective_period = (
                 row._mapping["menu_period_override"] or "both"
             )
-            available = effective_period in ("both", current_period)
+            in_window = effective_period in ("both", current_period)
+            is_active = row._mapping["is_active"]
 
-            if available:
-                cta_type = "add_to_cart"
-                reason_code = None
-            else:
+            if not is_active:
+                available = False
+                cta_type = "unavailable"
+                reason_code = "INACTIVE"
+            elif not in_window:
+                available = False
                 cta_type = "unavailable"
                 reason_code = "OUTSIDE_WINDOW"
+            else:
+                available = True
+                cta_type = "add_to_cart"
+                reason_code = None
 
             items.append(
                 MenuProductItem(
