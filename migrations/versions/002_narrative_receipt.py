@@ -6,9 +6,13 @@ Create Date: 2026-07-04
 """
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from _split_sql import run_sql_file
 from alembic import op
 
 revision: str = "002_narrative_receipt"
@@ -19,8 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     sql_path = Path(__file__).resolve().parents[1] / "002_narrative_receipt.sql"
-    sql = sql_path.read_text()
-    op.execute(sql)
+    run_sql_file(op, sql_path)
 
 
 def downgrade() -> None:

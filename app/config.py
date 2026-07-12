@@ -1,7 +1,11 @@
 """app/config.py — Settings via pydantic-settings."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
@@ -11,7 +15,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://sieshka:sieshka@localhost:5432/sieshka"
     POSTGRES_USER: str = "sieshka"
     POSTGRES_PASSWORD: str = "sieshka"
-    SQLITE_PATH: str = "C:/Users/alexd/AppData/Local/Temp/sieshka_nano_vm.db"
+    SQLITE_PATH: str = str(_PROJECT_ROOT / "data" / "sieshka_nano_vm.db")
     # nano-vm-mcp SQLite WAL
 
     # LLM Providers (M4+)

@@ -218,6 +218,14 @@ __marimo__/
 .streamlit/secrets.toml
 
 context/
-C/
+
+# SQLite (nano-vm-mcp trace store) — never commit the local DB
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*-journal
+
+# Windows NTFS download artifacts
 *:Zone.Identifier
 *.Zone.Identifier

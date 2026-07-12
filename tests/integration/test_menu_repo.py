@@ -12,6 +12,7 @@ import asyncpg
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.routes.menu import get_menu_service
@@ -57,16 +58,24 @@ async def seed_categories(
     async with session_factory() as session:
         for cat in categories:
             await session.execute(
-                "INSERT INTO categories (external_id, name, menu_period, sort, is_active) "
-                "VALUES ($1, $2, $3, $4, $5)",
-                str(cat["id"]), cat["name"], cat["menu_period"], cat["sort"], cat["is_active"],
+                text(
+                    "INSERT INTO categories (external_id, name, menu_period, sort, is_active) "
+                    "VALUES (:external_id, :name, :menu_period, :sort, :is_active)"
+                ),
+                {
+                    "external_id": str(cat["id"]),
+                    "name": cat["name"],
+                    "menu_period": cat["menu_period"],
+                    "sort": cat["sort"],
+                    "is_active": cat["is_active"],
+                },
             )
         await session.commit()
 
     name_to_id: dict[str, str] = {}
     async with session_factory() as session:
-        rows = await session.execute("SELECT id, name FROM categories")
-        for row in rows:
+        rows = await session.execute(text("SELECT id, name FROM categories"))
+        for row in rows.mappings():
             name_to_id[row["name"]] = str(row["id"])
 
     async with session_factory() as session:
@@ -76,8 +85,11 @@ async def seed_categories(
                 parent_id = name_to_id.get(parent_name)
                 if parent_id:
                     await session.execute(
-                        "UPDATE categories SET parent_category_id = $1 WHERE name = $2",
-                        parent_id, cat["name"],
+                        text(
+                            "UPDATE categories SET parent_category_id = :parent_id "
+                            "WHERE name = :name"
+                        ),
+                        {"parent_id": parent_id, "name": cat["name"]},
                     )
         await session.commit()
 
@@ -89,30 +101,26 @@ async def seed_products(
     """Insert a few test products."""
     async with session_factory() as session:
         cat_result = await session.execute(
-            "SELECT id FROM categories WHERE name = $1 LIMIT 1",
-            "Бургеры",
+            text("SELECT id FROM categories WHERE name = :name LIMIT 1"),
+            {"name": "Бургеры"},
         )
-        cat_row = cat_result.first()
+        cat_row = cat_result.mappings().first()
         if not cat_row:
             return
 
         cat_id = cat_row["id"]
-        await session.execute(
-            "INSERT INTO products (name, category_id, price_rub, is_active) "
-            "VALUES ($1, $2, $3, $4)",
-            "Чизбургер", cat_id, 199, True,
-        )
-        await session.execute(
-            "INSERT INTO products (name, category_id, price_rub, is_active) "
-            "VALUES ($1, $2, $3, $4)",
-            "Гамбургер", cat_id, 149, True,
-        )
-        # Product with no price — should NOT appear in menu
-        await session.execute(
-            "INSERT INTO products (name, category_id, price_rub, is_active) "
-            "VALUES ($1, $2, $3, $4)",
-            "Скрытый товар", cat_id, None, True,
-        )
+        for name, price in (
+            ("Чизбургер", 199),
+            ("Гамбургер", 149),
+            ("Скрытый товар", None),
+        ):
+            await session.execute(
+                text(
+                    "INSERT INTO products (name, category_id, price_rub, is_active) "
+                    "VALUES (:name, :category_id, :price_rub, :is_active)"
+                ),
+                {"name": name, "category_id": cat_id, "price_rub": price, "is_active": True},
+            )
         await session.commit()
 
 

@@ -58,8 +58,6 @@ def postgres_dsn() -> str:
         cur.execute(f"DROP DATABASE IF EXISTS {test_db_name}")
         cur.execute(f"CREATE DATABASE {test_db_name}")
 
-    test_dsn = admin_dsn.replace("dbname=postgres", f"dbname={test_db_name}")
-
     test_async_url = (
         f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
         f"@127.0.0.1:5432/{test_db_name}"
@@ -72,7 +70,7 @@ def postgres_dsn() -> str:
     finally:
         settings.DATABASE_URL = original_database_url
 
-    yield test_dsn
+    yield test_async_url
 
     with psycopg.connect(admin_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
