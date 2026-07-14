@@ -6,6 +6,13 @@ import logging
 
 from nano_vm.validator import IssueSeverity, ProgramValidator
 
+from app.programs.llm_fallback_program import PROVIDER_FALLBACK
+from app.programs.menu_agent_program import (
+    PROGRAM_COLLECT_ORDER as MENU_AGENT_PROGRAM,
+)
+from app.programs.order_agent_program import (
+    PROGRAM_COLLECT_ORDER as ORDER_AGENT_PROGRAM,
+)
 from app.programs.order_programs import (
     PROGRAM_CANCEL,
     PROGRAM_CONFIRM,
@@ -13,6 +20,12 @@ from app.programs.order_programs import (
     PROGRAM_PAYMENT_FAILED,
     PROGRAM_REQUEST_PAYMENT,
     PROGRAM_START_COOKING,
+)
+from app.programs.promotion_agent_program import (
+    PROGRAM_COLLECT_ORDER as PROMOTION_AGENT_PROGRAM,
+)
+from app.programs.support_agent_program import (
+    PROGRAM_COLLECT_ORDER as SUPPORT_AGENT_PROGRAM,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,6 +37,11 @@ _ALL_PROGRAMS = [
     PROGRAM_CONFIRM,
     PROGRAM_PAYMENT_FAILED,
     PROGRAM_CANCEL,
+    PROVIDER_FALLBACK,
+    MENU_AGENT_PROGRAM,
+    ORDER_AGENT_PROGRAM,
+    PROMOTION_AGENT_PROGRAM,
+    SUPPORT_AGENT_PROGRAM,
 ]
 
 
