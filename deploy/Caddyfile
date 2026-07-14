@@ -1,0 +1,31 @@
+# Sieshka production reverse proxy + TLS.
+# Caddy obtains and renews a Let's Encrypt cert automatically via ACME on :80/:443.
+#
+# Replace new.siesh-ka.ru with your domain (DNS A -> VPS, ports 80/443 open).
+#
+# NOTE on rate limiting: the stock caddy:2 image has no rate_limit directive.
+# To throttle /admin brute-force, build a custom image with the caddy-ratelimit
+# plugin (xcaddy) and uncomment the block below. Until then, the app's own
+# argon2 basic-auth is the only /admin gate — acceptable for pre-prod, not for
+# sustained public traffic.
+
+new.siesh-ka.ru {
+    encode gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+        -Server
+    }
+
+    # rate_limit {
+    #     zone admin_zone {
+    #         key {http.request.header.X-Forwarded-For}
+    #         events 10
+    #         window 1m
+    #     }
+    # }
+
+    reverse_proxy app:8000
+}

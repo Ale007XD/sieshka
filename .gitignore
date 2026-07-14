@@ -229,3 +229,5 @@ context/
 # Windows NTFS download artifacts
 *:Zone.Identifier
 *.Zone.Identifier
+# Sieshka deploy backups (contain DB dumps)
+deploy/backups/

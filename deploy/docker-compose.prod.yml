@@ -1,0 +1,68 @@
+# Production overlay for Sieshka.
+#
+# Run from the project root:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+#
+# This file does NOT modify local-dev behaviour. It only *adds* production
+# concerns (reverse proxy + TLS, no public app port, resource limits, log
+# rotation). The base docker-compose.yml stays the dev/default.
+#
+# WARNING — migrations: the base file mounts ./migrations into postgres'
+# docker-entrypoint-initdb.d. That applies 001-004.sql ONLY on the FIRST init
+# of an EMPTY postgres volume. DO NOT rely on initdb.d after the first Alembic
+# migration lands — it diverges silently from alembic. For real prod, switch to
+# `alembic upgrade head` and drop the initdb.d mount. Pre-prod runs with a
+# fresh volume are fine as-is.
+
+services:
+  postgres:
+    # Override the weak default password ('sieshka') with a value from .env.
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Do not expose 5432 to the host in production.
+    ports: []
+    mem_limit: 512m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  app:
+    # No host port publish — only the caddy reverse proxy reaches app:8000.
+    ports: []
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    # Cap resources so a runaway LLM call can't eat the whole VPS.
+    mem_limit: 1g
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:
