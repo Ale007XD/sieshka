@@ -72,17 +72,22 @@ class TestProviderFallback:
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.SUCCESS
         step_ids = [s.step_id for s in trace.steps]
-        assert step_ids == ["attempt_openrouter", "check_openrouter", "success"]
+        assert step_ids == [
+            "attempt_openrouter",
+            "check_openrouter",
+            "success_openrouter",
+        ]
         assert trace.steps[0].output == 1
+        # debt 3.4: real LLM text propagates to terminal output
+        assert trace.steps[-1].output == "response ok"
 
     async def test_openrouter_timeout_yandex_succeeds_one_switch(
         self, nano_vm: ExecutionVM,
     ) -> None:
         """OpenRouter times out → YandexGPT succeeds → exactly one switch."""
         program = PROVIDER_FALLBACK
-        with (
-            patch("app.llm.providers.openrouter_adapter.complete", mock_timeout),
-            patch("app.llm.providers.yandexgpt_adapter.complete", mock_success),
+        with patch("app.llm.providers.openrouter_adapter.complete", mock_timeout), patch(
+            "app.llm.providers.yandexgpt_adapter.complete", mock_success
         ):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.SUCCESS
@@ -92,18 +97,21 @@ class TestProviderFallback:
             "check_openrouter",
             "attempt_yandexgpt",
             "check_yandexgpt",
-            "success",
+            "success_yandexgpt",
         ]
         assert trace.steps[0].output == 0
         assert trace.steps[2].output == 1
+        assert trace.steps[-1].output == "response ok"
 
     async def test_two_hop_switch_to_gigachat(self, nano_vm: ExecutionVM) -> None:
         """Both OpenRouter and YandexGPT time out → GigaChat succeeds → two switches."""
         program = PROVIDER_FALLBACK
-        with (
-            patch("app.llm.providers.openrouter_adapter.complete", mock_timeout),
-            patch("app.llm.providers.yandexgpt_adapter.complete", mock_timeout),
-            patch("app.llm.providers.gigachat_adapter.complete", mock_success),
+        with patch(
+            "app.llm.providers.openrouter_adapter.complete", mock_timeout
+        ), patch(
+            "app.llm.providers.yandexgpt_adapter.complete", mock_timeout
+        ), patch(
+            "app.llm.providers.gigachat_adapter.complete", mock_success
         ):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.SUCCESS
@@ -114,11 +122,12 @@ class TestProviderFallback:
             "attempt_yandexgpt",
             "check_yandexgpt",
             "attempt_gigachat",
-            "success",
+            "success_gigachat",
         ]
         assert trace.steps[0].output == 0
         assert trace.steps[2].output == 0
         assert trace.steps[4].output == 1
+        assert trace.steps[-1].output == "response ok"
 
     async def test_non_timeout_failure_does_not_trigger_fallback(
         self, nano_vm: ExecutionVM,

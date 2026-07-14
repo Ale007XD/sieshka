@@ -63,14 +63,14 @@ class SupportAgent:
         self._vm = vm
 
     def _build_vm(self) -> _VMProtocol:
-        from nano_vm.adapters import MockLLMAdapter
         from nano_vm.vm import ExecutionVM
 
         from app.db_nano import StoreCursorRepository, get_store
+        from app.llm.fallback import FallbackLLMAdapter
 
         cursor = StoreCursorRepository(get_store())
         vm = ExecutionVM(
-            llm=MockLLMAdapter(""),
+            llm=FallbackLLMAdapter(),
             cursor_repository=cursor,
         )
         executor = GovernedToolExecutor(policy=SUPPORT_AGENT_POLICY_SNAPSHOT)
