@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,10 +17,19 @@ from app.domains.menu.models import (
     MenuResponse,
 )
 
+_DEFAULT_TZ = ZoneInfo("UTC")
+
+
+def _menu_timezone() -> ZoneInfo:
+    try:
+        return ZoneInfo(settings.MENU_TIMEZONE)
+    except (ZoneInfoNotFoundError, ValueError):
+        return _DEFAULT_TZ
+
 
 def _current_menu_period() -> Literal["morning", "evening"]:
-    hour = datetime.datetime.now().hour
-    return "morning" if hour < 16 else "evening"
+    now = datetime.datetime.now(_menu_timezone())
+    return "morning" if now.hour < settings.MENU_MORNING_END_HOUR else "evening"
 
 
 class MenuService:

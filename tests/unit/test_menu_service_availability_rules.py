@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.services.menu_service import MenuService
+from app.services.menu_service import MenuService, _current_menu_period
 
 
 @dataclass
@@ -162,6 +162,35 @@ class TestMenuServiceAvailability:
         p = result.categories[0].products[0]
         assert p.available is False
         assert p.reason_code == "OUTSIDE_WINDOW"
+    def test_current_menu_period_uses_configured_window(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import types
+        from datetime import datetime as _RealDateTime
+        from zoneinfo import ZoneInfo
+
+        monkeypatch.setattr(
+            "app.services.menu_service.settings.MENU_TIMEZONE", "UTC"
+        )
+        monkeypatch.setattr(
+            "app.services.menu_service.settings.MENU_MORNING_END_HOUR", 16
+        )
+        tz = ZoneInfo("UTC")
+
+        class _FixedDateTime(_RealDateTime):
+            @classmethod
+            def now(cls, _tz: object = None) -> _RealDateTime:
+                return _fixed_value  # type: ignore[used-before-def]
+
+        morning = _RealDateTime(2026, 1, 1, 15, 30, tzinfo=tz)
+        evening = _RealDateTime(2026, 1, 1, 17, 0, tzinfo=tz)
+
+        _fake_dt = types.SimpleNamespace(datetime=_FixedDateTime)
+        for _fixed_value in (morning, evening):
+            monkeypatch.setattr("app.services.menu_service.datetime", _fake_dt)
+            expected = "morning" if _fixed_value.hour < 16 else "evening"
+            assert _current_menu_period() == expected
+
 
 
 @asynccontextmanager

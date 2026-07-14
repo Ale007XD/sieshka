@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     # Delivery
     DELIVERY_FEE: int = 99
 
+    # Menu availability window (M7)
+    # IANA timezone used to decide the current morning/evening window.
+    # Per-project: set MENU_TIMEZONE in .env (e.g. "UTC", "Europe/Moscow",
+    # "Asia/Ho_Chi_Minh"). Falls back to UTC if the name is unknown.
+    MENU_TIMEZONE: str = "UTC"
+    # Hour (local to MENU_TIMEZONE) at which "morning" switches to "evening".
+    MENU_MORNING_END_HOUR: int = 16
+
     # App
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
