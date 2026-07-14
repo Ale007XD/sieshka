@@ -4,7 +4,7 @@ from __future__ import annotations
 import decimal
 import logging
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 from uuid import uuid4
 
 import httpx
@@ -21,6 +21,14 @@ from app.services.idempotency import IdempotencyService
 from app.trace import trace
 
 logger = logging.getLogger(__name__)
+
+
+class PaymentInitResult(TypedDict):
+    """Typed result of PaymentService.create_payment (YooKassa redirect payload)."""
+
+    confirmation_url: str
+    payment_id: str
+    trace_id: str
 
 
 class _VMProtocol(Protocol):
@@ -147,7 +155,7 @@ class PaymentService:
         currency: str = "RUB",
         description: str | None = None,
         return_url: str | None = None,
-    ) -> dict[str, object]:
+    ) -> PaymentInitResult:
         trace_id = trace.record(
             entity_id=order_id,
             domain="orders",
