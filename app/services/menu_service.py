@@ -41,7 +41,10 @@ class MenuService:
 
             for cat in cat_rows:
                 cat_id: UUID = cat._mapping["id"]
-                products = await self._fetch_products(session, cat_id, current_period)
+                cat_period: str = cat._mapping["menu_period"]
+                products = await self._fetch_products(
+                    session, cat_id, current_period, cat_period
+                )
                 categories.append(
                     MenuCategory(
                         category_id=cat_id,
@@ -74,6 +77,7 @@ class MenuService:
         session: AsyncSession,
         category_id: UUID,
         current_period: Literal["morning", "evening"],
+        category_period: str,
     ) -> list[MenuProductItem]:
         result = await session.execute(
             text(
@@ -91,7 +95,7 @@ class MenuService:
 
         for row in rows:
             effective_period = (
-                row._mapping["menu_period_override"] or "both"
+                row._mapping["menu_period_override"] or category_period
             )
             in_window = effective_period in ("both", current_period)
             is_active = row._mapping["is_active"]

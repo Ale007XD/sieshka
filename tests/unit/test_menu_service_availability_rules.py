@@ -140,6 +140,29 @@ class TestMenuServiceAvailability:
         assert p.cta_type == "unavailable"
         assert p.reason_code == "INACTIVE"
 
+    async def test_product_inherits_category_period(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Напитки", menu_period="morning")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Кофе", price_rub=100,
+                menu_period_override=None, description=None, image_url=None,
+                is_active=True,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        # Mock bypasses the category period filter; product with no override must
+        # inherit the category's "morning" period and be OUTSIDE_WINDOW in the evening.
+        with patch("app.services.menu_service._current_menu_period", return_value="evening"):
+            result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.available is False
+        assert p.reason_code == "OUTSIDE_WINDOW"
+
 
 @asynccontextmanager
 async def _asession(session: AsyncMock) -> AsyncGenerator[AsyncMock, None]:
