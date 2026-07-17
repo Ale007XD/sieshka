@@ -30,7 +30,7 @@ async def apply_menu_import(
     session: AsyncSession,
     rows: list[dict[str, Any]],
     **kwargs: object,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Terminal tool: batch-upsert already-validated product rows.
 
     `rows` is a list of ProductRow.model_dump() dicts (name, category_id,
@@ -38,10 +38,15 @@ async def apply_menu_import(
     and category/name resolution already happened in parse_and_validate_csv,
     so this step only does the DB write.
 
-    Returns {"imported": N, "rows": M} where N is the count successfully
-    written and M is the number of rows handed to the tool.
+    Returns {"imported": N, "rows": M, "write_skipped": [...]} where N is the
+    count successfully written, M is the number of rows handed to the tool, and
+    write_skipped lists rows that were skipped *at write time* (e.g. an
+    ambiguous same-name collision the parser could not have known about) with a
+    human-readable reason. The caller merges these into the same skip report the
+    admin already sees for parse-time skips.
     """
     imported = 0
+    write_skipped: list[dict[str, str]] = []
     for row in rows:
         name = row["name"]
         category_id_raw = row.get("category_id")
@@ -68,8 +73,11 @@ async def apply_menu_import(
         matches = existing.fetchall()
         if len(matches) > 1:
             # Ambiguity should have been caught at parse time; defensively skip
-            # rather than guess which row to update.
+            # rather than guess which row to update, and surface it to the admin.
             logger.warning("apply_menu_import: ambiguous name '%s' — skipped", name)
+            write_skipped.append(
+                {"name": name, "reason": "ambiguous name match"}
+            )
             continue
 
         params: dict[str, Any] = {
@@ -108,4 +116,8 @@ async def apply_menu_import(
         imported += 1
 
     logger.info("apply_menu_import: imported %d/%d rows", imported, len(rows))
-    return {"imported": imported, "rows": len(rows)}
+    return {
+        "imported": imported,
+        "rows": len(rows),
+        "write_skipped": write_skipped,
+    }

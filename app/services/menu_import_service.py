@@ -183,6 +183,13 @@ def parse_and_validate_csv(
     valid_rows: list[ProductRow] = []
     skipped: list[SkippedRow] = []
 
+    # In-file de-duplication: tracks normalized names already accepted from
+    # THIS csv so a later same-named row is skipped instead of silently
+    # overwriting the earlier row's upsert (the row-by-row apply loop would
+    # otherwise let the last row in the file win). Built from valid_rows as
+    # they're accumulated.
+    in_file_counts: dict[str, int] = {}
+
     for offset, raw in enumerate(raw_rows[1:]):
         row_num = offset + 2  # 1-based; header is row 1
 
@@ -201,6 +208,14 @@ def parse_and_validate_csv(
         existing_count = name_counts.get(_normalize(name), 0)
         if existing_count > 1:
             _skip(f"ambiguous name match: {existing_count} rows", name)
+            continue
+
+        # Duplicate name within this very file — a later row with a name that
+        # already appeared earlier in the same upload must not silently clobber
+        # the earlier row (last-write-wins).
+        norm = _normalize(name)
+        if in_file_counts.get(norm, 0) > 0:
+            _skip("duplicate name within this file", name)
             continue
 
         # 2. Category resolution.
@@ -257,6 +272,7 @@ def parse_and_validate_csv(
                 is_active=is_active,
             )
         )
+        in_file_counts[norm] = in_file_counts.get(norm, 0) + 1
 
     return valid_rows, skipped
 
@@ -355,10 +371,19 @@ class MenuImportService:
             )
 
             imported = 0
+            write_skipped: list[SkippedRow] = []
             if trace.status == TraceStatus.SUCCESS:
                 last = trace.last_output()
                 if isinstance(last, dict):
                     imported = int(last.get("imported", 0))
+                    for ws in last.get("write_skipped", []) or []:
+                        write_skipped.append(
+                            SkippedRow(
+                                row_num=0,
+                                name_if_present=ws.get("name"),
+                                reason=ws.get("reason", "skipped at write time"),
+                            )
+                        )
                 await session.commit()
             else:
                 await session.rollback()
@@ -366,10 +391,11 @@ class MenuImportService:
                     "menu_import: program failed — %s", trace.error or "unknown"
                 )
 
+            # ONE unified skip list: parse-time skips + apply-time write skips.
             receipt = TraceAnalyzer._build_receipt(trace)
             return ImportReport(
                 imported=imported,
-                skipped=skipped,
+                skipped=skipped + write_skipped,
                 trace_hash=receipt.trace_hash,
                 final_status=receipt.final_status,
             )

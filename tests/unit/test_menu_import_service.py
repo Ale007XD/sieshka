@@ -116,6 +116,25 @@ def test_ambiguous_name_match_is_skipped() -> None:
     assert skipped[0].name_if_present == dup
 
 
+def test_within_file_duplicate_name_second_skipped() -> None:
+    # Two rows with normalized-equal names in the SAME file: only the first is
+    # imported, the second is skipped (not silently last-write-wins).
+    csv = (
+        "Name,Category,Description,Price Rub,Photo Url\n"
+        "Burger,Бургеры,,350,\n"
+        "  Burger ,Бургеры,,400,\n"  # whitespace-normalized equals the first
+    )
+    valid, skipped = parse_and_validate_csv(
+        csv.encode("utf-8"), categories=CATEGORIES, existing_products=EMPTY_PRODUCTS
+    )
+    assert len(valid) == 1
+    assert valid[0].name == "Burger"
+    assert valid[0].price_rub == 350
+    assert len(skipped) == 1
+    assert skipped[0].reason == "duplicate name within this file"
+    assert skipped[0].name_if_present == "Burger"
+
+
 # ---------------------------------------------------------------------------
 # Happy path / updates / blank price
 # ---------------------------------------------------------------------------

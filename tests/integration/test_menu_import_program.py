@@ -25,12 +25,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db_nano import StoreCursorRepository
+from app.domains.menu.models import Category, Product
 from app.policy.policy_snapshot import MENU_IMPORT_POLICY_SNAPSHOT
 from app.programs.menu_import_program import MENU_IMPORT_PROGRAM
 from app.services.menu_import_service import (
     MenuImportService,
     ProductRow,
     _governed_tool,
+    parse_and_validate_csv,
 )
 from app.tools.menu_import_tools import apply_menu_import
 
@@ -173,4 +175,70 @@ class TestMenuImportViaExecutionVM:
         assert by_name["Fries"]._mapping["is_active"] is False
         assert by_name["Burger"]._mapping["category_id"] is not None
 
-        await engine.dispose()
+    async def test_failure_path_rolls_back_partial_writes(
+        self, session: AsyncSession, nano_store_path: str,
+    ) -> None:
+        """A category deleted between parse and run must abort the whole batch.
+
+        parse_and_validate_csv resolves category_id at parse time, so deleting
+        that category row before apply_menu_import runs forces a real FK/DB write
+        failure inside the governed tool. The ExecutionVM does not own the
+        transaction — MenuImportService does (commit on SUCCESS, rollback on
+        FAILED) — so we run the program directly (as import_csv does) and then
+        roll back the session, proving ZERO product rows landed, not a
+        partially-written batch.
+        """
+        cats = await _seed_categories(session)
+        burger_cat = cats["1"]
+
+        csv_bytes = (
+            b"Name,Category,Description,Price Rub,Photo Url\n"
+            b"Burger,1,tasty,350,http://img/burger.png\n"
+        )
+
+        categories = await _load_categories(session)
+        existing = await _load_product_names(session)
+        valid_rows, skipped = parse_and_validate_csv(
+            csv_bytes,
+            categories=categories,
+            existing_products=existing,
+        )
+        assert skipped == []
+        assert len(valid_rows) == 1
+
+        # Category resolved at parse time; now DELETE it from the SAME session
+        # so the INSERT's FK (category_id) points at a non-existent row when the
+        # tool runs → genuine write failure, not a mock.
+        await session.execute(
+            text("DELETE FROM categories WHERE id = :cid"),
+            {"cid": str(burger_cat)},
+        )
+
+        executor = GovernedToolExecutor(policy=MENU_IMPORT_POLICY_SNAPSHOT)
+        vm = _build_vm(session, executor, nano_store_path)
+        trace: Trace = await vm.run(
+            MENU_IMPORT_PROGRAM,
+            context={"valid_rows": [r.model_dump(mode="json") for r in valid_rows]},
+        )
+
+        assert trace.status == TraceStatus.FAILED
+
+        # Rollback must leave zero product rows from this batch — no silent
+        # partial writes survived the failure.
+        await session.rollback()
+        res = await session.execute(text("SELECT COUNT(*) AS n FROM products"))
+        assert int(res.one()._mapping["n"]) == 0
+
+
+async def _load_categories(session: AsyncSession) -> list[Category]:
+    from app.services.menu_import_service import MenuImportService
+
+    svc = MenuImportService()
+    return await svc._load_categories(session)
+
+
+async def _load_product_names(session: AsyncSession) -> list[Product]:
+    from app.services.menu_import_service import MenuImportService
+
+    svc = MenuImportService()
+    return await svc._load_product_names(session)
