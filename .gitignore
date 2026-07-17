@@ -231,3 +231,12 @@ context/
 *.Zone.Identifier
 # Sieshka deploy backups (contain DB dumps)
 deploy/backups/
+
+# Local SQLite store leftovers / diagnostic logs
+*.db.locked_bak
+*_out.txt
+*_base.txt
+*_decoded.txt
+*_raw.txt
+*_all.txt
+mypy_*.txt
