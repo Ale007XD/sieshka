@@ -45,7 +45,17 @@ async def apply_menu_import(
     for row in rows:
         name = row["name"]
         category_id_raw = row.get("category_id")
-        category_id = UUID(category_id_raw) if category_id_raw else None
+        # Defensive: category_id_raw is normally a str (caller model_dump(mode=
+        # "json")'d it before putting it in Trace context), but tolerate an
+        # already-UUID instance too — UUID(<UUID instance>) raises (it wants a
+        # hex string/bytes, not another UUID), which silently broke every row
+        # with a non-null category through this exact path before 2026-07-15.
+        if isinstance(category_id_raw, UUID):
+            category_id: UUID | None = category_id_raw
+        elif category_id_raw:
+            category_id = UUID(category_id_raw)
+        else:
+            category_id = None
         price_rub = row.get("price_rub")
         description = row.get("description")
         image_url = row.get("image_url")

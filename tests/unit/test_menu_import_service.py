@@ -195,8 +195,8 @@ def test_import_report_model() -> None:
         imported=3,
         skipped=[SkippedRow(row_num=2, name_if_present="X", reason="missing name")],
         trace_hash="abc",
-        final_status="SUCCESS",
+        final_status="success",
     )
     assert report.imported == 3
     assert report.skipped[0].reason == "missing name"
-    assert report.final_status == "SUCCESS"
+    assert report.final_status == "success"

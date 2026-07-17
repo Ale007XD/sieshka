@@ -119,7 +119,7 @@ class TestMenuImportViaExecutionVM:
             vm = _build_vm(session, executor, nano_store_path)
             trace: Trace = await vm.run(
                 MENU_IMPORT_PROGRAM,
-                context={"valid_rows": [r.model_dump() for r in valid_rows]},
+                context={"valid_rows": [r.model_dump(mode="json") for r in valid_rows]},
             )
 
             assert trace.status == TraceStatus.SUCCESS
@@ -144,12 +144,12 @@ class TestMenuImportViaExecutionVM:
         await _seed_categories(session)
 
         csv_bytes = (
-            b"Name,Category,Description,Price Rub,Photo Url\n"
-            b"Burger,Burgers,tasty,350,http://img/burger.png\n"  # category by name
-            b"Water,21,,50,\n"  # category by external_id
-            b"Fries,,\n"  # blank category + blank price -> unassigned + inactive
-            b"Bad,NoSuchCat,,99,\n"  # unknown category -> skipped
-        )
+            "Name,Category,Description,Price Rub,Photo Url\n"
+            "Burger,Бургеры,tasty,350,http://img/burger.png\n"  # category by name
+            "Water,21,,50,\n"  # category by external_id
+            "Fries,,\n"  # blank category + blank price -> unassigned + inactive
+            "Bad,NoSuchCat,,99,\n"  # unknown category -> skipped
+        ).encode()
 
         engine = create_async_engine(postgres_dsn)
         sf = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -157,7 +157,7 @@ class TestMenuImportViaExecutionVM:
 
         report = await service.import_csv(csv_bytes)
 
-        assert report.final_status == "SUCCESS"
+        assert report.final_status == "success"
         # Burger, Water, Fries imported; Bad skipped (unknown category).
         assert report.imported == 3
         assert len(report.skipped) == 1

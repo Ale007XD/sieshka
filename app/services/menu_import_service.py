@@ -345,7 +345,13 @@ class MenuImportService:
 
             trace: Trace = await vm.run(
                 MENU_IMPORT_PROGRAM,
-                context={"valid_rows": [r.model_dump() for r in valid_rows]},
+                # BUGFIX (2026-07-15): mode="json" is required here — plain
+                # model_dump() leaves category_id as a uuid.UUID instance, and
+                # apply_menu_import's UUID(category_id_raw) call then raises
+                # (UUID() rejects a UUID instance, it wants a hex string/bytes).
+                # This broke every row with a non-null category_id, not just an
+                # edge case — Trace.status went FAILED on any real import.
+                context={"valid_rows": [r.model_dump(mode="json") for r in valid_rows]},
             )
 
             imported = 0
@@ -382,9 +388,18 @@ class MenuImportService:
     # ------------------------------------------------------------------
 
     async def _load_categories(self, session: AsyncSession) -> list[Category]:
+        # BUGFIX (2026-07-15): categories has parent_category_id UUID (self-FK,
+        # migrations/004_menu.sql), NOT a parent_name column. The Category model's
+        # parent_name field is a resolved display string for the flat admin
+        # dropdown — resolve it here via a self-join, don't query a column that
+        # was never created.
         result = await session.execute(
-            text("SELECT id, external_id, name, parent_name, menu_period, "
-                 "sort, is_active FROM categories")
+            text(
+                "SELECT c.id, c.external_id, c.name, p.name AS parent_name, "
+                "c.menu_period, c.sort, c.is_active "
+                "FROM categories c "
+                "LEFT JOIN categories p ON p.id = c.parent_category_id"
+            )
         )
         rows = result.fetchall()
         return [
