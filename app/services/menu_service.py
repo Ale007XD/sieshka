@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.db import async_session_factory
+from app.domains.delivery.zones import DeliveryZone
 from app.domains.menu.models import (
     DeliveryFeeResponse,
     MenuCategory,
@@ -141,3 +142,26 @@ class MenuService:
 
     async def get_delivery_fee(self) -> DeliveryFeeResponse:
         return DeliveryFeeResponse(delivery_fee=settings.DELIVERY_FEE)
+
+    async def get_delivery_zones(self) -> list[DeliveryZone]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, external_id, name, delivery_time_minutes, is_active "
+                    "FROM delivery_zones "
+                    "WHERE is_active = TRUE "
+                    "ORDER BY delivery_time_minutes"
+                )
+            )
+            rows = result.fetchall()
+
+        return [
+            DeliveryZone(
+                id=row._mapping["id"],
+                external_id=row._mapping["external_id"],
+                name=row._mapping["name"],
+                delivery_time_minutes=row._mapping["delivery_time_minutes"],
+                is_active=row._mapping["is_active"],
+            )
+            for row in rows
+        ]

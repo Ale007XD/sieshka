@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "Балахня",
+    "delivery_time_minutes": 15,
+    "is_active": true
+  },
+  {
+    "id": 2,
+    "name": "Город-Аэропорт-Дом Отдыха",
+    "delivery_time_minutes": 20,
+    "is_active": true
+  },
+  {
+    "id": 3,
+    "name": "Отдаленные районы",
+    "delivery_time_minutes": 30,
+    "is_active": true
+  }
+]
