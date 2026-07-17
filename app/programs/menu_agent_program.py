@@ -75,3 +75,58 @@ PROGRAM_COLLECT_ORDER = Program(
         ),
     ],
 )
+
+
+# ---------------------------------------------------------------------------
+# APPLY phase (sprint_m7_agent_apply_phase_pattern) — the reference implementation
+# of the shared "agent apply-phase CONVENTION" (see app/agents/README.md).
+#
+# Shape:
+#   validate_command [TOOL] → CONDITION(valid) →
+#     apply_command [TOOL, GovernedToolExecutor-wrapped, is_terminal]  (valid)
+#     report_invalid [TOOL, is_terminal]                               (invalid)
+#
+# There is NO LLM step here: the confirmed command already came out of the
+# COLLECT phase's terminal JSON. The apply phase turns that confirmed command
+# into the ONE governed write.
+#
+# The command dict is placed in the Program context by MenuAgent.apply_menu, so
+# both TOOL steps reference it via "$command" (a whole typed dict, NOT free text).
+# ---------------------------------------------------------------------------
+
+PROGRAM_APPLY_MENU = Program(
+    name="menu_agent_apply",
+    steps=[
+        Step(
+            id="validate_command",
+            type=StepType.TOOL,
+            tool="validate_apply_command",
+            args={"command": "$command"},
+            output_key="validation_result",
+            next_step="check_valid",
+        ),
+        Step(
+            id="check_valid",
+            type=StepType.CONDITION,
+            condition="$validate_command.output < 1",
+            then="report_invalid",
+            otherwise="apply_command",
+        ),
+        Step(
+            id="apply_command",
+            type=StepType.TOOL,
+            tool="apply_menu_command",
+            args={"command": "$command"},
+            output_key="apply_result",
+            is_terminal=True,
+        ),
+        Step(
+            id="report_invalid",
+            type=StepType.TOOL,
+            tool="report_invalid_command",
+            args={"reason": "$validate_command.output"},
+            output_key="invalid_result",
+            is_terminal=True,
+        ),
+    ],
+)

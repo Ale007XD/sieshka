@@ -63,6 +63,17 @@ MENU_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_collect_failure": ["menu:read"],
 }
 
+# Apply phase (sprint_m7_agent_apply_phase_pattern). Its own capability dict —
+# every apply_command tool needs its own entry because GovernedToolExecutor
+# denies-by-default; forgetting an entry fails closed (loud) at runtime. The
+# shared CONVENTION: sprint_m7_zone_agent / sprint_m7_schedule_agent each add
+# their OWN dict (ZONE_AGENT_APPLY_TOOL_CAPABILITIES etc.), not a one-off here.
+MENU_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_apply_command": ["menu:read"],
+    "apply_menu_command": ["menu:write"],
+    "report_invalid_command": ["menu:read"],
+}
+
 PROMOTION_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "validate_promotion_command": ["promotion:read"],
     "collect_promotion_command": ["promotion:write"],
@@ -81,6 +92,10 @@ ORDER_AGENT_POLICY_CONFIG: dict[str, object] = {
 
 MENU_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": MENU_AGENT_TOOL_CAPABILITIES,
+}
+
+MENU_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": MENU_AGENT_APPLY_TOOL_CAPABILITIES,
 }
 
 PROMOTION_AGENT_POLICY_CONFIG: dict[str, object] = {
@@ -118,6 +133,12 @@ DELIVERY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 MENU_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     MENU_AGENT_POLICY_CONFIG,
     policy_id="menu-agent-v1",
+    version="1.0.0",
+)
+
+MENU_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    MENU_AGENT_APPLY_POLICY_CONFIG,
+    policy_id="menu-agent-apply-v1",
     version="1.0.0",
 )
 
