@@ -1,0 +1,3 @@
+tests\unit\test_menu_domain.py:46: error: Unused "type: ignore" comment  [unused-ignore]
+scripts\seed_categories.py:24: error: Missing type parameters for generic type "dict"  [type-arg]
+scripts\seed_categories.py:27: error: Returning Any from function declared to return "list[dict[Any, Any]]"  [no-any-return]

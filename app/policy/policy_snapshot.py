@@ -133,3 +133,23 @@ SUPPORT_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     version="1.0.0",
 )
 
+# ---------------------------------------------------------------------------
+# Menu CSV import (sprint_m7_menu_csv_import) — governed write, no LLM step.
+# The single terminal tool (apply_menu_import) mutates product rows and must
+# carry the menu:write capability, identical discipline to every other write.
+# ---------------------------------------------------------------------------
+
+MENU_IMPORT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "apply_menu_import": ["menu:write"],
+}
+
+MENU_IMPORT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": MENU_IMPORT_TOOL_CAPABILITIES,
+}
+
+MENU_IMPORT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    MENU_IMPORT_POLICY_CONFIG,
+    policy_id="menu-import-v1",
+    version="1.0.0",
+)
+
