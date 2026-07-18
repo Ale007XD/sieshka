@@ -8,12 +8,14 @@ from fastapi.responses import HTMLResponse
 from nano_vm_mcp.store import ProgramStore
 
 from app.agents.schedule_agent import ScheduleAgent
+from app.agents.zone_agent import ZoneAgent
 from app.db_nano import get_store as get_nano_store
 from app.domains.orders.models import OrderRead, OrderState
 from app.services.menu_import_service import ImportReport, MenuImportService
 from app.services.order_service import OrderService
 from app.services.schedule_service import ScheduleService
 from app.services.trace_analyzer import ExecutionReceipt, TraceAnalyzer
+from app.services.zone_service import ZoneService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -165,3 +167,79 @@ async def schedule_apply(
         "receipt": receipt.model_dump() if receipt is not None else None,
         "windows": windows,
     }
+
+
+def get_zone_service() -> ZoneService:
+    return ZoneService()
+
+
+@router.get("/ui/zones", response_class=HTMLResponse)
+async def zones_admin_ui(
+    request: Request,
+    service: ZoneService = Depends(get_zone_service),
+) -> HTMLResponse:
+    """Render the zone admin page: free-text instruction box + zone reference.
+
+    A single chat-style instruction input (NOT a structured create/edit form)
+    that runs through ZoneAgent end-to-end, plus a read-only table of ALL zones
+    (active + retired) for reference.
+    """
+    zones = await service.list_all()
+    return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "zones_admin.html",
+        {
+            "zones": zones,
+            "form_action": "/admin/zones/apply",
+        },
+    )
+
+
+@router.post("/zones/apply")
+async def zone_apply(
+    payload: dict[str, Any],
+    request: Request,
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Run a free-text zone instruction through the ZoneAgent end-to-end.
+
+    Collect phase (LLM parse) -> apply phase (governed write). Returns the
+    confirmed command, the ExecutionReceipt, and the current zone reference list.
+    """
+    instruction = payload.get("instruction", "")
+    agent = ZoneAgent()
+    collect = await agent.collect_zone({"input_text": instruction})
+    if not collect.success or collect.command is None:
+        zones = await ZoneService().list_all()
+        return {
+            "ok": False,
+            "error": collect.error or "unparseable instruction",
+            "command": None,
+            "receipt": None,
+            "zones": _zone_view(zones),
+        }
+
+    apply = await agent.apply_zone(collect.command)
+    zones = await ZoneService().list_all()
+    receipt = None
+    if apply.trace_id is not None:
+        receipt = await analyzer.receipt(apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "command": collect.command,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "zones": _zone_view(zones),
+    }
+
+
+def _zone_view(zones: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": str(z.id),
+            "name": z.name,
+            "delivery_time_minutes": z.delivery_time_minutes,
+            "is_active": z.is_active,
+        }
+        for z in zones
+    ]

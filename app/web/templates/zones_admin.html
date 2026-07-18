@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold text-gray-900 mb-6">Delivery zones — natural-language control</h1>
+
+<!-- Instruction box + submit (chat-style, NOT a structured form) -->
+<div class="bg-white rounded-lg shadow p-6 mb-6" x-data="zoneForm()">
+  <h2 class="text-lg font-medium text-gray-900 mb-3">Instruction</h2>
+  <p class="text-sm text-gray-500 mb-4">
+    Examples: <code>Добавь зону Балахня, 15 минут</code>,
+    <code>деактивируй зону Отдалённые районы</code>,
+    <code>переименуй зону Город в Город-Центр</code>.
+    "deactivate"/"delete" retire a zone softly (it stays resolvable for past
+    orders but is no longer offered to new customers).
+  </p>
+  <textarea x-model="instruction" rows="3" required
+            class="block w-full border border-gray-300 rounded-md shadow-sm
+                   focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm p-2"
+            placeholder="e.g. Добавь зону Балахня, 15 минут"></textarea>
+  <button @click="submit()" :disabled="busy"
+          class="mt-3 inline-flex items-center px-4 py-2 border border-transparent
+                 text-sm font-medium rounded-md text-white bg-indigo-600
+                 hover:bg-indigo-700 disabled:opacity-50">
+    <span x-show="!busy">Apply</span>
+    <span x-show="busy">Working…</span>
+  </button>
+
+  <!-- Result: confirmed command + receipt -->
+  <div x-show="result" class="mt-4">
+    <template x-if="result && result.command">
+      <div class="rounded-md bg-gray-50 p-4 text-sm">
+        <div class="font-medium text-gray-900 mb-1">Confirmed command</div>
+        <pre class="text-xs text-gray-700 overflow-x-auto" x-text="JSON.stringify(result.command, null, 2)"></pre>
+      </div>
+    </template>
+    <template x-if="result && !result.ok && result.error">
+      <p class="mt-2 text-sm text-red-600" x-text="'Rejected: ' + result.error"></p>
+    </template>
+    <template x-if="result && result.receipt">
+      <div class="mt-3 rounded-md bg-gray-50 p-4 text-sm">
+        <div class="font-medium text-gray-900 mb-1">Execution receipt</div>
+        <div class="text-xs text-gray-700">
+          status: <span class="font-mono" x-text="result.receipt.final_status"></span><br>
+          trace: <span class="font-mono break-all" x-text="result.receipt.trace_id"></span><br>
+          steps: <span class="font-mono" x-text="result.receipt.health.total_steps"></span>
+          / success: <span class="font-mono" x-text="result.receipt.health.successful_steps"></span>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- Reference table: ALL zones (active + retired) -->
+<div class="bg-white rounded-lg shadow overflow-hidden">
+  <div class="px-6 py-4 border-b border-gray-200">
+    <h2 class="text-lg font-medium text-gray-900">Current zones</h2>
+    <p class="text-xs text-gray-500 mt-1">
+      Retired (deactivated) zones remain listed and resolvable for past orders,
+      but are excluded from the public offer set.
+    </p>
+  </div>
+  <table class="min-w-full divide-y divide-gray-200">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">ETA (min)</th>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200">
+      {% for z in zones %}
+      <tr>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ z.name }}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">{{ z.delivery_time_minutes }}</td>
+        <td class="px-6 py-4 whitespace-nowrap text-sm">
+          {% if z.is_active %}<span class="text-green-600">yes</span>{% else %}<span class="text-gray-400">no (retired)</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="3" class="px-6 py-12 text-center text-sm text-gray-400">No zones found.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function zoneForm() {
+  return {
+    instruction: '',
+    busy: false,
+    result: null,
+    async submit() {
+      if (!this.instruction.trim()) return;
+      this.busy = true;
+      this.result = null;
+      try {
+        const resp = await fetch("{{ form_action }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction: this.instruction }),
+        });
+        this.result = await resp.json();
+      } catch (e) {
+        this.result = { ok: false, error: String(e), command: null, receipt: null };
+      } finally {
+        this.busy = false;
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

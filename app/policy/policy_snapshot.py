@@ -89,6 +89,23 @@ SCHEDULE_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_invalid_schedule_command": ["schedule:read"],
 }
 
+# sprint_m7_zone_agent — its OWN capability dicts, per the apply-phase CONVENTION
+# (every agent adds its own collect + apply dicts; GovernedToolExecutor
+# denies-by-default, so a missing entry fails closed at runtime). zone_agent
+# lives under the "delivery:" capability family, matching DeliveryZone's
+# app/domains/delivery namespace.
+ZONE_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_zone_command": ["delivery:read"],
+    "collect_zone_command": ["delivery:write"],
+    "report_collect_failure": ["delivery:read"],
+}
+
+ZONE_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_apply_zone_command": ["delivery:read"],
+    "apply_zone_command": ["delivery:write"],
+    "report_invalid_zone_command": ["delivery:read"],
+}
+
 PROMOTION_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "validate_promotion_command": ["promotion:read"],
     "collect_promotion_command": ["promotion:write"],
@@ -174,6 +191,26 @@ SCHEDULE_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 SCHEDULE_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     SCHEDULE_AGENT_APPLY_POLICY_CONFIG,
     policy_id="schedule-agent-apply-v1",
+    version="1.0.0",
+)
+
+ZONE_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": ZONE_AGENT_TOOL_CAPABILITIES,
+}
+
+ZONE_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": ZONE_AGENT_APPLY_TOOL_CAPABILITIES,
+}
+
+ZONE_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    ZONE_AGENT_POLICY_CONFIG,
+    policy_id="zone-agent-v1",
+    version="1.0.0",
+)
+
+ZONE_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    ZONE_AGENT_APPLY_POLICY_CONFIG,
+    policy_id="zone-agent-apply-v1",
     version="1.0.0",
 )
 
