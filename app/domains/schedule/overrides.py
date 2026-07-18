@@ -14,7 +14,7 @@ MENU_TIMEZONE) and stored as TIME WITHOUT TIME ZONE.
 """
 from __future__ import annotations
 
-from datetime import time
+from datetime import date, time
 from typing import Literal
 from uuid import UUID
 
@@ -29,3 +29,9 @@ class ScheduleWindow(BaseModel):
     start_time: time
     end_time: time
     is_active: bool = True
+    # NULL = permanent default row (exactly one per period). A date = a
+    # one-day-only override (exactly one per (period, date)) that expires by
+    # construction on read — get_menu_window_context() only reads the row for
+    # CURRENT_DATE (or the permanent NULL row), so yesterday's override is
+    # never selected. See migrations/008_schedule_windows_effective_date.sql.
+    effective_date: date | None = None

@@ -115,8 +115,12 @@ class ScheduleService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, period, start_time, end_time, is_active "
-                    "FROM schedule_windows"
+                    "SELECT id, period, start_time, end_time, is_active, "
+                    "effective_date "
+                    "FROM schedule_windows "
+                    "WHERE period IN ('morning', 'evening') "
+                    "AND (effective_date = CURRENT_DATE OR effective_date IS NULL) "
+                    "ORDER BY period, effective_date NULLS LAST"
                 )
             )
             rows = result.fetchall()
@@ -126,11 +130,63 @@ class ScheduleService:
             period = row._mapping["period"]
             if period not in ("morning", "evening"):
                 continue
+            # effective_date NULLS LAST orders a day-override (non-null) ahead
+            # of the permanent (null) row for the same period, so the first
+            # row per period is the one currently in effect. A yesterday
+            # override is never returned because the WHERE clause excludes it.
+            if period in windows:
+                continue
             windows[period] = ScheduleWindow(
                 id=row._mapping["id"],
                 period=period,
                 start_time=row._mapping["start_time"],
                 end_time=row._mapping["end_time"],
                 is_active=row._mapping["is_active"],
+                effective_date=row._mapping["effective_date"],
             )
         return windows
+
+    async def get_admin_windows(
+        self,
+    ) -> dict[str, dict[str, Any]]:
+        """Return, per period, BOTH the permanent default and today's override.
+
+        An admin must see whether a today-override is silently in effect, not
+        just the permanent default — otherwise they'd be misled about what
+        customers are currently seeing. Keys: "morning"/"evening" →
+        {"permanent": ScheduleWindow | None, "today_override": ScheduleWindow | None}.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, period, start_time, end_time, is_active, "
+                    "effective_date "
+                    "FROM schedule_windows "
+                    "WHERE period IN ('morning', 'evening') "
+                    "AND (effective_date = CURRENT_DATE OR effective_date IS NULL) "
+                    "ORDER BY period, effective_date NULLS LAST"
+                )
+            )
+            rows = result.fetchall()
+
+        out: dict[str, dict[str, Any]] = {
+            "morning": {"permanent": None, "today_override": None},
+            "evening": {"permanent": None, "today_override": None},
+        }
+        for row in rows:
+            period = row._mapping["period"]
+            if period not in out:
+                continue
+            win = ScheduleWindow(
+                id=row._mapping["id"],
+                period=period,
+                start_time=row._mapping["start_time"],
+                end_time=row._mapping["end_time"],
+                is_active=row._mapping["is_active"],
+                effective_date=row._mapping["effective_date"],
+            )
+            if row._mapping["effective_date"] is None:
+                out[period]["permanent"] = win
+            else:
+                out[period]["today_override"] = win
+        return out

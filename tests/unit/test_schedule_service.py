@@ -19,6 +19,7 @@ def _window_row(
     start: time,
     end: time,
     is_active: bool = True,
+    effective_date: Any = None,
 ) -> MagicMock:
     row = MagicMock()
     row._mapping = {
@@ -27,6 +28,7 @@ def _window_row(
         "start_time": start,
         "end_time": end,
         "is_active": is_active,
+        "effective_date": effective_date,
     }
     return row
 
@@ -185,3 +187,77 @@ def _fixed_datetime(fixed: datetime) -> Any:
             return fixed
 
     return types.SimpleNamespace(datetime=_FixedDateTime)
+
+
+class TestLoadWindowsEffectiveDate:
+    """Read-branch coverage for the effective_date introduction (008).
+
+    These exercise the WHERE/ORDER logic that prefers a today-override over the
+    permanent default, and that a stale (yesterday) override is never picked up.
+    """
+
+    async def test_today_override_preferred_over_permanent(self) -> None:
+        from datetime import date
+
+        svc = _make_service(
+            [
+                # Mirrors the SQL "ORDER BY effective_date NULLS LAST": the
+                # non-null (today) row sorts BEFORE the permanent (NULL) row.
+                _window_row(
+                    "morning", time(8, 0), time(12, 0),
+                    effective_date=date(2099, 1, 1),
+                ),  # today override (fixed "now" is 2099-01-01)
+                _window_row("morning", time(0, 0), time(16, 0)),  # permanent
+            ]
+        )
+        now = datetime(2099, 1, 1, 10, 0, tzinfo=_menu_timezone())
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("app.services.schedule_service.datetime", _fixed_datetime(now))
+            windows = await svc._load_windows()
+
+        assert windows["morning"].start_time == time(8, 0)
+        assert windows["morning"].end_time == time(12, 0)
+
+    async def test_yesterday_override_falls_through_to_permanent(self) -> None:
+        from datetime import date
+
+        svc = _make_service(
+            [
+                _window_row("morning", time(0, 0), time(16, 0)),  # permanent
+                _window_row(
+                    "morning", time(8, 0), time(12, 0),
+                    effective_date=date(2099, 1, 1),
+                ),  # yesterday override (fixed "now" is 2099-01-02)
+            ]
+        )
+        now = datetime(2099, 1, 2, 10, 0, tzinfo=_menu_timezone())
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("app.services.schedule_service.datetime", _fixed_datetime(now))
+            windows = await svc._load_windows()
+
+        # The stale override must be ignored; the permanent row is in effect.
+        assert windows["morning"].start_time == time(0, 0)
+        assert windows["morning"].end_time == time(16, 0)
+
+    async def test_get_admin_windows_shows_both_slices(self) -> None:
+        from datetime import date
+
+        svc = _make_service(
+            [
+                _window_row("morning", time(0, 0), time(16, 0)),
+                _window_row("evening", time(16, 0), time(23, 59, 59)),
+                _window_row(
+                    "morning", time(8, 0), time(12, 0),
+                    effective_date=date(2099, 1, 1),
+                ),
+            ]
+        )
+        now = datetime(2099, 1, 1, 10, 0, tzinfo=_menu_timezone())
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("app.services.schedule_service.datetime", _fixed_datetime(now))
+            out = await svc.get_admin_windows()
+
+        assert out["morning"]["permanent"] is not None
+        assert out["morning"]["today_override"] is not None
+        assert out["evening"]["permanent"] is not None
+        assert out["evening"]["today_override"] is None

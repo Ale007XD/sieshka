@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import HTMLResponse
 from nano_vm_mcp.store import ProgramStore
 
+from app.agents.schedule_agent import ScheduleAgent
 from app.db_nano import get_store as get_nano_store
 from app.domains.orders.models import OrderRead, OrderState
 from app.services.menu_import_service import ImportReport, MenuImportService
 from app.services.order_service import OrderService
+from app.services.schedule_service import ScheduleService
 from app.services.trace_analyzer import ExecutionReceipt, TraceAnalyzer
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -98,3 +100,68 @@ async def menu_admin_ui(
             "form_action": "/admin/menu/import-csv",
         },
     )
+
+
+def get_schedule_service() -> ScheduleService:
+    return ScheduleService()
+
+
+@router.get("/ui/schedule", response_class=HTMLResponse)
+async def schedule_admin_ui(
+    request: Request,
+    service: ScheduleService = Depends(get_schedule_service),
+) -> HTMLResponse:
+    """Render the schedule admin page: free-text instruction box + window display.
+
+    Shows BOTH the permanent default AND today's override if one is active for
+    either period — an admin looking at a permanent-only view while a
+    today-override is silently in effect would be misled about what customers
+    currently see.
+    """
+    windows = await service.get_admin_windows()
+    return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "schedule_admin.html",
+        {
+            "windows": windows,
+            "form_action": "/admin/schedule/apply",
+        },
+    )
+
+
+@router.post("/schedule/apply")
+async def schedule_apply(
+    payload: dict[str, Any],
+    request: Request,
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Run a free-text schedule instruction through the ScheduleAgent end-to-end.
+
+    Collect phase (LLM parse) → apply phase (governed write). Returns the
+    confirmed command, the ExecutionReceipt, and the current window display.
+    """
+    instruction = payload.get("instruction", "")
+    agent = ScheduleAgent()
+    collect = await agent.collect_schedule({"input_text": instruction})
+    if not collect.success or collect.command is None:
+        windows = await ScheduleService().get_admin_windows()
+        return {
+            "ok": False,
+            "error": collect.error or "unparseable instruction",
+            "command": None,
+            "receipt": None,
+            "windows": windows,
+        }
+
+    apply = await agent.apply_schedule(collect.command)
+    windows = await ScheduleService().get_admin_windows()
+    receipt = None
+    if apply.trace_id is not None:
+        receipt = await analyzer.receipt(apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "command": collect.command,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "windows": windows,
+    }

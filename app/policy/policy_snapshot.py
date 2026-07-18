@@ -74,6 +74,21 @@ MENU_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_invalid_command": ["menu:read"],
 }
 
+# schedule_m7_schedule_agent — its OWN capability dict, per the apply-phase
+# CONVENTION (every apply_command needs its own entry; GovernedToolExecutor
+# denies-by-default, so a missing entry fails closed at runtime).
+SCHEDULE_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_schedule_command": ["schedule:read"],
+    "collect_schedule_command": ["schedule:write"],
+    "report_collect_failure": ["schedule:read"],
+}
+
+SCHEDULE_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_apply_schedule_command": ["schedule:read"],
+    "apply_schedule_command": ["schedule:write"],
+    "report_invalid_schedule_command": ["schedule:read"],
+}
+
 PROMOTION_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "validate_promotion_command": ["promotion:read"],
     "collect_promotion_command": ["promotion:write"],
@@ -96,6 +111,14 @@ MENU_AGENT_POLICY_CONFIG: dict[str, object] = {
 
 MENU_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": MENU_AGENT_APPLY_TOOL_CAPABILITIES,
+}
+
+SCHEDULE_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": SCHEDULE_AGENT_TOOL_CAPABILITIES,
+}
+
+SCHEDULE_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": SCHEDULE_AGENT_APPLY_TOOL_CAPABILITIES,
 }
 
 PROMOTION_AGENT_POLICY_CONFIG: dict[str, object] = {
@@ -139,6 +162,18 @@ MENU_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 MENU_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     MENU_AGENT_APPLY_POLICY_CONFIG,
     policy_id="menu-agent-apply-v1",
+    version="1.0.0",
+)
+
+SCHEDULE_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    SCHEDULE_AGENT_POLICY_CONFIG,
+    policy_id="schedule-agent-v1",
+    version="1.0.0",
+)
+
+SCHEDULE_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    SCHEDULE_AGENT_APPLY_POLICY_CONFIG,
+    policy_id="schedule-agent-apply-v1",
     version="1.0.0",
 )
 
