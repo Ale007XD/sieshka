@@ -22,6 +22,7 @@ class PaymentRequest(BaseModel):
 
 class PaymentInitResponse(BaseModel):
     confirmation_url: str
+    confirmation_token: str | None = None
     payment_id: str
     trace_id: str
 
@@ -72,4 +73,9 @@ async def pay_order(
         currency=body.currency,
         return_url=body.return_url,
     )
-    return PaymentInitResponse(**result)
+    return PaymentInitResponse(
+        confirmation_url=result["confirmation_url"],
+        confirmation_token=result.get("confirmation_token") or None,
+        payment_id=result["payment_id"],
+        trace_id=result["trace_id"],
+    )

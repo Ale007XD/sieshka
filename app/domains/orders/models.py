@@ -87,6 +87,53 @@ class OrderRead(BaseModel):
     id: UUID
     customer_id: UUID
     state: OrderState
-    items: list[dict[str, object]]
+    items: list[OrderItem]
     delivery_address: str
     trace_id: str | None = None  # M3: wired to nano-vm trace
+
+
+class OrderItem(BaseModel):
+    """Typed, immutable snapshot of a line item as it was at order-creation time.
+
+    Per sprint_m7_checkout_wiring: price/name are resolved ONCE from the live
+    Product row via menu_service and persisted verbatim. They are NEVER
+    re-joined to the mutable Product row when an existing order is later
+    re-rendered (Receipt page, admin board) — a later CSV re-import that
+    changes a product's price must not silently change how an ALREADY-PLACED
+    order's total appears.
+    """
+
+    product_id: UUID
+    name: str
+    price_rub: int
+    qty: int
+
+
+class CheckoutItem(BaseModel):
+    """Single item as sent by the real cart.js (product_id + qty only)."""
+
+    product_id: UUID
+    qty: int = Field(gt=0)
+
+
+class CheckoutRequest(BaseModel):
+    """sprint_m7_checkout_wiring — the REAL cart.js contract (POST /api/orders).
+
+    Field set confirmed from cart.js::setupCheckoutForm(), NOT the earlier
+    draft's guessed field set. `idempotency_key` is client-generated
+    (crypto.randomUUID()) and wired into the existing IdempotencyService —
+    the server does NOT invent one.
+    """
+
+    name: str
+    phone: str
+    address: str | None = None  # null when delivery_mode == "pickup"
+    comment: str | None = None
+    delivery_mode: str  # "delivery" | "pickup" (others folded into delivery)
+    delivery_slot: str | None = None
+    delivery_date: str | None = None
+    payment_method: str  # "yookassa_card" | "cash"
+    zone_id: int | None = None  # required + validated client-side when not pickup
+    items: list[CheckoutItem]
+    idempotency_key: str
+    client_max_uid: int | None = None  # MAX mini-app user id; persisted only

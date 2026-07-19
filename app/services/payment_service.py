@@ -24,9 +24,17 @@ logger = logging.getLogger(__name__)
 
 
 class PaymentInitResult(TypedDict):
-    """Typed result of PaymentService.create_payment (YooKassa redirect payload)."""
+    """Typed result of PaymentService.create_payment (YooKassa payload).
+
+    sprint_m7_checkout_wiring: embedded widget mode. The real cart.js renders
+    the YooMoneyCheckoutWidget from ``confirmation_token`` in-page — it never
+    uses ``confirmation_url``. ``confirmation_url`` is retained (empty string
+    in embedded mode) only so legacy callers/tests importing the key don't
+    break; the checkout endpoint reads ``confirmation_token`` exclusively.
+    """
 
     confirmation_url: str
+    confirmation_token: str
     payment_id: str
     trace_id: str
 
@@ -56,7 +64,7 @@ class YooKassaClient:
     ) -> dict[str, object]:
         payload = {
             "amount": {"value": f"{amount:.2f}", "currency": currency},
-            "confirmation": {"type": "redirect", "return_url": return_url},
+            "confirmation": {"type": "embedded"},
             "description": description,
             "metadata": metadata,
         }
@@ -184,8 +192,10 @@ class PaymentService:
         provider_id = str(raw_data["id"])
         confirmation_obj = raw_data.get("confirmation", {})
         confirmation_url = ""
+        confirmation_token = ""
         if isinstance(confirmation_obj, dict):
             confirmation_url = str(confirmation_obj.get("confirmation_url", ""))
+            confirmation_token = str(confirmation_obj.get("confirmation_token", ""))
 
         async with self._session_factory() as session:
             repo = PaymentRepository(session)
@@ -213,6 +223,7 @@ class PaymentService:
 
         return {
             "confirmation_url": confirmation_url,
+            "confirmation_token": confirmation_token,
             "payment_id": provider_id,
             "trace_id": trace_id,
         }

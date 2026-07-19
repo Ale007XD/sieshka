@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes.admin import router as admin_router
+from app.api.routes.checkout import router as checkout_router
 from app.api.routes.delivery import router as delivery_router
 from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.menu import router as menu_router
@@ -44,6 +45,7 @@ templates_dir = Path(__file__).resolve().parent / "web" / "templates"
 app.state.templates = Jinja2Templates(directory=str(templates_dir))
 
 app.include_router(orders_router)
+app.include_router(checkout_router)
 app.include_router(admin_router, dependencies=[Depends(get_current_username)])
 app.include_router(kitchen_router)
 app.include_router(delivery_router)

@@ -143,6 +143,33 @@ class MenuService:
     async def get_delivery_fee(self) -> DeliveryFeeResponse:
         return DeliveryFeeResponse(delivery_fee=settings.DELIVERY_FEE)
 
+    async def get_product_snapshot(self, product_id: UUID) -> MenuProductItem | None:
+        """Read a single product's current name + price once, for order-time snapshotting.
+
+        The returned values are frozen into the order's items and are NEVER
+        re-joined to this row when the order is later re-rendered — a later
+        CSV re-import that changes a price must not alter an already-placed
+        order's displayed total.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, name, price_rub FROM products WHERE id = :id"
+                ),
+                {"id": product_id},
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            return MenuProductItem(
+                product_id=row._mapping["id"],
+                name=row._mapping["name"],
+                price_rub=row._mapping["price_rub"],
+                available=True,
+                cta_type="add_to_cart",
+                reason_code=None,
+            )
+
     async def get_delivery_zones(self) -> list[DeliveryZone]:
         async with self._session_factory() as session:
             result = await session.execute(

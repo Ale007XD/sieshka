@@ -65,7 +65,10 @@ class TestOrderService:
         assert isinstance(result.id, uuid4().__class__)
         assert result.customer_id == customer_id
         assert result.state == OrderState.DRAFT
-        assert result.items == body.items
+        # sprint_m7_checkout_wiring: items are coerced into typed OrderItem rows.
+        assert len(result.items) == 1
+        assert result.items[0].name == "coffee"
+        assert result.items[0].qty == 2
 
     async def test_transition_order_success(self) -> None:
         """Uses real VM with real tools and mock session — session DI verified end-to-end."""

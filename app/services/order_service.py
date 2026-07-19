@@ -5,6 +5,7 @@ import json
 import logging
 from collections.abc import Callable
 from typing import Any, Protocol
+from uuid import UUID, uuid4
 
 from nano_vm.models import Program, Trace, TraceStatus
 from nano_vm.validator import ProgramValidator
@@ -13,12 +14,16 @@ from opentelemetry import trace as otel_trace
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import settings
 from app.db import async_session_factory
 from app.db_nano import StoreCursorRepository, get_store
 from app.domains.orders.models import (
     ORDER_TRANSITIONS,
+    CheckoutItem,
+    CheckoutRequest,
     OrderCreate,
     OrderEvent,
+    OrderItem,
     OrderRead,
     OrderState,
 )
@@ -30,6 +35,7 @@ from app.programs.order_programs import (
 )
 from app.repositories.kitchen_repo import KitchenRepository
 from app.repositories.order_repo import OrderRepository
+from app.services.menu_service import MenuService
 from app.tools.order_tools import (
     create_kitchen_ticket,
     log_validation_failure,
@@ -118,7 +124,62 @@ class OrderService:
                 id=row._mapping["id"],
                 customer_id=row._mapping["customer_id"],
                 state=OrderState(row._mapping["state"]),
-                items=items_val if isinstance(items_val, list) else json.loads(items_val),
+                items=_coerce_items(
+                    items_val if isinstance(items_val, list) else json.loads(items_val)
+                ),
+                delivery_address=row._mapping["delivery_address"],
+                trace_id=row._mapping.get("trace_id"),
+            )
+
+    async def create_order_from_checkout(
+        self,
+        data: CheckoutRequest,
+        customer_id: UUID,
+        items: list[OrderItem],
+        total_rub: int,
+    ) -> OrderRead:
+        """Persist a checkout-built order with a typed, price-snapshotted item list.
+
+        The caller (checkout route) is responsible for resolving prices via
+        menu_service and computing the server-authoritative total; this method
+        only persists what it is given. Never trusts a client-supplied total.
+        """
+        delivery_address = data.address or ""
+        items_payload = json.dumps([item.model_dump() for item in items])
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "INSERT INTO orders "
+                    "(customer_id, items, delivery_address, state, delivery_mode, "
+                    " zone_id, comment, client_max_uid, total_rub, payment_method) "
+                    "VALUES (:customer_id, :items, :delivery_address, :state, "
+                    " :delivery_mode, :zone_id, :comment, :client_max_uid, "
+                    " :total_rub, :payment_method) "
+                    "RETURNING id, customer_id, state, items, delivery_address, trace_id"
+                ),
+                {
+                    "customer_id": customer_id,
+                    "items": items_payload,
+                    "delivery_address": delivery_address,
+                    "state": OrderState.DRAFT.value,
+                    "delivery_mode": data.delivery_mode,
+                    "zone_id": data.zone_id,
+                    "comment": data.comment,
+                    "client_max_uid": data.client_max_uid,
+                    "total_rub": total_rub,
+                    "payment_method": data.payment_method,
+                },
+            )
+            await session.commit()
+            row = result.one()
+            items_val = row._mapping["items"]
+            return OrderRead(
+                id=row._mapping["id"],
+                customer_id=row._mapping["customer_id"],
+                state=OrderState(row._mapping["state"]),
+                items=_coerce_items(
+                    items_val if isinstance(items_val, list) else json.loads(items_val)
+                ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
             )
@@ -257,7 +318,9 @@ class OrderService:
                 id=row._mapping["id"],
                 customer_id=row._mapping["customer_id"],
                 state=OrderState(row._mapping["state"]),
-                items=items_val if isinstance(items_val, list) else json.loads(items_val),
+                items=_coerce_items(
+                    items_val if isinstance(items_val, list) else json.loads(items_val)
+                ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
             )
@@ -352,9 +415,11 @@ async def fetch_orders(
                 id=row._mapping["id"],
                 customer_id=row._mapping["customer_id"],
                 state=OrderState(row._mapping["state"]),
-                items=row._mapping["items"]
-                if isinstance(row._mapping["items"], list)
-                else json.loads(row._mapping["items"]),
+                items=_coerce_items(
+                    row._mapping["items"]
+                    if isinstance(row._mapping["items"], list)
+                    else json.loads(row._mapping["items"])
+                ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
             )
@@ -418,3 +483,76 @@ _ORDER_TOOLS: dict[str, Callable[..., Any]] = {
     "notify_inventory_insufficient": notify_inventory_insufficient,
     "transition_order_state": transition_order_state,
 }
+
+
+def _coerce_items(raw_items: list[object]) -> list[OrderItem]:
+    """Coerce a raw JSONB ``items`` column into typed ``OrderItem`` records.
+
+    New checkout orders persist fully-snapshotted OrderItems. Legacy rows
+    (and agent-created orders) may carry arbitrary dicts — those are wrapped
+    so OrderRead never receives an untyped ``list[dict]`` and downstream
+    receipt/admin rendering stays attribute-based under mypy --strict.
+    """
+    coerced: list[OrderItem] = []
+    for raw in raw_items:
+        if isinstance(raw, OrderItem):
+            coerced.append(raw)
+            continue
+        if isinstance(raw, dict):
+            try:
+                coerced.append(OrderItem.model_validate(raw))
+                continue
+            except Exception:
+                pass
+            coerced.append(
+                OrderItem(
+                    product_id=uuid4(),
+                    name=str(raw.get("sku", raw.get("product_id", "unknown"))),
+                    price_rub=int(raw.get("price_rub", 0)),
+                    qty=int(raw.get("qty", 1)),
+                )
+            )
+            continue
+        coerced.append(OrderItem(product_id=uuid4(), name="unknown", price_rub=0, qty=1))
+    return coerced
+
+
+def compute_checkout_total(items: list[OrderItem], delivery_mode: str) -> int:
+    """Server-authoritative total in RUB.
+
+    Sum(product.price_rub * qty) + flat DELIVERY_FEE (from settings, identical
+    to GET /api/config/delivery-fee) when delivery_mode != "pickup", else 0.
+
+    "model output is not execution authority" applied to money — a client
+    total is never accepted; this is the only number that counts.
+    """
+    goods = sum(item.price_rub * item.qty for item in items)
+    if delivery_mode == "pickup":
+        return goods
+    return goods + settings.DELIVERY_FEE
+
+
+async def resolve_checkout_items(
+    checkout_items: list[CheckoutItem],
+    menu_service: MenuService | None = None,
+) -> list[OrderItem]:
+    """Resolve checkout items into price-snapshotted ``OrderItem`` records.
+
+    Prices/names are read ONCE from the live menu and frozen here. They are
+    never re-joined to the mutable Product row when the order is later shown.
+    """
+    menu = menu_service or MenuService()
+    resolved: list[OrderItem] = []
+    for ci in checkout_items:
+        snapshot = await menu.get_product_snapshot(ci.product_id)
+        if snapshot is None or snapshot.price_rub is None:
+            raise ValueError(f"product {ci.product_id} not found or has no price")
+        resolved.append(
+            OrderItem(
+                product_id=snapshot.product_id,
+                name=snapshot.name,
+                price_rub=snapshot.price_rub,
+                qty=ci.qty,
+            )
+        )
+    return resolved

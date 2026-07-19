@@ -51,3 +51,31 @@ class IdempotencyService:
             inserted = result.scalar_one_or_none() is not None
             await session.commit()
             return inserted
+
+    async def get_payload(self, key: str) -> dict[str, object] | None:
+        """Return the stored payload for *key*, or ``None`` if absent."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text("SELECT payload FROM idempotency_keys WHERE key = :key"),
+                {"key": key},
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            payload = row._mapping["payload"]
+            if isinstance(payload, dict):
+                return payload
+            return json.loads(payload) if payload else None
+
+    async def update_payload(self, key: str, payload: dict[str, object]) -> None:
+        """Upsert *payload* for an existing *key* (e.g. after order creation)."""
+        async with self._session_factory() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO idempotency_keys (key, payload) "
+                    "VALUES (:key, CAST(:payload AS jsonb)) "
+                    "ON CONFLICT (key) DO UPDATE SET payload = CAST(:payload AS jsonb)"
+                ),
+                {"key": key, "payload": json.dumps(payload)},
+            )
+            await session.commit()
