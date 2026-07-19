@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes.admin import router as admin_router
@@ -52,6 +53,9 @@ app.include_router(delivery_router)
 app.include_router(menu_router)
 app.include_router(web_router, dependencies=[Depends(get_current_username)])
 app.include_router(yookassa_router)
+
+static_dir = Path(__file__).resolve().parent / "web" / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
 
 
 @app.get("/health")
