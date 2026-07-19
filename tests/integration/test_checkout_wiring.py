@@ -23,8 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.api.routes.checkout import router as checkout_router
 from app.api.routes.orders import router as orders_router
 from app.services.customer_service import CustomerService
+from app.services.idempotency import IdempotencyService
 from app.services.menu_service import MenuService
 from app.services.order_service import OrderService
+from app.services.payment_service import PaymentService
 
 
 @pytest.fixture
@@ -70,15 +72,46 @@ async def client(
     async def _menu_svc() -> MenuService:
         return MenuService(session_factory=session_factory)
 
+    # BUGFIX (2026-07-19): these two were NOT overridden before, so every
+    # checkout request silently fell through to get_idempotency_service()'s /
+    # get_payment_service()'s defaults — IdempotencyService()'s default
+    # session_factory=async_session_factory (app/db.py) is a MODULE-LEVEL
+    # engine created once at import time against the real settings.
+    # DATABASE_URL, shared and cached across the whole pytest session. Its
+    # underlying asyncpg connections bind to whichever event loop first uses
+    # them; every later test running in a *different* event loop (pytest-
+    # asyncio's default per-function loop) then crashes with exactly
+    # "Task attached to a different loop" / "another operation is in
+    # progress" the moment it touches idempotency_keys. Same class of bug
+    # this project has already fixed for production tools (CONSTRAINTS.md
+    # "Tool-authoring: side-effect session boundary") — a caller silently
+    # relying on a shared, non-injected default instead of the session
+    # explicitly passed to it for this test/request.
+    async def _idempotency_svc() -> IdempotencyService:
+        return IdempotencyService(session_factory=session_factory)
+
+    async def _payment_svc() -> PaymentService:
+        # CORRECTION to an earlier draft of this comment: PaymentService DOES
+        # take session_factory (defaults to the same problematic app.db.
+        # async_session_factory) and builds its OWN internal IdempotencyService
+        # from it — it is not DB-independent. Verified by reading
+        # app/services/payment_service.py::PaymentService.__init__ directly
+        # before assuming otherwise.
+        return PaymentService(session_factory=session_factory)
+
     from app.api.routes.checkout import (
         get_customer_service,
+        get_idempotency_service,
         get_menu_service,
         get_order_service,
+        get_payment_service,
     )
 
     app.dependency_overrides[get_order_service] = _order_svc
     app.dependency_overrides[get_customer_service] = _customer_svc
     app.dependency_overrides[get_menu_service] = _menu_svc
+    app.dependency_overrides[get_idempotency_service] = _idempotency_svc
+    app.dependency_overrides[get_payment_service] = _payment_svc
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

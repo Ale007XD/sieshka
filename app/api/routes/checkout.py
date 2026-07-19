@@ -142,6 +142,18 @@ async def checkout(
     )
 
     if body.payment_method == "yookassa_card":
+        # BUGFIX (2026-07-19): this branch created the order and requested a
+        # YooKassa payment, but never advanced the order's own FSM state —
+        # it stayed DRAFT forever, even on a fully successful payment
+        # creation. ORDER_TRANSITIONS requires two hops to get from DRAFT to
+        # PAYMENT_PENDING: DRAFT -CONFIRM-> CONFIRMED -REQUEST_PAYMENT->
+        # PAYMENT_PENDING (app/domains/orders/models.py). Done BEFORE calling
+        # payment_service.create_payment(): if the YooKassa call itself then
+        # fails, the order correctly reflects "payment was requested" (safe
+        # to retry) rather than silently reporting DRAFT with no record a
+        # payment attempt was ever made.
+        await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
+        await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
         payment = await payment_service.create_payment(
             order_id=str(order.id),
             amount=Decimal(total_rub),

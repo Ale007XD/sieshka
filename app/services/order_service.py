@@ -145,7 +145,13 @@ class OrderService:
         only persists what it is given. Never trusts a client-supplied total.
         """
         delivery_address = data.address or ""
-        items_payload = json.dumps([item.model_dump() for item in items])
+        # BUGFIX (2026-07-19): mode="json" is required — plain model_dump()
+        # leaves OrderItem.product_id as a uuid.UUID instance, and stdlib
+        # json.dumps() has no encoder for UUID, raising TypeError on every
+        # checkout. Same class of bug already fixed once in
+        # menu_import_service.py (2026-07-15) — model_dump() output going
+        # into json.dumps()/a Trace context always needs mode="json".
+        items_payload = json.dumps([item.model_dump(mode="json") for item in items])
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
