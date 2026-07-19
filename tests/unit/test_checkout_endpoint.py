@@ -81,7 +81,8 @@ def _body(payment_method: str, delivery_mode: str = "delivery", **over) -> dict:
         "delivery_slot": None,
         "delivery_date": None,
         "payment_method": payment_method,
-        "zone_id": 1,
+        "zone_id": str(uuid4()),  # BUGFIX (2026-07-19): was `1` (int) — zone_id
+        # is UUID now, matching delivery_zones.id's real type
         "items": [{"product_id": str(uuid4()), "qty": 2}],
         "idempotency_key": str(uuid4()),
         "client_max_uid": None,

@@ -132,6 +132,24 @@ async def _seed_product(factory: async_sessionmaker[AsyncSession], price: int = 
     return pid
 
 
+async def _seed_zone(factory: async_sessionmaker[AsyncSession]) -> uuid.UUID:
+    # BUGFIX (2026-07-19): needed now that orders.zone_id has a real FK to
+    # delivery_zones(id) (migrations/011_zone_id_uuid.sql) — a checkout test
+    # exercising the "delivery" path can no longer send an arbitrary zone_id,
+    # it must reference a real row.
+    zid = uuid.uuid4()
+    async with factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO delivery_zones (id, name, delivery_time_minutes, is_active) "
+                "VALUES (:id, 'Test Zone', 20, TRUE)"
+            ),
+            {"id": zid},
+        )
+        await session.commit()
+    return zid
+
+
 async def test_cash_checkout_creates_order_no_token(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -174,6 +192,7 @@ async def test_card_checkout_returns_confirmation_token(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     pid = await _seed_product(session_factory, 150)
+    zid = await _seed_zone(session_factory)
     body = {
         "name": "Ivan",
         "phone": "+79991234567",
@@ -183,7 +202,8 @@ async def test_card_checkout_returns_confirmation_token(
         "delivery_slot": None,
         "delivery_date": None,
         "payment_method": "yookassa_card",
-        "zone_id": 1,
+        "zone_id": str(zid),  # BUGFIX (2026-07-19): was `1` (int) — zone_id
+        # is UUID now, FK-enforced against a real delivery_zones row
         "items": [{"product_id": str(pid), "qty": 2}],
         "idempotency_key": str(uuid.uuid4()),
         "client_max_uid": None,

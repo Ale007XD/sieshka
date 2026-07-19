@@ -66,6 +66,10 @@ async def session(postgres_dsn: str) -> AsyncGenerator[AsyncSession, None]:
         engine, class_=AsyncSession, expire_on_commit=False
     )
     async with async_session() as s:
+        # Orders now FKs zone_id -> delivery_zones (migrations/011); clear
+        # orders (and anything referencing them) so the zone delete is not
+        # blocked by a stale reference from an earlier test in this shared DB.
+        await s.execute(text("TRUNCATE TABLE orders CASCADE"))
         await s.execute(text("DELETE FROM delivery_zones"))
         await s.commit()
         yield s

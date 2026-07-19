@@ -93,7 +93,10 @@ async def seeded(
         # test functions' seeds would otherwise collide on unique constraints
         # (delivery_zones.lower(name), products, etc.).
         await session.execute(
-            text("TRUNCATE TABLE delivery_zones, products, categories RESTART IDENTITY")
+            text(
+                "TRUNCATE TABLE orders, delivery_zones, products, categories "
+                "RESTART IDENTITY CASCADE"
+            )
         )
         await session.execute(
             text(
@@ -169,7 +172,9 @@ async def client(
     main_app.dependency_overrides.clear()
 
 
-def _checkout_body(prod_id: uuid.UUID, method: str) -> dict[str, object]:
+def _checkout_body(
+    prod_id: uuid.UUID, method: str, zone_id: uuid.UUID | None = None
+) -> dict[str, object]:
     return {
         "name": "Ivan",
         "phone": "+79991234567",
@@ -179,7 +184,12 @@ def _checkout_body(prod_id: uuid.UUID, method: str) -> dict[str, object]:
         "delivery_slot": None,
         "delivery_date": None,
         "payment_method": method,
-        "zone_id": 1 if method == "yookassa_card" else None,
+        # BUGFIX (2026-07-19): was `1 if method == "yookassa_card" else None`
+        # — zone_id is UUID now (matching delivery_zones.id, and now FK-
+        # enforced), a fake int would fail Pydantic validation outright and
+        # a fake-but-valid-looking UUID would violate the new FK constraint.
+        # Must be a real seeded zone's id.
+        "zone_id": str(zone_id) if zone_id is not None else None,
         "items": [{"product_id": str(prod_id), "qty": 2}],
         "idempotency_key": str(uuid.uuid4()),
         "client_max_uid": None,
@@ -258,7 +268,7 @@ class TestStorefrontSmoke:
         seeded: _Seed,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
-        body = _checkout_body(seeded.prod_id, "yookassa_card")
+        body = _checkout_body(seeded.prod_id, "yookassa_card", seeded.zone_id)
         fake_payment = {
             "confirmation_url": "",
             "confirmation_token": "tok_embedded_smoke",

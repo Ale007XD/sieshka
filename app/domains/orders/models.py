@@ -133,7 +133,17 @@ class CheckoutRequest(BaseModel):
     delivery_slot: str | None = None
     delivery_date: str | None = None
     payment_method: str  # "yookassa_card" | "cash"
-    zone_id: int | None = None  # required + validated client-side when not pickup
+    zone_id: UUID | None = None
+    # BUGFIX (2026-07-19): was `int | None`. delivery_zones.id is UUID
+    # (migrations/006_delivery_zones.sql) — int only ever "worked" because
+    # cart.js's parseInt() coincidentally matched the 3 originally-seeded
+    # zones' numeric external_id, and because nothing validated the value
+    # existed (no FK on orders.zone_id until migrations/011). Any zone
+    # created via sprint_m7_zone_agent's apply_zone_command has
+    # external_id=NULL — parseInt() on that path always produced NaN,
+    # silently dropped to null on the wire. UUID matches the real PK
+    # unconditionally, regardless of how the zone was created. required +
+    # validated client-side when not pickup
     items: list[CheckoutItem]
     idempotency_key: str
     client_max_uid: int | None = None  # MAX mini-app user id; persisted only

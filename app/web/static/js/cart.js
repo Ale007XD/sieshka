@@ -290,7 +290,14 @@
       var phone = form.querySelector("#f-phone").value.trim();
       var address = form.querySelector("#f-address").value.trim() || null;
       var zoneRaw = form.querySelector("#f-zone").value;
-      var zoneId = zoneRaw === "" ? null : parseInt(zoneRaw, 10);
+      // BUGFIX (2026-07-19): was parseInt(zoneRaw, 10) — delivery_zones.id is
+      // a UUID (see loadZones() below: opt.value = String(z.id)), never an
+      // integer. parseInt() on a UUID string produces NaN (JSON.stringify
+      // then silently turns that into null), so the selected zone was never
+      // actually saved — only worked by coincidence when the API's
+      // zone_id field was still typed as int on the backend. Pass the UUID
+      // string straight through.
+      var zoneId = zoneRaw === "" ? null : zoneRaw;
       var comment = form.querySelector("#f-comment").value.trim() || null;
 
       if (!name || !phone) {

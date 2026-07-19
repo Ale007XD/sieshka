@@ -36,7 +36,9 @@ async def session_factory(
     conn = await asyncpg.connect(raw_dsn)
     try:
         await conn.execute(schema_path.read_text())
-        await conn.execute("TRUNCATE TABLE delivery_zones")
+        # CASCADE: orders.zone_id now has a FK to delivery_zones (migrations/011),
+        # so a plain TRUNCATE is rejected. Test DB only — safe to cascade.
+        await conn.execute("TRUNCATE TABLE delivery_zones CASCADE")
     finally:
         await conn.close()
 
