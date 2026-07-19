@@ -1,0 +1,15 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Sieshka — меню доставки{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Доставка еды Sieshka</h1>
+  <p class="muted">Соберите заказ из меню ниже. Корзина сохраняется в браузере.</p>
+</section>
+
+<div id="menu-status" class="menu-status" role="status">Загрузка меню…</div>
+<div id="menu-root" class="menu-root"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+<script src="/static/js/menu.js" nonce="{{ csp_nonce }}"></script>
+{% endblock %}

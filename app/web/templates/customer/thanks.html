@@ -1,0 +1,18 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Спасибо за заказ — Sieshka{% endblock %}
+{% block content %}
+<section class="thanks-page">
+  <h1>Спасибо за заказ!</h1>
+  {% if order %}
+    <p>Номер заказа: <strong>{{ order.id }}</strong></p>
+    <p>Статус: {{ order.state.value }}</p>
+    {% if delivery_fee %}
+      <p>Стоимость доставки: {{ delivery_fee }} ₽</p>
+    {% endif %}
+    <p class="muted">Мы свяжемся с вами для подтверждения.</p>
+  {% else %}
+    <p class="muted">Заказ не найден.</p>
+  {% endif %}
+  <a href="/" class="btn btn-primary">Вернуться в меню</a>
+</section>
+{% endblock %}

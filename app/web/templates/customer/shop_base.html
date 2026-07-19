@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Sieshka — доставка еды{% endblock %}</title>
+  <meta name="description" content="Sieshka — доставка еды. Меню, корзина, оформление заказа.">
+  <link rel="manifest" href="/static/site.webmanifest">
+  <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body>
+  <header class="shop-header">
+    <div class="shop-bar">
+      <a href="/" class="shop-logo">Sieshka</a>
+      <a href="/cart" class="shop-nav-link" id="nav-cart">Корзина <span class="cart-count" id="cart-count" hidden></span></a>
+      <a href="/requisites" class="shop-nav-link">Реквизиты</a>
+      <a href="/offer" class="shop-nav-link">Оферта</a>
+      <a href="/agreement" class="shop-nav-link">Соглашение</a>
+      <a href="/privacy" class="shop-nav-link">Политика</a>
+      <a href="tel:+79641027995" class="shop-phone">+7 (964) 102-79-95</a>
+    </div>
+  </header>
+  <main class="shop-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="shop-footer">
+    Работаем каждый день кроме воскресенья, 9:00 — 21:00
+  </footer>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

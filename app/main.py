@@ -21,6 +21,7 @@ from app.config import settings
 from app.startup import validate_all_programs
 from app.telemetry import configure_otel
 from app.web.auth import get_current_username
+from app.web.csp import CSPMiddleware
 from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
 from app.webhooks.yookassa import router as yookassa_router
@@ -59,14 +60,16 @@ app.include_router(yookassa_router)
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
 
+app.add_middleware(CSPMiddleware)
+
 
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": "0.1.0"})
 
 
-@app.get("/")
-async def root() -> JSONResponse:
+@app.get("/api/status")
+async def status() -> JSONResponse:
     return JSONResponse({
         "service": "Sieshka",
         "architecture": "nano-vm governed FSM",
@@ -77,6 +80,8 @@ async def root() -> JSONResponse:
             "M4": "AI Layer — DONE",
             "M5": "Observability — DONE",
             "M6": "Restaurateur Dashboard — DONE",
+            "M7": "Customer Storefront — DONE",
         },
         "dashboard": "/admin/ui/ (auth required)",
+        "store": "/",
     })

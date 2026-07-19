@@ -1,0 +1,19 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Закрыто — Sieshka{% endblock %}
+{% block content %}
+<section class="closed-page">
+  <h1>Сейчас мы закрыты</h1>
+  {% if preorder_info and preorder_info.is_preorder %}
+    <p class="muted">
+      Но вы можете оформить предзаказ: вечернее меню откроется в {{ preorder_info.opens_at }}.
+    </p>
+  {% else %}
+    <p class="muted">Мы открыты каждый день кроме воскресенья, 9:00 — 21:00.</p>
+  {% endif %}
+  <p>
+    Утро: {% if morning_start %}{{ morning_start }}{% else %}—{% endif %}–{% if morning_end %}{{ morning_end }}{% else %}—{% endif %}<br>
+    Вечер: {% if evening_start %}{{ evening_start }}{% else %}—{% endif %}–{% if evening_end %}{{ evening_end }}{% else %}—{% endif %}
+  </p>
+  <a href="/" class="btn btn-primary">Посмотреть меню</a>
+</section>
+{% endblock %}

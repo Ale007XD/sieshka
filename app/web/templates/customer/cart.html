@@ -1,0 +1,28 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Корзина — Sieshka{% endblock %}
+{% block content %}
+<section class="cart-page">
+  <h1>Ваша корзина</h1>
+  <div id="cart-root" class="cart-root">
+    <p class="muted">Корзина пуста.</p>
+  </div>
+  <div id="cart-summary" class="cart-summary" hidden>
+    <div class="cart-total-row">
+      <span>Товары:</span>
+      <span id="cart-goods">0 ₽</span>
+    </div>
+    <div class="cart-total-row">
+      <span>Доставка:</span>
+      <span id="cart-delivery">—</span>
+    </div>
+    <div class="cart-total-row cart-total-final">
+      <span>Итого:</span>
+      <span id="cart-total">0 ₽</span>
+    </div>
+    <a href="/checkout" class="btn btn-primary" id="to-checkout">Оформить заказ</a>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+{% endblock %}

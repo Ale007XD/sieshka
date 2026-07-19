@@ -1,0 +1,60 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Оформление заказа — Sieshka{% endblock %}
+{% block content %}
+<section class="checkout-page">
+  <h1>Оформление заказа</h1>
+
+  {% if show_delivery_notice %}
+  <div class="notice notice-warn" id="delivery-notice">
+    {% if preorder_info and preorder_info.is_preorder %}
+      Приём предзаказов. Открытие вечернего меню в {{ preorder_info.opens_at }}.
+    {% else %}
+      Обратите внимание: сейчас вне времени приёма заказов.
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div id="checkout-empty" class="muted" hidden>Корзина пуста. Вернитесь в <a href="/">меню</a>.</div>
+
+  <form id="checkout-form" class="checkout-form" novalidate>
+    <label class="field">
+      <span>Имя</span>
+      <input type="text" name="name" id="f-name" required autocomplete="name">
+    </label>
+    <label class="field">
+      <span>Телефон</span>
+      <input type="tel" name="phone" id="f-phone" required autocomplete="tel">
+    </label>
+    <fieldset class="field">
+      <legend>Способ получения</legend>
+      <label><input type="radio" name="delivery_mode" value="delivery" checked> Доставка</label>
+      <label><input type="radio" name="delivery_mode" value="pickup"> Самовывоз</label>
+    </fieldset>
+    <label class="field" id="address-field">
+      <span>Адрес доставки</span>
+      <input type="text" name="address" id="f-address" autocomplete="street-address">
+    </label>
+    <label class="field">
+      <span>Зона доставки</span>
+      <select name="zone_id" id="f-zone">
+        <option value="">— выберите зону —</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Комментарий</span>
+      <textarea name="comment" id="f-comment" rows="3"></textarea>
+    </label>
+    <fieldset class="field">
+      <legend>Оплата</legend>
+      <label><input type="radio" name="payment_method" value="yookassa_card" checked> Карта (ЮKassa)</label>
+      <label><input type="radio" name="payment_method" value="cash"> Наличные</label>
+    </fieldset>
+    <div id="yookassa-widget" hidden></div>
+    <button type="submit" class="btn btn-primary" id="checkout-submit">Оплатить и заказать</button>
+    <div id="checkout-error" class="notice notice-error" hidden></div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+{% endblock %}

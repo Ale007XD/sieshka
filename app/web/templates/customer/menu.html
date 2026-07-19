@@ -1,0 +1,13 @@
+{% extends "customer/shop_base.html" %}
+{% block title %}Меню — Sieshka{% endblock %}
+{% block content %}
+<section class="menu-page">
+  <h1>Меню</h1>
+  <div id="menu-status" class="menu-status" role="status">Загрузка меню…</div>
+  <div id="menu-root" class="menu-root"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+<script src="/static/js/menu.js" nonce="{{ csp_nonce }}"></script>
+{% endblock %}
