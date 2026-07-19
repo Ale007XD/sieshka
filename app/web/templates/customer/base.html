@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Sieshka{% endblock %}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; color: #1f2937; background: #f9fafb; }
+    header { background: #fff; border-bottom: 1px solid #e5e7eb; }
+    .bar { max-width: 64rem; margin: 0 auto; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 1.25rem; }
+    .logo { font-weight: 700; color: #4f46e5; font-size: 1.125rem; }
+    .bar a { color: #4b5563; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .bar a:hover { color: #4f46e5; }
+    .phone { margin-left: auto; color: #374151; text-decoration: none; font-weight: 600; font-size: 0.875rem; }
+    main { max-width: 48rem; margin: 1.5rem auto 0; padding: 2rem 1rem 3rem; background: #fff; border-radius: 0.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    h1 { font-size: 1.5rem; margin-top: 0; }
+    h2 { font-size: 1.125rem; margin-top: 1.75rem; }
+    a { color: #4f46e5; }
+    footer { max-width: 48rem; margin: 0 auto; padding: 1rem; color: #6b7280; font-size: 0.875rem; text-align: center; }
+    .legal-nav a { margin: 0 0.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="/" class="logo">Sieshka</a>
+      <a href="/requisites">Реквизиты</a>
+      <a href="/offer">Публичная оферта</a>
+      <a href="/agreement">Пользовательское соглашение</a>
+      <a href="/privacy">Политика конфиденциальности</a>
+      <a href="tel:+79641027995" class="phone">+7 (964) 102-79-95</a>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    Работаем каждый день кроме воскресенья, 9:00 — 21:00
+  </footer>
+</body>
+</html>

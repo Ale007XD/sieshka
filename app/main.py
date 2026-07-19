@@ -21,6 +21,7 @@ from app.config import settings
 from app.startup import validate_all_programs
 from app.telemetry import configure_otel
 from app.web.auth import get_current_username
+from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
 from app.webhooks.yookassa import router as yookassa_router
 
@@ -52,6 +53,7 @@ app.include_router(kitchen_router)
 app.include_router(delivery_router)
 app.include_router(menu_router)
 app.include_router(web_router, dependencies=[Depends(get_current_username)])
+app.include_router(customer_router)
 app.include_router(yookassa_router)
 
 static_dir = Path(__file__).resolve().parent / "web" / "static"
