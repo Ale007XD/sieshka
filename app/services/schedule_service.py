@@ -112,6 +112,25 @@ class ScheduleService:
         }
 
     async def _load_windows(self) -> dict[SchedulePeriod, ScheduleWindow]:
+        # BUGFIX (2026-07-20): was raw SQL CURRENT_DATE — that's the Postgres
+        # session/server timezone's calendar day, which need not match
+        # MENU_TIMEZONE (the business's actual timezone, e.g.
+        # "Asia/Ho_Chi_Minh"). Docker/Postgres defaults to UTC unless
+        # explicitly configured. Vietnam is UTC+7: for the first 7 hours of
+        # every Vietnam calendar day, Postgres's UTC-based CURRENT_DATE is
+        # still showing YESTERDAY — a genuine production bug, not just a
+        # test flake: it surfaced as test_yesterday_override_expires_by_
+        # read_fallthrough returning yesterday's override instead of falling
+        # through to the permanent row, because at the moment the test ran,
+        # Postgres's CURRENT_DATE (UTC) still agreed with the "yesterday"
+        # date the test computed using the test runner's LOCAL (Vietnam)
+        # clock — the two sides of the comparison were using different
+        # timezones and coincidentally aligned wrong. Bind :today explicitly,
+        # computed the same timezone-aware way as get_menu_window_context's
+        # `now = datetime.datetime.now(_menu_timezone())` above, so this
+        # function is no longer at the mercy of whatever timezone the
+        # Postgres server/session happens to be configured with.
+        today = datetime.datetime.now(_menu_timezone()).date()
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
@@ -119,9 +138,10 @@ class ScheduleService:
                     "effective_date "
                     "FROM schedule_windows "
                     "WHERE period IN ('morning', 'evening') "
-                    "AND (effective_date = CURRENT_DATE OR effective_date IS NULL) "
+                    "AND (effective_date = :today OR effective_date IS NULL) "
                     "ORDER BY period, effective_date NULLS LAST"
-                )
+                ),
+                {"today": today},
             )
             rows = result.fetchall()
 
@@ -156,6 +176,9 @@ class ScheduleService:
         customers are currently seeing. Keys: "morning"/"evening" →
         {"permanent": ScheduleWindow | None, "today_override": ScheduleWindow | None}.
         """
+        # Same fix as _load_windows above — MENU_TIMEZONE-aware "today",
+        # not Postgres's session-timezone-dependent CURRENT_DATE.
+        today = datetime.datetime.now(_menu_timezone()).date()
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
@@ -163,9 +186,10 @@ class ScheduleService:
                     "effective_date "
                     "FROM schedule_windows "
                     "WHERE period IN ('morning', 'evening') "
-                    "AND (effective_date = CURRENT_DATE OR effective_date IS NULL) "
+                    "AND (effective_date = :today OR effective_date IS NULL) "
                     "ORDER BY period, effective_date NULLS LAST"
-                )
+                ),
+                {"today": today},
             )
             rows = result.fetchall()
 

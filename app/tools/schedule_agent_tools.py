@@ -43,6 +43,15 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# BUGFIX (2026-07-20): reuse the same MENU_TIMEZONE-aware "today" as
+# schedule_service.py's _load_windows/get_admin_windows — this file's write
+# path used raw SQL CURRENT_DATE (Postgres server/session timezone), which
+# would have silently disagreed with the read side once that was fixed to
+# use MENU_TIMEZONE explicitly. Both sides of the write/read pair must agree
+# on what "today" means, or a today-override written during the UTC-vs-
+# MENU_TIMEZONE mismatch window would be invisible to reads (or vice versa).
+from app.services.schedule_service import _menu_timezone
+
 logger = logging.getLogger(__name__)
 
 _VALID_PERIODS = ("morning", "evening")
@@ -239,10 +248,14 @@ async def apply_schedule_command(
             "DO UPDATE SET start_time = EXCLUDED.start_time, "
             "end_time = EXCLUDED.end_time, is_active = TRUE "
         )
+        # For today scope we bind the same MENU_TIMEZONE-aware date computed
+        # in Python (not Postgres's CURRENT_DATE) so the write side agrees
+        # with schedule_service.py's read side on what "today" means.
+        today = datetime.datetime.now(_menu_timezone()).date()
         today_insert_sql = (
             "INSERT INTO schedule_windows "
             "(period, start_time, end_time, is_active, effective_date) "
-            "VALUES (:period, :start, :end, TRUE, CURRENT_DATE) "
+            "VALUES (:period, :start, :end, TRUE, :today) "
             "ON CONFLICT (period, effective_date) WHERE effective_date IS NOT NULL "
             "DO UPDATE SET start_time = EXCLUDED.start_time, "
             "end_time = EXCLUDED.end_time, is_active = TRUE "
@@ -260,7 +273,7 @@ async def apply_schedule_command(
         else:
             await session.execute(
                 text(today_insert_sql),
-                {"period": period, "start": start, "end": end},
+                {"period": period, "start": start, "end": end, "today": today},
             )
         logger.info(
             "apply_schedule_command: upserted %s window (scope=%s)",
@@ -276,20 +289,21 @@ async def apply_schedule_command(
 
     # action == reset_to_default, scope == today (validated above)
     assert action == "reset_to_default" and scope == "today"
+    today = datetime.datetime.now(_menu_timezone()).date()
     before = await session.execute(
         text(
             "SELECT COUNT(*) AS n FROM schedule_windows "
-            "WHERE period = :period AND effective_date = CURRENT_DATE"
+            "WHERE period = :period AND effective_date = :today"
         ),
-        {"period": period},
+        {"period": period, "today": today},
     )
     deleted = int(before.one()._mapping["n"])
     await session.execute(
         text(
             "DELETE FROM schedule_windows "
-            "WHERE period = :period AND effective_date = CURRENT_DATE"
+            "WHERE period = :period AND effective_date = :today"
         ),
-        {"period": period},
+        {"period": period, "today": today},
     )
     # Idempotent: deleting a row that isn't there is not an error (deleted == 0),
     # it just means there was nothing to reset.
