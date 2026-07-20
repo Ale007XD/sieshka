@@ -83,8 +83,21 @@
         if (!r.ok) throw new Error("menu load failed: " + r.status);
         return r.json();
       })
-      .then(function (data) {
-        var products = Array.isArray(data) ? data : (data.products || []);
+            .then(function (data) {
+        var products = [];
+        if (Array.isArray(data)) {
+          products = data;
+        } else if (data && Array.isArray(data.categories)) {
+          // Разворачиваем категории в плоский список товаров
+          data.categories.forEach(function(cat) {
+            (cat.products || []).forEach(function(p) {
+              p.category = cat.name; // Добавляем имя категории в товар
+              products.push(p);
+            });
+          });
+        } else if (data && Array.isArray(data.products)) {
+          products = data.products;
+        }
         renderMenu(products);
       })
       .catch(function (err) {
