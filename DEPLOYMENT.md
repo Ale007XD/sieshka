@@ -133,6 +133,18 @@ AUTH — ЗАКРЫТО (sprint_m6_auth_gate DONE, verified 2026-07-05): /admin/
                                              (nginx/Caddy/managed LB) с limit_req
                                              перед любым публичным деплоем — этот
                                              проект его не поставляет.
+                                             ЗАКРЫТО для staging (sprint_m7_
+                                             staging_deploy, 2026-07-20): siesh-ka.
+                                             online обслуживается существующим nginx
+                                             VPS'а (тот же, что держит siesh-ka.ru) —
+                                             см. §3.4. deploy/docker-compose.prod.yml
+                                             больше не поднимает Caddy — этот VPS
+                                             занял порт 80 nginx'ом до появления
+                                             этого проекта, второй процесс на 80/443
+                                             не забиндится. Rate-limiting на /admin
+                                             всё ещё не настроен нигде — это отдельный
+                                             TODO, nginx location не даёт его бесплатно
+                                             без limit_req directive, добавить явно.
 
 SQLITE_PATH default — буквальный Windows-путь
   (C:/Users/alexd/AppData/Local/Temp/sieshka_nano_vm.db в app/config.py) — это dev-
@@ -209,6 +221,92 @@ python scripts/validate_all_programs.py       # ERROR-severity issues блоки
 ```
 
 ---
+
+### 3.4 Staging deploy: siesh-ka.online (sprint_m7_staging_deploy, 2026-07-20)
+
+```
+Topology confirmed with Alex before writing this: same VPS as the live siesh-ka.ru
+site; that site is served by nginx OUTSIDE this repo (not Docker, not managed by
+anything here) and already owns host port 80. siesh-ka.online already resolves to
+this VPS (nslookup confirmed 178.212.12.107). certbot/ACME plan was undecided —
+resolved below as: same existing nginx handles both HTTP-01 challenge and TLS
+termination for siesh-ka.online, via a brand-new, independent server block. The
+siesh-ka.ru server block/certificate is never touched by any command below.
+```
+
+```bash
+# 1. Bring up the isolated staging stack — postgres + app only, no caddy
+#    (deploy/docker-compose.prod.yml no longer defines a caddy service — see
+#    its own header comment for why). Run from ~/projects/sieshka (or wherever
+#    this repo lives on the VPS):
+cd ~/projects/sieshka
+git pull
+cp .env.example .env   # if not already present — fill in real values per §3.2,
+                        # including a FRESH DASHBOARD_PASSWORD_HASH, do not reuse
+                        # any credential from the actual siesh-ka.ru site
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+
+# 2. Confirm the app is reachable ONLY on localhost, not the public interface —
+#    this is the check that would have caught a copy-paste "0.0.0.0" mistake
+#    before it became a security incident:
+curl http://127.0.0.1:8001/health                     # expect 200
+curl http://<vps-public-ip>:8001/health --max-time 3   # expect: connection refused/timeout
+
+# 3. Apply the alembic migration chain against THIS stack's Postgres — not the
+#    one behind siesh-ka.ru, if that even uses this same Postgres instance at all
+#    (it almost certainly doesn't, per the "outside this repo" note above, but
+#    double check DATABASE_URL in .env points at the NEW postgres container,
+#    not anything pre-existing):
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+  exec app alembic upgrade head
+
+# 4. Install the new nginx server block ALONGSIDE the existing siesh-ka.ru one —
+#    see deploy/nginx-siesh-ka-online.conf for the full file + why each step
+#    matters (reload not restart, nginx -t before reload, etc.):
+sudo cp deploy/nginx-siesh-ka-online.conf /etc/nginx/sites-available/siesh-ka.online
+sudo ln -s /etc/nginx/sites-available/siesh-ka.online /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 5. Confirm siesh-ka.ru is unaffected BEFORE requesting a certificate for the
+#    new domain — this is the single most important check in this whole
+#    procedure, do not skip it even though it feels redundant:
+curl -I https://siesh-ka.ru/                           # expect the SAME response
+                                                        # it gave before step 4
+
+# 6. TLS via certbot's nginx plugin — HTTP-01 challenge through the same nginx,
+#    on the new server block only (certbot matches by -d domain, does not
+#    touch the siesh-ka.ru block or its own certificate):
+sudo certbot --nginx -d siesh-ka.online
+
+# 7. Re-confirm siesh-ka.ru again after certbot has edited nginx's config —
+#    certbot reloads nginx itself as part of issuing the cert, so this is the
+#    real post-deploy check, not step 5's pre-check:
+curl -I https://siesh-ka.ru/
+
+# 8. Full ordering flow, end-to-end, on the actual staging URL:
+curl -I https://siesh-ka.online/                       # expect 200, valid cert
+curl -s https://siesh-ka.online/ | grep -i "noindex"    # X-Robots-Tag present —
+                                                         # confirm as a header via
+                                                         # curl -I, not just body
+```
+
+```
+Gate for this sprint (mirrors the spec in docs/SPRINTS_SIESHKA.md): the full
+ordering flow (browse → cart → checkout, both cash and yookassa_card) works
+end-to-end on https://siesh-ka.online with a valid TLS cert, siesh-ka.ru is
+provably unaffected (steps 5 and 7 above, not just "should be fine"), and the
+noindex header is present and verified via curl -I (not assumed from the nginx
+config alone — confirm it actually reaches the client).
+
+If DATABASE_URL for this staging stack turns out to need to point at a Postgres
+instance already used by something else on this VPS (contradicting the
+"completely separate" assumption above) — STOP and confirm with Alex before
+running alembic upgrade head. Migrations are additive/idempotent by convention
+in this project, but running them against an unexpected database is not a risk
+worth taking silently.
+```
+
 
 ## 4. Установка opencode + nano-vm-dev-agent
 

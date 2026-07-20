@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, MutableMapping
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.routes.admin import router as admin_router
 from app.api.routes.checkout import router as checkout_router
@@ -60,6 +63,36 @@ app.include_router(yookassa_router)
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
 
+
+class NoIndexMiddleware:
+    """Attach `X-Robots-Tag: noindex, nofollow` to every response.
+
+    Staging/sibling domain guard (sprint_m7_staging_deploy): siesh-ka.online
+    serves the same catalog as the live site and must never be indexed. nginx
+    also sets this header at the proxy layer (deploy/nginx-siesh-ka-online.conf),
+    but enforcing it here too means the guard survives even if the proxy header
+    is ever dropped. Applied to ALL responses (HTML, JSON, static) so nothing
+    leaks into search engines.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def _send(message: MutableMapping[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(raw=cast("list[tuple[bytes, bytes]]", message["headers"]))
+                headers["X-Robots-Tag"] = "noindex, nofollow"
+                message["headers"] = headers.raw
+            await send(message)
+
+        await self.app(scope, receive, _send)
+
+app.add_middleware(NoIndexMiddleware)
 app.add_middleware(CSPMiddleware)
 
 

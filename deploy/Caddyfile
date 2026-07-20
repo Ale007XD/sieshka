@@ -1,6 +1,16 @@
 # Sieshka production reverse proxy + TLS.
 # Caddy obtains and renews a Let's Encrypt cert automatically via ACME on :80/:443.
 #
+# NOT CURRENTLY USED (2026-07-20, sprint_m7_staging_deploy): this VPS already
+# runs nginx bound to port 80 (serving the live siesh-ka.ru site, outside this
+# repo). A second process can't also bind 80/443 — Caddy would fail to start.
+# The staging site (siesh-ka.online) is instead reverse-proxied by that SAME
+# existing nginx, via a new independent server block — see
+# deploy/nginx-siesh-ka-online.conf and DEPLOYMENT.md §3.3. This file is kept
+# for a possible future environment where Caddy genuinely owns 80/443 (e.g. a
+# fresh VPS with no pre-existing nginx) — do not delete it, but do not deploy
+# it here either.
+#
 # Replace new.siesh-ka.ru with your domain (DNS A -> VPS, ports 80/443 open).
 #
 # NOTE on rate limiting: the stock caddy:2 image has no rate_limit directive.

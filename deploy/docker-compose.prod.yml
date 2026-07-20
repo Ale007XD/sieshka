@@ -4,8 +4,8 @@
 #   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
 #
 # This file does NOT modify local-dev behaviour. It only *adds* production
-# concerns (reverse proxy + TLS, no public app port, resource limits, log
-# rotation). The base docker-compose.yml stays the dev/default.
+# concerns (no public app port, resource limits, log rotation). The base
+# docker-compose.yml stays the dev/default.
 #
 # WARNING — migrations: the base file mounts ./migrations into postgres'
 # docker-entrypoint-initdb.d. That applies 001-004.sql ONLY on the FIRST init
@@ -13,6 +13,19 @@
 # migration lands — it diverges silently from alembic. For real prod, switch to
 # `alembic upgrade head` and drop the initdb.d mount. Pre-prod runs with a
 # fresh volume are fine as-is.
+#
+# REVISION (2026-07-20, sprint_m7_staging_deploy): the earlier version of this
+# file ran its own `caddy` container publishing host ports 80/443. That's
+# wrong for THIS VPS — nginx is already bound to port 80 there, serving the
+# live siesh-ka.ru site (a completely separate, non-Docker deployment outside
+# this repo). A second process trying to bind the same host ports would fail
+# to start outright. Reverse-proxying + TLS for siesh-ka.online is handled by
+# that SAME existing nginx instead (a new, independent server block — see
+# deploy/nginx-siesh-ka-online.conf and DEPLOYMENT.md §3.3), not by a
+# container in this compose file. The app container now publishes to
+# 127.0.0.1 only, on a port (8001) chosen not to collide with anything else
+# already running on this VPS — confirm free with `ss -ltnp | grep 8001`
+# before first deploy, don't assume.
 
 services:
   postgres:
@@ -30,10 +43,12 @@ services:
         max-file: "5"
 
   app:
-    # No host port publish — only the caddy reverse proxy reaches app:8000.
-    ports: []
-    expose:
-      - "8000"
+    # localhost-only — nginx (already on this VPS) reverse-proxies to this
+    # port for siesh-ka.online. NOT "0.0.0.0:8001" — binding all interfaces
+    # would expose the app directly to the internet on 8001, bypassing nginx
+    # (and its TLS termination) entirely.
+    ports:
+      - "127.0.0.1:8001:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
     # Cap resources so a runaway LLM call can't eat the whole VPS.
@@ -45,24 +60,4 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-volumes:
-  caddy_data:
-  caddy_config:
+volumes: {}
