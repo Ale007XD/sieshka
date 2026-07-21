@@ -367,14 +367,14 @@
         confirmation_token: token,
         return_url: window.location.origin + "/thanks/" + orderId,
         embedded_3ds: true,
+        error_callback: function (err) {
+          mount.innerHTML = '<div class="notice notice-error">Ошибка оплаты: ' +
+            escapeHtml(err && err.message ? err.message : "неизвестная ошибка") + "</div>";
+        },
       });
       widget.on("success", function () {
         cart.clear();
         window.location.href = "/thanks/" + orderId;
-      });
-      widget.on("error", function (err) {
-        mount.innerHTML = '<div class="notice notice-error">Ошибка оплаты: ' +
-          escapeHtml(err && err.message ? err.message : "неизвестная ошибка") + "</div>";
       });
       widget.render(mount);
     };
