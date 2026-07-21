@@ -40,10 +40,10 @@ class TraceAnalyzer:
         self._cursor = StoreCursorRepository(self._store)
 
     async def receipt(self, trace_id: str) -> ExecutionReceipt:
-        result = await self._cursor.load(trace_id)
-        if result is None:
+        trace_data = self._store.get_trace(trace_id)
+        if trace_data is None:
             raise ValueError(f"Trace {trace_id!r} not found")
-        _, _, trace = result
+        trace = Trace.model_validate(trace_data)
         return self._build_receipt(trace)
 
     @staticmethod
