@@ -90,6 +90,7 @@ class OrderService:
     ) -> None:
         self._session_factory = session_factory
         self._vm = vm
+        self._store = get_store()
 
     def _transition_vm(self, session: AsyncSession) -> _VMProtocol:
         """Return a VM per-transition, bound to the given session.
@@ -247,6 +248,17 @@ class OrderService:
             ):
                 trace = await self._transition_vm(session).run(program, context=context)
 
+            # Persist trace to SQLite store so receipt viewer works.
+            if trace.trace_id:
+                self._store.save_trace(
+                    trace_id=trace.trace_id,
+                    program_id=trace.program_name,
+                    status=trace.status.value,
+                    steps_count=len(trace.steps),
+                    total_cost=trace.total_cost_usd() or 0.0,
+                    trace=trace.model_dump(mode="json"),
+                )
+
             if trace.status == TraceStatus.SUCCESS:
                 # Persist trace_id so /admin/ui/orders/{id}/receipt works.
                 if trace.trace_id:
@@ -385,6 +397,17 @@ class OrderService:
                 },
             ):
                 trace = await self._transition_vm(session).run(program, context=context)
+
+            # Persist trace to SQLite store so receipt viewer works.
+            if trace.trace_id:
+                self._store.save_trace(
+                    trace_id=trace.trace_id,
+                    program_id=trace.program_name,
+                    status=trace.status.value,
+                    steps_count=len(trace.steps),
+                    total_cost=trace.total_cost_usd() or 0.0,
+                    trace=trace.model_dump(mode="json"),
+                )
 
             if trace.status == TraceStatus.SUCCESS:
                 await session.commit()
