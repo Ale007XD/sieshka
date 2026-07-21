@@ -255,3 +255,152 @@ async def report_invalid_command(reason: str, **kwargs: object) -> str:
     """
     logger.warning("report_invalid_command: %s", reason)
     return f"INVALID:{reason}"
+
+
+# ---------------------------------------------------------------------------
+# APPLY phase — category creation (mirrors product apply above)
+# ---------------------------------------------------------------------------
+
+
+def _required_apply_category_fields(
+    command: Any,
+) -> tuple[str, str | None, str, int] | None:
+    """Extract (name, parent_category|None, menu_period, sort) if well-formed."""
+    if not isinstance(command, dict):
+        return None
+    name = command.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    parent_category = command.get("parent_category")
+    if parent_category is not None and (
+        not isinstance(parent_category, str) or not parent_category.strip()
+    ):
+        return None
+    menu_period = command.get("menu_period", "both")
+    if menu_period not in ("both", "delivery", "pickup"):
+        return None
+    sort = command.get("sort", 0)
+    if isinstance(sort, bool) or not isinstance(sort, int):
+        return None
+    return (
+        name.strip(),
+        parent_category.strip() if parent_category else None,
+        menu_period,
+        sort,
+    )
+
+
+async def validate_apply_category_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> int:
+    """Early-rejection convenience for category apply. Numeric sentinel.
+
+    NOT the enforcement point — apply_category_command re-verifies at write
+    time (TOCTOU, same shape as validate_apply_command).
+    """
+    parsed = _required_apply_category_fields(command)
+    if parsed is None:
+        logger.warning("validate_apply_category_command: malformed command")
+        return 0
+    name, parent_category, _menu_period, _sort = parsed
+
+    existing = await session.execute(
+        text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
+        {"name": name},
+    )
+    if existing.fetchall():
+        logger.warning(
+            "validate_apply_category_command: name '%s' already in use", name
+        )
+        return 0
+
+    if parent_category is not None:
+        parent = await session.execute(
+            text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
+            {"name": parent_category},
+        )
+        parent_matches = parent.fetchall()
+        if len(parent_matches) != 1:
+            logger.warning(
+                "validate_apply_category_command: parent '%s' resolves to %d rows",
+                parent_category, len(parent_matches),
+            )
+            return 0
+
+    logger.info("validate_apply_category_command: '%s' valid at validate time", name)
+    return 1
+
+
+async def apply_category_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> dict[str, Any]:
+    """Terminal tool: write a new category row.
+
+    is_terminal, no downstream CONDITION → MUST raise on any write failure
+    (CONSTRAINTS.md "Terminal TOOL step failure propagation").
+
+    TOCTOU RE-CHECK at write time, same shape as apply_menu_command. NOTE:
+    categories.name carries no UNIQUE constraint (migrations/004_menu.sql,
+    index only) — this check-then-insert still has a narrow race window under
+    true concurrency, matching the existing (also unindexed-unique) behaviour
+    of apply_menu_command against products.name. Flagged as a known gap, not
+    silently patched here with a schema change.
+    """
+    parsed = _required_apply_category_fields(command)
+    if parsed is None:
+        raise ValueError("apply_category_command: malformed command")
+    name, parent_category, menu_period, sort = parsed
+
+    parent_id: UUID | None = None
+    if parent_category is not None:
+        parent = await session.execute(
+            text(
+                "SELECT id FROM categories WHERE lower(name) = lower(:name) FOR UPDATE"
+            ),
+            {"name": parent_category},
+        )
+        parent_matches = parent.fetchall()
+        if len(parent_matches) != 1:
+            logger.error(
+                "apply_category_command: parent '%s' resolves to %d rows at write time",
+                parent_category, len(parent_matches),
+            )
+            raise ValueError(
+                f"parent category not uniquely resolvable at write time: "
+                f"{parent_category!r} ({len(parent_matches)} matches)"
+            )
+        parent_id = parent_matches[0]._mapping["id"]
+
+    existing = await session.execute(
+        text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
+        {"name": name},
+    )
+    if existing.fetchall():
+        logger.error(
+            "apply_category_command: name '%s' already in use at write time", name
+        )
+        raise ValueError(f"category name already in use at write time: {name!r}")
+
+    result = await session.execute(
+        text(
+            "INSERT INTO categories (name, parent_category_id, menu_period, sort, is_active) "
+            "VALUES (:name, :parent_id, :menu_period, :sort, TRUE) "
+            "RETURNING id"
+        ),
+        {"name": name, "parent_id": parent_id, "menu_period": menu_period, "sort": sort},
+    )
+    row = result.fetchone()
+    assert row is not None
+    category_id: UUID = row._mapping["id"]
+    logger.info("apply_category_command: wrote category '%s' (id=%s)", name, category_id)
+    return {"applied": True, "name": name, "category_id": str(category_id)}
+
+
+async def report_invalid_category_command(reason: str, **kwargs: object) -> str:
+    """Terminal tool: invalid-branch terminal for the category apply phase."""
+    logger.warning("report_invalid_category_command: %s", reason)
+    return f"INVALID:{reason}"

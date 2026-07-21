@@ -27,15 +27,23 @@ from nano_vm_mcp.handlers import GovernedToolExecutor
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.policy.policy_snapshot import (
+    MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT,
     MENU_AGENT_APPLY_POLICY_SNAPSHOT,
     MENU_AGENT_POLICY_SNAPSHOT,
 )
-from app.programs.menu_agent_program import PROGRAM_APPLY_MENU, PROGRAM_COLLECT_ORDER
+from app.programs.menu_agent_program import (
+    PROGRAM_APPLY_CATEGORY,
+    PROGRAM_APPLY_MENU,
+    PROGRAM_COLLECT_ORDER,
+)
 from app.tools.menu_agent_tools import (
+    apply_category_command,
     apply_menu_command,
     collect_menu_command,
     report_collect_failure,
+    report_invalid_category_command,
     report_invalid_command,
+    validate_apply_category_command,
     validate_apply_command,
     validate_menu_command,
 )
@@ -64,6 +72,7 @@ class MenuApplyResult:
     applied: bool
     result: dict[str, Any] | None = None
     error: str | None = None
+    trace_id: str | None = None
 
 
 class _VMProtocol(Protocol):
@@ -119,6 +128,28 @@ class MenuAgent:
         "Tool-authoring: side-effect session boundary"). Every tool is wrapped
         by GovernedToolExecutor so menu:write is enforced on the write step.
         """
+        return self._build_generic_apply_vm(
+            session, _APPLY_TOOLS, _APPLY_SESSION_TOOLS, MENU_AGENT_APPLY_POLICY_SNAPSHOT,
+        )
+
+    def _build_apply_category_vm(self, session: AsyncSession) -> _VMProtocol:
+        """Session-bound VM for the category apply phase. Same wiring shape as
+        _build_apply_vm — separate tool set (category tools), same policy
+        snapshot family (menu:* capability domain), own PolicySnapshot per the
+        apply-phase CONVENTION (policy_snapshot.py already had the 3 tool
+        names + snapshot pre-provisioned: MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT)."""
+        return self._build_generic_apply_vm(
+            session, _APPLY_CATEGORY_TOOLS, _APPLY_CATEGORY_SESSION_TOOLS,
+            MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT,
+        )
+
+    def _build_generic_apply_vm(
+        self,
+        session: AsyncSession,
+        tools: dict[str, Callable[..., Any]],
+        session_tools: frozenset[str],
+        policy: Any,
+    ) -> _VMProtocol:
         from nano_vm.adapters import MockLLMAdapter
         from nano_vm.vm import ExecutionVM
 
@@ -129,10 +160,10 @@ class MenuAgent:
             llm=MockLLMAdapter(""),
             cursor_repository=cursor,
         )
-        executor = GovernedToolExecutor(policy=MENU_AGENT_APPLY_POLICY_SNAPSHOT)
-        for name, fn in _APPLY_TOOLS.items():
+        executor = GovernedToolExecutor(policy=policy)
+        for name, fn in tools.items():
             governed = _governed_tool(fn, name, executor)
-            if name in _APPLY_SESSION_TOOLS:
+            if name in session_tools:
                 vm.register_tool(name, functools.partial(governed, session=session))
             else:
                 vm.register_tool(name, governed)
@@ -219,7 +250,7 @@ class MenuAgent:
 
         # Injected VM (tests) takes over session wiring itself.
         if self._apply_vm is not None:
-            return await self._run_apply(self._apply_vm, command, session=None)
+            return await self._run_apply(self._apply_vm, PROGRAM_APPLY_MENU, command, session=None)
 
         if self._session_factory is None:
             from app.db import async_session_factory
@@ -228,15 +259,51 @@ class MenuAgent:
 
         async with self._session_factory() as session:
             vm = self._build_apply_vm(session)
-            return await self._run_apply(vm, command, session=session)
+            return await self._run_apply(vm, PROGRAM_APPLY_MENU, command, session=session)
+
+    async def apply_category(self, command: dict[str, Any]) -> MenuApplyResult:
+        """Apply a confirmed category command to Postgres via the governed apply Program.
+
+        The apply command schema written to the categories table is:
+          {name: str, parent_category?: str,
+           menu_period?: "both"|"delivery"|"pickup", sort?: int}
+        (`parent_category` is resolved to a category row by name at write time.)
+
+        Commit/rollback follows the same convention as apply_menu: SUCCESS
+        commits; a FAILED trace rolls back (CONSTRAINTS.md "Tool-authoring:
+        side-effect session boundary").
+        """
+        _report = ProgramValidator(PROGRAM_APPLY_CATEGORY).validate()
+        if not _report.is_valid():
+            raise RuntimeError(
+                f"Program '{PROGRAM_APPLY_CATEGORY.name}' validation failed: "
+                f"{_report.summary()}"
+            )
+
+        if self._apply_vm is not None:
+            return await self._run_apply(
+                self._apply_vm, PROGRAM_APPLY_CATEGORY, command, session=None
+            )
+
+        if self._session_factory is None:
+            from app.db import async_session_factory
+
+            self._session_factory = async_session_factory
+
+        async with self._session_factory() as session:
+            vm = self._build_apply_category_vm(session)
+            return await self._run_apply(
+                vm, PROGRAM_APPLY_CATEGORY, command, session=session
+            )
 
     async def _run_apply(
         self,
         vm: _VMProtocol,
+        program: Program,
         command: dict[str, Any],
         session: AsyncSession | None,
     ) -> MenuApplyResult:
-        trace = await vm.run(PROGRAM_APPLY_MENU, context={"command": command})
+        trace = await vm.run(program, context={"command": command})
 
         if trace.status == TraceStatus.SUCCESS:
             apply_step = next(
@@ -247,7 +314,7 @@ class MenuAgent:
                     await session.commit()
                 out = apply_step.output
                 result = out if isinstance(out, dict) else {"output": out}
-                return MenuApplyResult(applied=True, result=result)
+                return MenuApplyResult(applied=True, result=result, trace_id=trace.trace_id)
 
             # Invalid branch reached its terminal cleanly — nothing written.
             if session is not None:
@@ -260,15 +327,15 @@ class MenuAgent:
                 if invalid_step and invalid_step.output
                 else "command rejected"
             )
-            logger.info("apply_menu: command rejected (%s)", reason)
-            return MenuApplyResult(applied=False, error=None)
+            logger.info("_run_apply: command rejected (%s)", reason)
+            return MenuApplyResult(applied=False, error=None, trace_id=trace.trace_id)
 
         # Trace FAILED — the write raised. Roll back; surface the error.
         if session is not None:
             await session.rollback()
         error_msg = trace.error or "apply execution failed"
-        logger.error("apply_menu: apply failed — %s", error_msg)
-        return MenuApplyResult(applied=False, error=error_msg)
+        logger.error("_run_apply: apply failed — %s", error_msg)
+        return MenuApplyResult(applied=False, error=error_msg, trace_id=trace.trace_id)
 
 
 def _governed_tool(
@@ -298,4 +365,16 @@ _APPLY_TOOLS: dict[str, Callable[..., Any]] = {
 _APPLY_SESSION_TOOLS: frozenset[str] = frozenset({
     "validate_apply_command",
     "apply_menu_command",
+})
+
+_APPLY_CATEGORY_TOOLS: dict[str, Callable[..., Any]] = {
+    "validate_apply_category_command": validate_apply_category_command,
+    "apply_category_command": apply_category_command,
+    "report_invalid_category_command": report_invalid_category_command,
+}
+
+# Category apply-phase tools that need the closure-injected session.
+_APPLY_CATEGORY_SESSION_TOOLS: frozenset[str] = frozenset({
+    "validate_apply_category_command",
+    "apply_category_command",
 })

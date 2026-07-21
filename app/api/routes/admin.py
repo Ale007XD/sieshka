@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import HTMLResponse
 from nano_vm_mcp.store import ProgramStore
 
+from app.agents.menu_agent import MenuAgent
 from app.agents.schedule_agent import ScheduleAgent
 from app.agents.zone_agent import ZoneAgent
 from app.db_nano import get_store as get_nano_store
@@ -85,6 +86,90 @@ async def import_menu_csv(
     return report
 
 
+async def _fetch_categories_ref() -> list[dict[str, Any]]:
+    """Lightweight read-only categories list for admin dropdowns.
+
+    TODO: belongs in MenuImportService.list_categories() long-term (parity
+    with ZoneService.list_all()) — kept inline here because that service file
+    wasn't available for this patch. Read-only, no governance concern.
+    """
+    from sqlalchemy import text as sql_text
+
+    from app.db import async_session_factory
+
+    async with async_session_factory() as session:
+        rows = await session.execute(
+            sql_text(
+                "SELECT id, name FROM categories WHERE is_active = TRUE ORDER BY name"
+            )
+        )
+        return [
+            {"id": str(r._mapping["id"]), "name": r._mapping["name"]}
+            for r in rows.fetchall()
+        ]
+
+
+def _product_view(products: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": p.name,
+            "category_name": p.category_name,
+            "price_rub": p.price_rub,
+            "is_active": p.is_active,
+        }
+        for p in products
+    ]
+
+
+@router.post("/menu/categories/apply")
+async def menu_category_apply(
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Create one category from a structured admin form.
+
+    No LLM collect phase — the admin-submitted form IS the confirmed command
+    (same contract MenuAgent.apply_category expects from any collect phase).
+    """
+    agent = MenuAgent()
+    apply = await agent.apply_category(payload)
+    categories = await _fetch_categories_ref()
+    receipt = None
+    if apply.trace_id is not None:
+        receipt = await analyzer.receipt(apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "result": apply.result,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "categories": categories,
+    }
+
+
+@router.post("/menu/products/apply")
+async def menu_product_apply(
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    service: MenuImportService = Depends(get_menu_import_service),
+) -> dict[str, Any]:
+    """Create one product from a structured admin form. Same no-LLM-collect
+    contract as menu_category_apply above."""
+    agent = MenuAgent()
+    apply = await agent.apply_menu(payload)
+    products, counts = await service.get_admin_data()
+    receipt = None
+    if apply.trace_id is not None:
+        receipt = await analyzer.receipt(apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "result": apply.result,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "products": _product_view(products),
+        "counts": counts.model_dump(),
+    }
+
+
 @router.get("/ui/menu", response_class=HTMLResponse)
 async def menu_admin_ui(
     request: Request,
@@ -92,14 +177,18 @@ async def menu_admin_ui(
 ) -> HTMLResponse:
     """Render the menu admin page: product table + upload form + last report."""
     products, counts = await service.get_admin_data()
+    categories = await _fetch_categories_ref()
     return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
         request,
         "menu_admin.html",
         {
-            "products": products,
-            "counts": counts,
+            "products": _product_view(products),
+            "counts": counts.model_dump(),
+            "categories": categories,
             "report": _last_menu_import_report,
             "form_action": "/admin/menu/import-csv",
+            "category_form_action": "/admin/menu/categories/apply",
+            "product_form_action": "/admin/menu/products/apply",
         },
     )
 

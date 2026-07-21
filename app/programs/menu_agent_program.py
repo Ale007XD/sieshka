@@ -130,3 +130,54 @@ PROGRAM_APPLY_MENU = Program(
         ),
     ],
 )
+
+
+# ---------------------------------------------------------------------------
+# APPLY phase — category creation (same 4-step CONVENTION shape as
+# PROGRAM_APPLY_MENU; only tool names and program name differ).
+#
+# Shape:
+#   validate_command [TOOL] → CONDITION(valid) →
+#     apply_command [TOOL, GovernedToolExecutor-wrapped, is_terminal]  (valid)
+#     report_invalid [TOOL, is_terminal]                               (invalid)
+#
+# Command dict placed in context by MenuAgent.apply_category; referenced
+# via "$command" (typed dict, NOT free text — no LLM step here).
+# ---------------------------------------------------------------------------
+
+PROGRAM_APPLY_CATEGORY = Program(
+    name="menu_agent_apply_category",
+    steps=[
+        Step(
+            id="validate_command",
+            type=StepType.TOOL,
+            tool="validate_apply_category_command",
+            args={"command": "$command"},
+            output_key="validation_result",
+            next_step="check_valid",
+        ),
+        Step(
+            id="check_valid",
+            type=StepType.CONDITION,
+            condition="$validate_command.output < 1",
+            then="report_invalid",
+            otherwise="apply_command",
+        ),
+        Step(
+            id="apply_command",
+            type=StepType.TOOL,
+            tool="apply_category_command",
+            args={"command": "$command"},
+            output_key="apply_result",
+            is_terminal=True,
+        ),
+        Step(
+            id="report_invalid",
+            type=StepType.TOOL,
+            tool="report_invalid_category_command",
+            args={"reason": "$validate_command.output"},
+            output_key="invalid_result",
+            is_terminal=True,
+        ),
+    ],
+)
