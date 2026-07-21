@@ -248,6 +248,14 @@ class OrderService:
                 trace = await self._transition_vm(session).run(program, context=context)
 
             if trace.status == TraceStatus.SUCCESS:
+                # Persist trace_id so /admin/ui/orders/{id}/receipt works.
+                if trace.trace_id:
+                    await session.execute(
+                        text(
+                            "UPDATE orders SET trace_id = :trace_id WHERE id = :order_id"
+                        ),
+                        {"trace_id": trace.trace_id, "order_id": order_id},
+                    )
                 if new_state == OrderState.COOKING and event == OrderEvent.START_COOKING:
                     pass
                 elif new_state == OrderState.COOKING:
