@@ -35,8 +35,8 @@
     }
   }
 
-  function formatRub(kopecks) {
-    return (Math.round(Number(kopecks)) / 100).toLocaleString("ru-RU") + " ₽";
+  function formatRub(rub) {
+    return Math.round(Number(rub)).toLocaleString("ru-RU") + " ₽";
   }
 
   function CartManager() {
