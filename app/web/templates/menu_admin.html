@@ -168,11 +168,15 @@
         <th class="px-4 py-3"></th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-200">
-      <template x-if="!products.length">
+    <!-- One <tbody> per product — multiple tbody is valid HTML and the only
+         way to have multiple <tr> per x-for iteration in Alpine 3. -->
+    <template x-if="!products.length">
+      <tbody>
         <tr><td colspan="6" class="px-6 py-12 text-center text-sm text-gray-400">No products found.</td></tr>
-      </template>
-      <template x-for="p in products" :key="p.id">
+      </tbody>
+    </template>
+    <template x-for="p in products" :key="p.id">
+      <tbody>
         <!-- View row -->
         <tr x-show="editingId !== p.id">
           <td class="px-4 py-3 text-sm text-gray-900" x-text="p.name"></td>
@@ -236,8 +240,8 @@
         <tr x-show="editingId === p.id && editError" class="bg-red-50">
           <td colspan="6" class="px-4 py-1 text-xs text-red-600" x-text="editError"></td>
         </tr>
-      </template>
-    </tbody>
+      </tbody>
+    </template>
   </table>
 </div>
 
