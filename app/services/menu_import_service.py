@@ -74,9 +74,12 @@ class SkippedRow(BaseModel):
 class ProductAdminRow(BaseModel):
     """Read model for the admin product table."""
 
+    id: str
     name: str
     category_name: str | None
     price_rub: int | None
+    description: str | None = None
+    image_url: str | None = None
     is_active: bool
 
 
@@ -466,8 +469,9 @@ class MenuImportService:
     ) -> list[ProductAdminRow]:
         result = await session.execute(
             text(
-                "SELECT p.name AS name, c.name AS category_name, "
-                "p.price_rub AS price_rub, p.is_active AS is_active "
+                "SELECT p.id AS id, p.name AS name, c.name AS category_name, "
+                "p.price_rub AS price_rub, p.description AS description, "
+                "p.image_url AS image_url, p.is_active AS is_active "
                 "FROM products p "
                 "LEFT JOIN categories c ON p.category_id = c.id "
                 "ORDER BY p.name"
@@ -476,9 +480,12 @@ class MenuImportService:
         rows = result.fetchall()
         return [
             ProductAdminRow(
+                id=str(row._mapping["id"]),
                 name=row._mapping["name"],
                 category_name=row._mapping["category_name"],
                 price_rub=row._mapping["price_rub"],
+                description=row._mapping["description"],
+                image_url=row._mapping["image_url"],
                 is_active=row._mapping["is_active"],
             )
             for row in rows

@@ -82,6 +82,13 @@ MENU_AGENT_APPLY_CATEGORY_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_invalid_category_command": ["menu:read"],
 }
 
+# Product update phase — own capability dict per the apply-phase CONVENTION.
+MENU_AGENT_UPDATE_PRODUCT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_update_product_command": ["menu:read"],
+    "apply_update_product_command": ["menu:write"],
+    "report_invalid_update_product_command": ["menu:read"],
+}
+
 # schedule_m7_schedule_agent — its OWN capability dict, per the apply-phase
 # CONVENTION (every apply_command needs its own entry; GovernedToolExecutor
 # denies-by-default, so a missing entry fails closed at runtime).
@@ -142,6 +149,10 @@ MENU_AGENT_APPLY_CATEGORY_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": MENU_AGENT_APPLY_CATEGORY_TOOL_CAPABILITIES,
 }
 
+MENU_AGENT_UPDATE_PRODUCT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": MENU_AGENT_UPDATE_PRODUCT_TOOL_CAPABILITIES,
+}
+
 SCHEDULE_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": SCHEDULE_AGENT_TOOL_CAPABILITIES,
 }
@@ -197,6 +208,12 @@ MENU_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     MENU_AGENT_APPLY_CATEGORY_POLICY_CONFIG,
     policy_id="menu-agent-apply-category-v1",
+    version="1.0.0",
+)
+
+MENU_AGENT_UPDATE_PRODUCT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    MENU_AGENT_UPDATE_PRODUCT_POLICY_CONFIG,
+    policy_id="menu-agent-update-product-v1",
     version="1.0.0",
 )
 

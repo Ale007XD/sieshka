@@ -170,6 +170,35 @@ async def menu_product_apply(
     }
 
 
+@router.patch("/menu/products/{product_id}/apply")
+async def menu_product_update(
+    product_id: str,
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    service: MenuImportService = Depends(get_menu_import_service),
+) -> dict[str, Any]:
+    """Update an existing product via the governed update Program.
+
+    product_id is injected from the URL path into the command so the form
+    payload doesn't need to carry it (and can't spoof a different id).
+    """
+    command = {**payload, "product_id": product_id}
+    agent = MenuAgent()
+    apply = await agent.update_product(command)
+    products, counts = await service.get_admin_data()
+    receipt = None
+    if apply.trace_id is not None:
+        receipt = await analyzer.receipt(apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "result": apply.result,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "products": _product_view(products),
+        "counts": counts.model_dump(),
+    }
+
+
 @router.get("/ui/menu", response_class=HTMLResponse)
 async def menu_admin_ui(
     request: Request,

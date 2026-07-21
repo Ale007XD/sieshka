@@ -19,12 +19,15 @@ from app.tools.llm_fallback_tools import (
 from app.tools.menu_agent_tools import (
     apply_category_command,
     apply_menu_command,
+    apply_update_product_command,
     collect_menu_command,
     report_invalid_category_command,
     report_invalid_command,
+    report_invalid_update_product_command,
     validate_apply_category_command,
     validate_apply_command,
     validate_menu_command,
+    validate_update_product_command,
 )
 from app.tools.notification_tools import (
     notify_order_confirmed,
@@ -64,6 +67,7 @@ from app.tools.support_agent_tools import (
 __all__ = [
     "apply_category_command",
     "apply_menu_command",
+    "apply_update_product_command",
     "attempt_gigachat",
     "attempt_openrouter",
     "attempt_yandexgpt",
@@ -77,6 +81,7 @@ __all__ = [
     "report_collect_failure",
     "report_invalid_category_command",
     "report_invalid_command",
+    "report_invalid_update_product_command",
     "decrement_inventory",
     "increment_inventory",
     "log_validation_failure",
@@ -96,6 +101,7 @@ __all__ = [
     "validate_promotion_command",
     "validate_support_command",
     "validate_order_items",
+    "validate_update_product_command",
     "write_kitchen_state_handed_off",
     "write_kitchen_state_preparing",
     "write_kitchen_state_queued",

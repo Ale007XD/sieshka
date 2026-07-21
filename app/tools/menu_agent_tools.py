@@ -404,3 +404,187 @@ async def report_invalid_category_command(reason: str, **kwargs: object) -> str:
     """Terminal tool: invalid-branch terminal for the category apply phase."""
     logger.warning("report_invalid_category_command: %s", reason)
     return f"INVALID:{reason}"
+
+
+# ---------------------------------------------------------------------------
+# APPLY phase — product update (mirrors zone_agent update action pattern)
+# ---------------------------------------------------------------------------
+
+
+def _required_update_product_fields(
+    command: Any,
+) -> tuple[str, str | None, str | None, int | None, str | None, str | None, bool | None] | None:
+    """Extract (product_id, name, category, price_rub, description, image_url, is_active).
+
+    product_id is required (UUID string). All other fields are optional —
+    None means "leave unchanged" (COALESCE pattern at write time).
+    Returns None on any structural problem.
+    """
+    if not isinstance(command, dict):
+        return None
+    product_id = command.get("product_id")
+    if not isinstance(product_id, str) or not product_id.strip():
+        return None
+
+    name = command.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        return None
+
+    category = command.get("category")
+    if category is not None and (not isinstance(category, str) or not category.strip()):
+        return None
+
+    price_rub = command.get("price_rub")
+    if price_rub is not None:
+        if isinstance(price_rub, bool) or not isinstance(price_rub, int):
+            return None
+        if price_rub < 0:
+            return None
+
+    description = command.get("description")
+    if description is not None and not isinstance(description, str):
+        return None
+
+    image_url = command.get("image_url")
+    if image_url is not None and not isinstance(image_url, str):
+        return None
+
+    is_active = command.get("is_active")
+    if is_active is not None and not isinstance(is_active, bool):
+        return None
+
+    return (
+        product_id.strip(),
+        name.strip() if name else None,
+        category.strip() if category else None,
+        price_rub,
+        description,
+        image_url,
+        is_active,
+    )
+
+
+async def validate_update_product_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> int:
+    """Early-rejection convenience for product update. Numeric sentinel.
+
+    NOT the enforcement point — apply_update_product_command re-verifies at
+    write time (TOCTOU, same shape as validate_apply_command).
+    """
+    parsed = _required_update_product_fields(command)
+    if parsed is None:
+        logger.warning("validate_update_product_command: malformed command")
+        return 0
+    product_id, _name, category, _price, _desc, _img, _active = parsed
+
+    existing = await session.execute(
+        text("SELECT id FROM products WHERE id = :id"),
+        {"id": product_id},
+    )
+    if not existing.fetchall():
+        logger.warning(
+            "validate_update_product_command: product_id '%s' not found", product_id
+        )
+        return 0
+
+    if category is not None:
+        cat = await session.execute(
+            text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
+            {"name": category},
+        )
+        if len(cat.fetchall()) != 1:
+            logger.warning(
+                "validate_update_product_command: category '%s' not uniquely resolvable",
+                category,
+            )
+            return 0
+
+    logger.info("validate_update_product_command: product_id '%s' valid", product_id)
+    return 1
+
+
+async def apply_update_product_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> dict[str, Any]:
+    """Terminal tool: update an existing product row.
+
+    is_terminal, no downstream CONDITION → MUST raise on any write failure.
+
+    TOCTOU RE-CHECK: product row locked with FOR UPDATE; category re-resolved
+    inside the same transaction (same discipline as apply_menu_command).
+
+    Only fields present and non-None in the command are updated; absent fields
+    are left unchanged via COALESCE (same pattern as zone_agent update action).
+    """
+    parsed = _required_update_product_fields(command)
+    if parsed is None:
+        raise ValueError("apply_update_product_command: malformed command")
+    product_id, name, category, price_rub, description, image_url, is_active = parsed
+
+    # Re-check product exists and lock the row.
+    existing = await session.execute(
+        text("SELECT id FROM products WHERE id = :id FOR UPDATE"),
+        {"id": product_id},
+    )
+    if not existing.fetchall():
+        logger.error(
+            "apply_update_product_command: product_id '%s' not found at write time",
+            product_id,
+        )
+        raise ValueError(f"product not found at write time: {product_id!r}")
+
+    # Resolve category if provided.
+    category_id: UUID | None = None
+    if category is not None:
+        cat = await session.execute(
+            text(
+                "SELECT id FROM categories WHERE lower(name) = lower(:name) FOR UPDATE"
+            ),
+            {"name": category},
+        )
+        cat_matches = cat.fetchall()
+        if len(cat_matches) != 1:
+            logger.error(
+                "apply_update_product_command: category '%s' resolves to %d rows at write time",
+                category, len(cat_matches),
+            )
+            raise ValueError(
+                f"category not uniquely resolvable at write time: {category!r} "
+                f"({len(cat_matches)} matches)"
+            )
+        category_id = cat_matches[0]._mapping["id"]
+
+    await session.execute(
+        text(
+            "UPDATE products SET "
+            "name        = COALESCE(:name,        name), "
+            "category_id = COALESCE(:category_id, category_id), "
+            "price_rub   = COALESCE(:price_rub,   price_rub), "
+            "description = COALESCE(:description, description), "
+            "image_url   = COALESCE(:image_url,   image_url), "
+            "is_active   = COALESCE(:is_active,   is_active) "
+            "WHERE id = :product_id"
+        ),
+        {
+            "product_id": product_id,
+            "name": name,
+            "category_id": category_id,
+            "price_rub": price_rub,
+            "description": description,
+            "image_url": image_url,
+            "is_active": is_active,
+        },
+    )
+    logger.info("apply_update_product_command: updated product id=%s", product_id)
+    return {"applied": True, "product_id": product_id}
+
+
+async def report_invalid_update_product_command(reason: str, **kwargs: object) -> str:
+    """Terminal tool: invalid-branch terminal for the product update phase."""
+    logger.warning("report_invalid_update_product_command: %s", reason)
+    return f"INVALID:{reason}"
