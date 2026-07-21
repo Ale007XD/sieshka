@@ -112,9 +112,12 @@ async def _fetch_categories_ref() -> list[dict[str, Any]]:
 def _product_view(products: list[Any]) -> list[dict[str, Any]]:
     return [
         {
+            "id": p.id,
             "name": p.name,
             "category_name": p.category_name,
             "price_rub": p.price_rub,
+            "description": p.description,
+            "image_url": p.image_url,
             "is_active": p.is_active,
         }
         for p in products
