@@ -304,8 +304,6 @@ function menuAdmin() {
       this.editError = null;
       try {
         const payload = { ...this.editForm };
-        // Strip empty optional strings so backend treats them as "no change"
-        // by omitting them; keep null price_rub as-is (null = unpriced).
         if (payload.description === '') delete payload.description;
         if (payload.image_url === '') delete payload.image_url;
         if (payload.category === '') delete payload.category;
@@ -314,6 +312,11 @@ function menuAdmin() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        if (!resp.ok) {
+          const text = await resp.text();
+          this.editError = `Server error ${resp.status}: ${text.slice(0, 200)}`;
+          return;
+        }
         const data = await resp.json();
         if (data.ok) {
           if (data.products) this.products = data.products;

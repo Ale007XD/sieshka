@@ -26,6 +26,7 @@ from nano_vm.validator import ProgramValidator
 from nano_vm_mcp.handlers import GovernedToolExecutor
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.db_nano import get_store
 from app.policy.policy_snapshot import (
     MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT,
     MENU_AGENT_APPLY_POLICY_SNAPSHOT,
@@ -106,6 +107,8 @@ class MenuAgent:
     ) -> None:
         self._vm = vm
         self._session_factory = session_factory
+        self._apply_vm = apply_vm
+        self._store = get_store()
         self._apply_vm = apply_vm
 
     def _build_vm(self) -> _VMProtocol:
@@ -346,6 +349,17 @@ class MenuAgent:
         session: AsyncSession | None,
     ) -> MenuApplyResult:
         trace = await vm.run(program, context={"command": command})
+
+        # Persist trace to SQLite store so receipt viewer works.
+        if trace.trace_id:
+            self._store.save_trace(
+                trace_id=trace.trace_id,
+                program_id=trace.program_name,
+                status=trace.status.value,
+                steps_count=len(trace.steps),
+                total_cost=trace.total_cost_usd() or 0.0,
+                trace=trace.model_dump(mode="json"),
+            )
 
         if trace.status == TraceStatus.SUCCESS:
             apply_step = next(
