@@ -14,8 +14,7 @@
           <div class="mt-2">
             {% if ticket.state.value == 'NEW' %}
             <button
-              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
-              hx-vals='"QUEUE"'
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events/QUEUE"
               hx-target="#kitchen-board"
               hx-swap="innerHTML"
               class="w-full text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">
@@ -23,8 +22,7 @@
             </button>
             {% elif ticket.state.value == 'QUEUED' %}
             <button
-              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
-              hx-vals='"START_PREP"'
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events/START_PREP"
               hx-target="#kitchen-board"
               hx-swap="innerHTML"
               class="w-full text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200">
@@ -32,8 +30,7 @@
             </button>
             {% elif ticket.state.value == 'PREPARING' %}
             <button
-              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
-              hx-vals='"MARK_READY"'
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events/MARK_READY"
               hx-target="#kitchen-board"
               hx-swap="innerHTML"
               class="w-full text-xs font-medium px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200">
@@ -41,8 +38,7 @@
             </button>
             {% elif ticket.state.value == 'READY' %}
             <button
-              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
-              hx-vals='"HAND_OFF"'
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events/HAND_OFF"
               hx-target="#kitchen-board"
               hx-swap="innerHTML"
               class="w-full text-xs font-medium px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">

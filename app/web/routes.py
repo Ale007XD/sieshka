@@ -128,16 +128,15 @@ async def kitchen_board_partial(
     )
 
 
-@router.post("/kitchen/tickets/{ticket_id}/events", response_class=Response)
+@router.post("/kitchen/tickets/{ticket_id}/events/{event}", response_class=Response)
 async def kitchen_ticket_event(
     request: Request,
     ticket_id: UUID,
+    event: str,
     service: KitchenService = Depends(get_kitchen_service),
 ) -> Response:
     from app.domains.kitchen.fsm import KitchenEvent
-    body = await request.json()
-    event = KitchenEvent(body)
-    await service.transition_ticket(str(ticket_id), event)
+    await service.transition_ticket(str(ticket_id), KitchenEvent(event))
     tickets = await service.list_tickets()
     columns = _group_kitchen_tickets(tickets)
     templates = request.app.state.templates
