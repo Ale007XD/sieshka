@@ -11,6 +11,45 @@
         <div class="bg-gray-50 rounded p-3 border border-gray-200">
           <div class="text-sm font-medium text-gray-900 truncate">{{ ticket.id|string|truncate(8, True, '…') }}</div>
           <div class="text-xs text-gray-500 mt-1">Order: {{ ticket.order_id|string|truncate(8, True, '…') }}</div>
+          <div class="mt-2">
+            {% if ticket.state.value == 'NEW' %}
+            <button
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
+              hx-vals='"QUEUE"'
+              hx-target="#kitchen-board"
+              hx-swap="innerHTML"
+              class="w-full text-xs font-medium px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">
+              В очередь →
+            </button>
+            {% elif ticket.state.value == 'QUEUED' %}
+            <button
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
+              hx-vals='"START_PREP"'
+              hx-target="#kitchen-board"
+              hx-swap="innerHTML"
+              class="w-full text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200">
+              Готовим →
+            </button>
+            {% elif ticket.state.value == 'PREPARING' %}
+            <button
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
+              hx-vals='"MARK_READY"'
+              hx-target="#kitchen-board"
+              hx-swap="innerHTML"
+              class="w-full text-xs font-medium px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200">
+              Готово →
+            </button>
+            {% elif ticket.state.value == 'READY' %}
+            <button
+              hx-post="/admin/ui/kitchen/tickets/{{ ticket.id }}/events"
+              hx-vals='"HAND_OFF"'
+              hx-target="#kitchen-board"
+              hx-swap="innerHTML"
+              class="w-full text-xs font-medium px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">
+              Выдано ✓
+            </button>
+            {% endif %}
+          </div>
         </div>
         {% else %}
         <p class="text-xs text-gray-400 text-center py-8">No tickets</p>
