@@ -46,6 +46,7 @@ ORDER_TRANSITIONS: dict[OrderState, dict[OrderEvent, OrderState]] = {
     },
     OrderState.CONFIRMED: {
         OrderEvent.REQUEST_PAYMENT: OrderState.PAYMENT_PENDING,
+        OrderEvent.START_COOKING: OrderState.COOKING,  # cash orders skip payment
         OrderEvent.CANCEL: OrderState.CANCELLED,
     },
     OrderState.PAYMENT_PENDING: {
