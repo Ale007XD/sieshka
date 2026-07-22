@@ -346,8 +346,10 @@ class TestScheduleAgentApplyPhase:
         """
         from datetime import timedelta
 
+        from app.services.schedule_service import _menu_timezone
+
         await _seed_permanent(session)
-        yesterday = (datetime.now().date() - timedelta(days=1))
+        yesterday = (datetime.now(_menu_timezone()).date() - timedelta(days=1))
         await session.execute(
             text(
                 "INSERT INTO schedule_windows "

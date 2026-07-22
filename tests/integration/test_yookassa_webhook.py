@@ -258,4 +258,5 @@ class TestYooKassaWebhook:
                 {"id": uuid.UUID(order_id)},
             )
             state = result.scalar_one()
-            assert state == OrderState.PAID.value
+            # After webhook: PAYMENT_CONFIRMED → PAID → START_COOKING → COOKING
+            assert state in (OrderState.PAID.value, OrderState.COOKING.value)

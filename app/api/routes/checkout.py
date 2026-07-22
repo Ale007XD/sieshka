@@ -179,6 +179,13 @@ async def checkout(
 
     # Cash: no external payment — confirm the order so the kitchen can proceed.
     await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
+    cooking = await order_service.transition_order(str(order.id), OrderEvent.START_COOKING)
+    if not cooking.success:
+        import logging
+        logging.getLogger(__name__).warning(
+            "checkout: START_COOKING failed for cash order %s: %s",
+            order.id, cooking.reason,
+        )
     await idempotency.update_payload(
         idem_key,
         {

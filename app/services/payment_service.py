@@ -279,4 +279,16 @@ class PaymentService:
                 session, order_id, OrderEvent.PAYMENT_CONFIRMED, current_state,
             )
             await session.commit()
-            return result
+
+        # Auto-advance to COOKING so the kitchen board picks up the order.
+        if result.success:
+            from app.services.order_service import OrderService
+            svc = OrderService(session_factory=self._session_factory)
+            cooking = await svc.transition_order(order_id, OrderEvent.START_COOKING)
+            if not cooking.success:
+                logger.warning(
+                    "PaymentService: START_COOKING failed for order %s: %s",
+                    order_id, cooking.reason,
+                )
+
+        return result
