@@ -244,10 +244,16 @@ async def write_order_state_cooking(
     ticket_id: str,
     **kwargs: object,
 ) -> str:
-    """Terminal tool: PAID → COOKING. Writes order + ticket in single PG tx."""  # terminal-tool
+    """Terminal tool: PAID|CONFIRMED → COOKING. Writes order + ticket in single PG tx.
+
+    Accepts both PAID (card payments) and CONFIRMED (cash payments that skip
+    the payment step) as valid prior states.
+    """  # terminal-tool
     from sqlalchemy import text as sql_text
 
     from app.domains.orders.models import OrderState
+
+    _ALLOWED_PRIOR = {OrderState.PAID.value, OrderState.CONFIRMED.value}
 
     row = await session.execute(
         sql_text("SELECT state FROM orders WHERE id = :id FOR UPDATE"),
@@ -257,12 +263,12 @@ async def write_order_state_cooking(
     if current is None:
         logger.error("write_order_state_cooking: order %s not found", order_id)
         raise ValueError(f"order not found: {order_id}")
-    if current != OrderState.PAID.value:
+    if current not in _ALLOWED_PRIOR:
         logger.warning(
-            "write_order_state_cooking: expected PAID, got %s", current
+            "write_order_state_cooking: expected PAID or CONFIRMED, got %s", current
         )
         raise ValueError(
-            f"invalid state transition: expected PAID, got {current}"
+            f"invalid state transition: expected PAID or CONFIRMED, got {current}"
         )
     await session.execute(
         sql_text("UPDATE orders SET state = :state WHERE id = :id"),

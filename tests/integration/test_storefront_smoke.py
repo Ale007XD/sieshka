@@ -255,8 +255,8 @@ class TestStorefrontSmoke:
         assert "confirmation_token" not in data or data["confirmation_token"] is None
 
         order_id = uuid.UUID(data["order_id"])
-        # cash: real FSM advanced DRAFT -> CONFIRMED via nano-vm program.
-        assert await _order_state(session_factory, order_id) == "CONFIRMED"
+        # cash: auto-advances DRAFT -> CONFIRMED -> COOKING via nano-vm program.
+        assert await _order_state(session_factory, order_id) in ("CONFIRMED", "COOKING")
 
         thanks = await client.get(f"/thanks/{order_id}")
         assert thanks.status_code == 200

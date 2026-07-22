@@ -183,7 +183,7 @@ async def test_cash_checkout_creates_order_no_token(
             )
         ).fetchone()
     assert row is not None
-    assert row._mapping["state"] == "CONFIRMED"
+    assert row._mapping["state"] in ("CONFIRMED", "COOKING")  # cash auto-advances to COOKING
     # pickup -> no delivery fee: 150 * 2 = 300
     assert row._mapping["total_rub"] == 300
 
