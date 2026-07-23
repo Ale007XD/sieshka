@@ -58,7 +58,8 @@ class KitchenService:
             else:
                 return result
 
-        # Cross-domain: HANDED_OFF → advance order to PACKING atomically.
+        # Cross-domain: HANDED_OFF → advance order to PACKING, then
+        # auto-close pickup orders (delivery_mode='pickup').
         if event == KitchenEvent.HAND_OFF and result.success:
             try:
                 from app.domains.orders.models import OrderEvent
@@ -66,21 +67,34 @@ class KitchenService:
 
                 async with self._session_factory() as session:
                     row = await session.execute(
-                        text("SELECT order_id FROM kitchen_tickets WHERE id = :id"),
+                        text(
+                            "SELECT kt.order_id, o.delivery_mode "
+                            "FROM kitchen_tickets kt "
+                            "JOIN orders o ON o.id = kt.order_id "
+                            "WHERE kt.id = :id"
+                        ),
                         {"id": UUID(ticket_id)},
                     )
-                    order_id = row.scalar_one_or_none()
+                    record = row.fetchone()
 
-                if order_id is not None:
+                if record is not None:
+                    order_id = str(record._mapping["order_id"])
+                    delivery_mode = record._mapping["delivery_mode"]
                     svc = OrderService(session_factory=self._session_factory)
-                    packing = await svc.transition_order(
-                        str(order_id), OrderEvent.START_PACKING
-                    )
+
+                    packing = await svc.transition_order(order_id, OrderEvent.START_PACKING)
                     if not packing.success:
                         logger.warning(
                             "KitchenService: START_PACKING failed for order %s: %s",
                             order_id, packing.reason,
                         )
+                    elif delivery_mode == "pickup":
+                        close = await svc.transition_order(order_id, OrderEvent.CLOSE)
+                        if not close.success:
+                            logger.warning(
+                                "KitchenService: CLOSE failed for pickup order %s: %s",
+                                order_id, close.reason,
+                            )
             except Exception:
                 logger.exception(
                     "KitchenService: error advancing order after HAND_OFF ticket=%s",

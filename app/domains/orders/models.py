@@ -63,6 +63,7 @@ ORDER_TRANSITIONS: dict[OrderState, dict[OrderEvent, OrderState]] = {
     },
     OrderState.PACKING: {
         OrderEvent.ASSIGN_COURIER: OrderState.COURIER_ASSIGNED,
+        OrderEvent.CLOSE: OrderState.CLOSED,  # pickup orders: skip delivery
     },
     OrderState.COURIER_ASSIGNED: {
         OrderEvent.PICKUP: OrderState.DELIVERING,

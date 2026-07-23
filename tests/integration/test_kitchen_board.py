@@ -150,7 +150,7 @@ class TestKitchenBoard:
 
         resp = await client.get("/admin/ui/kitchen/partial")
         html = resp.text
-        for col in ("NEW", "QUEUED", "PREPARING", "READY", "HANDED_OFF"):
+        for col in ("Новые", "В очереди", "Готовятся", "Готово", "Выдано"):
             assert col in html
 
     async def test_partial_shows_created_ticket(

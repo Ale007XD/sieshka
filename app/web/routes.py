@@ -22,12 +22,12 @@ from app.web.helpers import INVENTORY_STATE_COLOR, PROMOTION_STATE_COLOR
 router = APIRouter(prefix="/admin/ui")
 
 _COLUMN_GROUPING: list[tuple[str, set[OrderState]]] = [
-    ("DRAFT", {OrderState.DRAFT}),
-    ("CONFIRMED", {OrderState.CONFIRMED, OrderState.PAYMENT_PENDING, OrderState.PAID}),
-    ("COOKING", {OrderState.COOKING}),
-    ("READY", {OrderState.PACKING, OrderState.COURIER_ASSIGNED, OrderState.DELIVERING}),
-    ("DELIVERED", {OrderState.DELIVERED, OrderState.CLOSED}),
-    ("CANCELLED", {OrderState.CANCELLED}),
+    ("Новые", {OrderState.DRAFT}),
+    ("Подтверждены", {OrderState.CONFIRMED, OrderState.PAYMENT_PENDING, OrderState.PAID}),
+    ("Готовятся", {OrderState.COOKING}),
+    ("Готовы", {OrderState.PACKING, OrderState.COURIER_ASSIGNED, OrderState.DELIVERING}),
+    ("Выданы", {OrderState.DELIVERED, OrderState.CLOSED}),
+    ("Отменены", {OrderState.CANCELLED}),
 ]
 
 
@@ -46,11 +46,11 @@ def get_order_service() -> OrderService:
 
 
 _KITCHEN_COLUMNS: list[tuple[str, set[KitchenState]]] = [
-    ("NEW", {KitchenState.NEW}),
-    ("QUEUED", {KitchenState.QUEUED}),
-    ("PREPARING", {KitchenState.PREPARING}),
-    ("READY", {KitchenState.READY}),
-    ("HANDED_OFF", {KitchenState.HANDED_OFF}),
+    ("Новые", {KitchenState.NEW}),
+    ("В очереди", {KitchenState.QUEUED}),
+    ("Готовятся", {KitchenState.PREPARING}),
+    ("Готово", {KitchenState.READY}),
+    ("Выдано", {KitchenState.HANDED_OFF}),
 ]
 
 

@@ -1,25 +1,56 @@
-<div class="flex gap-4 overflow-x-auto pb-4">
+<div x-data="ordersBoard()" class="w-full">
+  <!-- Tab bar -->
+  <div class="flex overflow-x-auto border-b border-gray-200 mb-4 gap-1">
+    {% for column_name, col_orders in columns.items() %}
+    <button
+      @click="activeTab = '{{ column_name }}'"
+      :class="activeTab === '{{ column_name }}'
+        ? 'border-b-2 border-indigo-600 text-indigo-600 font-semibold'
+        : 'text-gray-500 hover:text-gray-700'"
+      class="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap focus:outline-none">
+      {{ column_name }}
+      <span class="ml-1 text-xs px-1.5 py-0.5 rounded-full
+        {% if col_orders|length > 0 %}bg-indigo-100 text-indigo-700{% else %}bg-gray-100 text-gray-400{% endif %}">
+        {{ col_orders|length }}
+      </span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- Tab panels -->
   {% for column_name, col_orders in columns.items() %}
-  <div class="flex-shrink-0 w-72">
-    <div class="bg-white rounded-lg shadow">
-      <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h3 class="font-semibold text-gray-900">{{ column_name }}</h3>
-        <span class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{{ col_orders|length }}</span>
-      </div>
-      <div class="p-3 space-y-3 min-h-[200px]">
-        {% for order in col_orders %}
-        <div class="bg-gray-50 rounded p-3 border border-gray-200">
-          <div class="text-sm font-medium text-gray-900 truncate">{{ order.id|string|truncate(8, True, '…') }}</div>
-          <div class="text-xs text-gray-500 mt-1">{{ order.items|length }} item{% if order.items|length != 1 %}s{% endif %}</div>
-          <div class="text-xs text-gray-500 truncate">{{ order.delivery_address }}</div>
-          <a href="/admin/ui/orders/{{ order.id }}/receipt"
-             class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">Receipt →</a>
+  <div x-show="activeTab === '{{ column_name }}'">
+    {% if col_orders %}
+    <div class="space-y-3">
+      {% for order in col_orders %}
+      <div class="bg-white rounded-lg shadow p-4 border border-gray-100">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium text-gray-900">{{ order.id|string|truncate(8, True, '…') }}</span>
+          <span class="text-xs text-gray-400">{{ order.items|length }} поз.</span>
         </div>
-        {% else %}
-        <p class="text-xs text-gray-400 text-center py-8">No orders</p>
-        {% endfor %}
+        <div class="text-xs text-gray-500 truncate mb-2">{{ order.delivery_address }}</div>
+        <a href="/admin/ui/orders/{{ order.id }}/receipt"
+           class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Трейс →</a>
       </div>
+      {% endfor %}
     </div>
+    {% else %}
+    <p class="text-sm text-gray-400 text-center py-12">Нет заказов</p>
+    {% endif %}
   </div>
   {% endfor %}
 </div>
+
+<script>
+  function ordersBoard() {
+    return {
+      activeTab: localStorage.getItem('orders_tab') || '{{ columns.keys()|list|first }}',
+      get activeTab() { return this._activeTab; },
+      set activeTab(v) {
+        this._activeTab = v;
+        localStorage.setItem('orders_tab', v);
+      },
+      _activeTab: localStorage.getItem('orders_tab') || '{{ columns.keys()|list|first }}',
+    };
+  }
+</script>
