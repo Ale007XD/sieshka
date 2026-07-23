@@ -1,60 +1,286 @@
 {% extends "customer/shop_base.html" %}
 {% block title %}Оформление заказа — Sieshka{% endblock %}
-{% block content %}
-<section class="checkout-page">
-  <h1>Оформление заказа</h1>
 
-  {% if show_delivery_notice %}
-  <div class="notice notice-warn" id="delivery-notice">
-    {% if preorder_info and preorder_info.is_preorder %}
-      Приём предзаказов. Открытие вечернего меню в {{ preorder_info.opens_at }}.
-    {% else %}
-      Обратите внимание: сейчас вне времени приёма заказов.
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <div id="checkout-empty" class="muted" hidden>Корзина пуста. Вернитесь в <a href="/">меню</a>.</div>
-
-  <form id="checkout-form" class="checkout-form" novalidate>
-    <label class="field">
-      <span>Имя</span>
-      <input type="text" name="name" id="f-name" required autocomplete="name">
-    </label>
-    <label class="field">
-      <span>Телефон</span>
-      <input type="tel" name="phone" id="f-phone" required autocomplete="tel">
-    </label>
-    <fieldset class="field">
-      <legend>Способ получения</legend>
-      <label><input type="radio" name="delivery_mode" value="delivery" checked> Доставка</label>
-      <label><input type="radio" name="delivery_mode" value="pickup"> Самовывоз</label>
-    </fieldset>
-    <label class="field" id="address-field">
-      <span>Адрес доставки</span>
-      <input type="text" name="address" id="f-address" autocomplete="street-address">
-    </label>
-    <label class="field">
-      <span>Зона доставки</span>
-      <select name="zone_id" id="f-zone">
-        <option value="">— выберите зону —</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Комментарий</span>
-      <textarea name="comment" id="f-comment" rows="3"></textarea>
-    </label>
-    <fieldset class="field">
-      <legend>Оплата</legend>
-      <label><input type="radio" name="payment_method" value="yookassa_card" checked> Карта (ЮKassa)</label>
-      <label><input type="radio" name="payment_method" value="cash"> Наличные</label>
-    </fieldset>
-    <div id="yookassa-widget" hidden></div>
-    <button type="submit" class="btn btn-primary" id="checkout-submit">Оплатить и заказать</button>
-    <div id="checkout-error" class="notice notice-error" hidden></div>
-  </form>
-</section>
+{% block head %}
+<style>
+  .checkout-section {
+    max-width: 540px;
+    margin: 0 auto;
+  }
+  .payment-option, .delivery-option {
+    border: 2px solid var(--color-accent-border);
+    border-radius: var(--radius-lg);
+    padding: 0.875rem 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: var(--color-bg-secondary);
+  }
+  .payment-option:has(input:checked),
+  .delivery-option:has(input:checked) {
+    border-color: var(--brand-primary);
+    background: var(--color-accent-bg);
+  }
+  .payment-option input,
+  .delivery-option input { display: none; }
+  .order-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-accent-border);
+  }
+  .order-item-row:last-child { border-bottom: none; }
+</style>
 {% endblock %}
+
+{% block content %}
+<div class="checkout-section py-3">
+  <h1 class="h4 fw-bold mb-4">Оформление заказа</h1>
+
+  <div id="checkout-empty" class="text-center py-5 d-none">
+    <i class="bi bi-cart-x fs-1 text-muted d-block mb-3"></i>
+    <p class="text-muted mb-3">Корзина пуста</p>
+    <a href="/" class="btn btn-brand rounded-pill px-4">Перейти в меню</a>
+  </div>
+
+  <form id="checkout-form">
+    <input type="hidden" id="f-name" name="name">
+    <input type="hidden" id="f-phone" name="phone">
+    <input type="hidden" id="f-address" name="address">
+    <input type="hidden" id="f-comment" name="comment">
+
+    <!-- Скрытые элементы, требуемые cart.js -->
+    <div id="cart" class="d-none"></div>
+    <div id="cart-badge" class="d-none"></div>
+    <div id="cartActions" class="d-none"></div>
+    <div id="cartBadge" class="d-none"></div>
+    <div id="cartReal" class="d-none"></div>
+    <div id="emptyCart" class="d-none"></div>
+    <button id="offcanvasClearBtn" class="d-none" type="button"></button>
+    <div id="yookassa-widget-container" class="d-none"></div>
+
+    <!-- Состав заказа -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="fw-semibold"><i class="bi bi-bag me-2"></i>Ваш заказ</span>
+      </div>
+      <div class="card-body p-3">
+        <div id="orderItemsList">
+          <div class="text-center text-muted py-3">
+            <div class="spinner-border spinner-border-sm text-danger" role="status"></div>
+          </div>
+        </div>
+        <div id="orderTotals" class="mt-2 d-none">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Товары:</span>
+            <span id="checkoutSubtotal">0 ₽</span>
+          </div>
+          <div class="d-flex justify-content-between small text-muted mb-2" id="deliveryFeeRow">
+            <span>Доставка:</span>
+            <span id="checkoutDeliveryFee">0 ₽</span>
+          </div>
+<div class="d-flex justify-content-between fw-bold">
+             <span>Итого:</span>
+             <span class="price" id="checkoutGrandTotal">0 ₽</span>
+           </div>
+         </div>
+       </div>
+     </div>
+
+     <!-- Recently deleted items (for undo) -->
+     <div id="recentlyDeletedSection" class="d-none mb-3">
+       <div id="recentlyDeletedList"></div>
+     </div>
+
+    <!-- Контакты -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="fw-semibold"><i class="bi bi-person me-2"></i>Контактные данные</span>
+      </div>
+      <div class="card-body p-3">
+        <div class="mb-3">
+          <label for="name" class="form-label small fw-semibold">Имя *</label>
+          <input type="text" class="form-control" id="name" name="name"
+                 placeholder="Ваше имя" autocomplete="name" required>
+        </div>
+        <div class="mb-0">
+          <label for="phone" class="form-label small fw-semibold">Телефон *</label>
+          <input type="tel" class="form-control" id="phone" name="phone"
+                 placeholder="+7 (___) ___-__-__" autocomplete="tel" required>
+        </div>
+      </div>
+    </div>
+
+    <!-- Способ получения -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="fw-semibold"><i class="bi bi-geo-alt me-2"></i>Способ получения</span>
+      </div>
+      <div class="card-body p-3">
+        <div class="d-flex gap-3 mb-3">
+          <label class="delivery-option flex-fill text-center">
+            <input type="radio" name="delivery_mode" id="delivery_delivery" value="delivery" checked>
+            <i class="bi bi-truck d-block fs-4 mb-1 text-brand"></i>
+            <span class="small fw-semibold">Доставка</span>
+          </label>
+          <label class="delivery-option flex-fill text-center">
+            <input type="radio" name="delivery_mode" id="delivery_pickup" value="pickup">
+            <i class="bi bi-shop d-block fs-4 mb-1 text-brand"></i>
+            <span class="small fw-semibold">Самовывоз</span>
+          </label>
+        </div>
+
+        <div id="address-field">
+          <div class="mb-3">
+            <label for="address" class="form-label small fw-semibold">Адрес доставки *</label>
+            <input type="text" class="form-control" id="address" name="address"
+                   placeholder="Улица, дом, квартира" autocomplete="street-address">
+          </div>
+          <div class="mb-0">
+            <label for="f-zone" class="form-label small fw-semibold">Зона доставки *</label>
+            <select class="form-select" id="f-zone" name="zone_id">
+              <option value="">— выберите зону —</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="pickup-info" class="alert alert-info d-none py-2 mb-0" role="alert">
+          <i class="bi bi-geo-alt me-2"></i>
+          Самовывоз: уточните адрес по телефону <a href="tel:+79641027995" class="alert-link">+7 (964) 102-79-95</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Комментарий -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="fw-semibold"><i class="bi bi-chat-left-text me-2"></i>Комментарий</span>
+      </div>
+      <div class="card-body p-3">
+        <textarea class="form-control" id="comment" name="comment" rows="2"
+                  placeholder="Пожелания к заказу или доставке..."></textarea>
+      </div>
+    </div>
+
+    <!-- Оплата -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="fw-semibold"><i class="bi bi-credit-card me-2"></i>Способ оплаты</span>
+      </div>
+      <div class="card-body p-3">
+        <div class="d-flex gap-3">
+          <label class="payment-option flex-fill text-center">
+            <input type="radio" name="payment_method" value="yookassa_card" checked>
+            <i class="bi bi-credit-card d-block fs-4 mb-1 text-brand"></i>
+            <span class="small fw-semibold">Карта онлайн</span>
+            <div class="text-muted" style="font-size:0.7rem;">ЮKassa</div>
+          </label>
+          <label class="payment-option flex-fill text-center">
+            <input type="radio" name="payment_method" value="cash">
+            <i class="bi bi-cash-coin d-block fs-4 mb-1 text-brand"></i>
+            <span class="small fw-semibold">Наличные</span>
+            <div class="text-muted" style="font-size:0.7rem;">При получении</div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- YooKassa widget -->
+    <div id="yookassa-widget" hidden></div>
+
+    <!-- Ошибка -->
+    <div id="checkout-error" class="alert alert-danger d-none mb-3" role="alert"></div>
+
+    <!-- Кнопка -->
+    <div class="d-grid">
+      <button type="submit" class="btn btn-brand btn-lg rounded-pill" id="checkout-submit" name="submit">
+        <i class="bi bi-check-circle me-2"></i>Оплатить и заказать
+      </button>
+    </div>
+
+  </form>
+</div>
+{% endblock %}
+
 {% block scripts %}
-<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function() {
+  // Render order items
+  var items = CartManager.loadCart();
+  var listEl = document.getElementById('orderItemsList');
+  var totalsEl = document.getElementById('orderTotals');
+  var emptyEl = document.getElementById('checkout-empty');
+  var formEl = document.getElementById('checkout-form');
+
+  if (!items || items.length === 0) {
+    if (emptyEl) emptyEl.classList.remove('d-none');
+    if (formEl) formEl.classList.add('d-none');
+    return;
+  }
+
+  var subtotal = 0;
+  var html = '';
+  items.forEach(function(item) {
+    var lineTotal = item.price_rub * item.qty;
+    subtotal += lineTotal;
+    html += '<div class="order-item-row">' +
+      '<span class="small">' + escapeHtmlLocal(item.name) + ' × ' + item.qty + '</span>' +
+      '<span class="small fw-semibold price">' + lineTotal + ' ₽</span>' +
+      '</div>';
+  });
+  listEl.innerHTML = html;
+
+  // Totals
+  CartManager.getDeliveryFee().then(function(fee) {
+    var isPickup = document.getElementById('delivery_pickup').checked;
+    var effectiveFee = isPickup ? 0 : fee;
+    document.getElementById('checkoutSubtotal').textContent = subtotal + ' ₽';
+    document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
+    document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
+    totalsEl.classList.remove('d-none');
+  });
+
+  // Toggle address/zone on delivery mode change
+  var addressField = document.getElementById('address-field');
+  var pickupInfo = document.getElementById('pickup-info');
+  var deliveryFeeRow = document.getElementById('deliveryFeeRow');
+
+  function toggleDeliveryMode() {
+    var isPickup = document.getElementById('delivery_pickup').checked;
+    if (isPickup) {
+      addressField.classList.add('d-none');
+      pickupInfo.classList.remove('d-none');
+    } else {
+      addressField.classList.remove('d-none');
+      pickupInfo.classList.add('d-none');
+    }
+    CartManager.getDeliveryFee().then(function(fee) {
+      var effectiveFee = isPickup ? 0 : fee;
+      document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
+      document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
+    });
+  }
+
+  document.querySelectorAll('input[name="delivery_mode"]').forEach(function(el) {
+    el.addEventListener('change', toggleDeliveryMode);
+  });
+
+  // Load zones
+  fetch('/api/delivery-zones').then(function(r) { return r.json(); }).then(function(zones) {
+    var select = document.getElementById('f-zone');
+    zones.forEach(function(z) {
+      var opt = document.createElement('option');
+      opt.value = z.id;
+      opt.textContent = z.name + (z.delivery_time_minutes ? ' (' + z.delivery_time_minutes + ' мин)' : '');
+      select.appendChild(opt);
+    });
+  }).catch(function() {});
+
+  function escapeHtmlLocal(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+});
+</script>
 {% endblock %}

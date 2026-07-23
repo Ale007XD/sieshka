@@ -1,15 +1,111 @@
 {% extends "customer/shop_base.html" %}
-{% block title %}Sieshka — меню доставки{% endblock %}
-{% block content %}
-<section class="hero">
-  <h1>Доставка еды Sieshka</h1>
-  <p class="muted">Соберите заказ из меню ниже. Корзина сохраняется в браузере.</p>
-</section>
+{% block title %}Меню — Sieshka{% endblock %}
 
-<div id="menu-status" class="menu-status" role="status">Загрузка меню…</div>
-<div id="menu-root" class="menu-root"></div>
+{% block head %}
+<style>
+  .category-filter-bar {
+    top: 62px;
+    z-index: 1020;
+    background: var(--color-bg-primary);
+    border-bottom: 1px solid var(--color-accent-border);
+  }
+  #categoryCarousel::-webkit-scrollbar { display: none; }
+  .category-btn {
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-accent-border);
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    transition: all 0.2s ease;
+    padding: 0.4rem 1rem;
+    white-space: nowrap;
+  }
+  .category-btn:hover {
+    background-color: var(--color-accent-bg);
+    border-color: var(--brand-primary);
+    color: var(--brand-primary);
+  }
+  .category-btn.active {
+    background-color: var(--brand-primary);
+    border-color: var(--brand-primary);
+    color: white;
+    font-weight: 600;
+  }
+  .product-card.unavailable { opacity: 0.65; }
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-bg-tertiary) 25%, var(--color-bg-secondary) 50%, var(--color-bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+    border-radius: var(--radius-md);
+    height: 110px;
+  }
+  @keyframes skeleton-loading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @media (max-width: 576px) {
+    .category-filter-bar { top: 62px !important; }
+    .category-btn { padding: 0.35rem 0.75rem; font-size: 0.85rem; min-height: 40px; }
+  }
+</style>
 {% endblock %}
+
+{% block content %}
+
+<!-- Sticky method toggle -->
+<div id="sticky-bar" class="sticky-top" style="top: 62px; z-index: 1030; background: var(--color-bg-primary); border-bottom: 1px solid var(--color-accent-border);">
+  <div class="container py-2">
+    <div class="col-12 col-md-4 mx-auto">
+      <div class="btn-group w-100" role="group" style="min-height: 44px;">
+        <button type="button" class="btn btn-brand active" data-method="delivery" style="font-weight:600;">Доставка</button>
+        <button type="button" class="btn btn-outline-brand" data-method="pickup" style="font-weight:600;">Самовывоз</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Category filter bar -->
+<div class="category-filter-bar sticky-top">
+  <div class="container py-2">
+    <div class="d-flex align-items-center gap-2 overflow-x-auto" id="categoryCarousel" style="scroll-behavior:smooth; scrollbar-width:none; -ms-overflow-style:none;">
+      <button class="btn btn-sm rounded-pill category-btn active" data-category-id="all">
+        <i class="bi bi-grid-fill me-1"></i>Все меню
+      </button>
+      <div id="categoryButtons"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Menu -->
+<div id="menu-status" class="menu-status text-center text-muted py-3" role="status">Загрузка меню…</div>
+<div id="menu-root" class="menu-root">
+  <!-- Menu container (filled by menu.js) -->
+  <div id="menu-container" class="menu-container mt-2"></div>
+</div>
+
+<!-- cart-root + toast-root required by JS contract -->
+<div id="cart-root" class="d-none">
+  <span id="cart-summary">0 ₽</span>
+  <span id="cart-count">0</span>
+</div>
+<div id="toast-root" class="d-none"></div>
+
+<!-- Скрытые элементы, требуемые menu.js (other-date modal) -->
+<div id="otherDateModal" class="d-none"></div>
+<div id="modalCartPreview" class="d-none"></div>
+<button id="whatsappOrderBtn" class="d-none" type="button"></button>
+<select id="slot-select" class="d-none"></select>
+
+<!-- Sticky cart bar (HTML only, visibility controlled by JS) -->
+<div class="sticky-cartbar py-3 mt-4" id="stickyCartBar" style="display:none !important;">
+  <div class="container d-flex justify-content-end">
+    <a href="/cart" class="btn btn-brand btn-lg px-4 shadow-lg rounded-pill">
+      <i class="bi bi-cart3 me-2"></i>Перейти к заказу
+    </a>
+  </div>
+</div>
+
+{% endblock %}
+
 {% block scripts %}
-<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
 <script src="/static/js/menu.js" nonce="{{ csp_nonce }}"></script>
 {% endblock %}
