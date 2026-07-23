@@ -91,6 +91,11 @@ class OrderRead(BaseModel):
     state: OrderState
     items: list[OrderItem]
     delivery_address: str
+    delivery_mode: str | None = None
+    payment_method: str | None = None
+    comment: str | None = None
+    customer_name: str | None = None
+    customer_phone: str | None = None
     trace_id: str | None = None  # M3: wired to nano-vm trace
 
 

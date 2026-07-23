@@ -431,20 +431,21 @@ async def fetch_orders(
     state_filter: OrderState | None = None,
 ) -> list[OrderRead]:
     async with session_factory() as session:
+        base_sql = (
+            "SELECT o.id, o.customer_id, o.state, o.items, o.delivery_address, "
+            "o.delivery_mode, o.payment_method, o.comment, o.trace_id, "
+            "c.name AS customer_name, c.phone AS customer_phone "
+            "FROM orders o "
+            "LEFT JOIN customers c ON c.id = o.customer_id "
+        )
         if state_filter is not None:
             result = await session.execute(
-                text(
-                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
-                    "FROM orders WHERE state = :state ORDER BY created_at DESC"
-                ),
+                text(base_sql + "WHERE o.state = :state ORDER BY o.created_at DESC"),
                 {"state": state_filter.value},
             )
         else:
             result = await session.execute(
-                text(
-                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
-                    "FROM orders ORDER BY created_at DESC"
-                ),
+                text(base_sql + "ORDER BY o.created_at DESC"),
             )
         rows = result.fetchall()
         return [
@@ -458,6 +459,11 @@ async def fetch_orders(
                     else json.loads(row._mapping["items"])
                 ),
                 delivery_address=row._mapping["delivery_address"],
+                delivery_mode=row._mapping.get("delivery_mode"),
+                payment_method=row._mapping.get("payment_method"),
+                comment=row._mapping.get("comment"),
+                customer_name=row._mapping.get("customer_name"),
+                customer_phone=row._mapping.get("customer_phone"),
                 trace_id=row._mapping.get("trace_id"),
             )
             for row in rows

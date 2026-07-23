@@ -24,12 +24,20 @@
     <div class="space-y-3">
       {% for order in col_orders %}
       <div class="bg-white rounded-lg shadow p-4 border border-gray-100">
+        <!-- Header: id + delivery mode badge -->
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-mono text-gray-400">{{ order.id|string|truncate(8, True, '') }}</span>
           <span class="text-xs px-2 py-0.5 rounded-full {% if order.delivery_mode == 'pickup' %}bg-blue-100 text-blue-700{% else %}bg-orange-100 text-orange-700{% endif %}">
-            {% if order.delivery_mode == 'pickup' %}Самовывоз{% else %}Доставка{% endif %}
+            {% if order.delivery_mode == 'pickup' %}Самовывоз{% elif order.delivery_mode == 'delivery' %}Доставка{% else %}—{% endif %}
           </span>
         </div>
+        <!-- Customer info -->
+        {% if order.customer_name or order.customer_phone %}
+        <div class="text-sm font-medium text-gray-900 mb-1">
+          {% if order.customer_name %}{{ order.customer_name }}{% endif %}
+          {% if order.customer_phone %}<span class="text-gray-500 font-normal ml-1">{{ order.customer_phone }}</span>{% endif %}
+        </div>
+        {% endif %}
         <!-- Items -->
         <ul class="mb-2 space-y-0.5">
           {% for item in order.items %}
@@ -40,9 +48,15 @@
           {% endfor %}
         </ul>
         <!-- Address (delivery only) -->
-        {% if order.delivery_address %}
+        {% if order.delivery_mode != 'pickup' and order.delivery_address %}
         <div class="text-xs text-gray-500 truncate border-t border-gray-100 pt-1 mt-1">
           📍 {{ order.delivery_address }}
+        </div>
+        {% endif %}
+        <!-- Comment -->
+        {% if order.comment %}
+        <div class="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">
+          💬 {{ order.comment }}
         </div>
         {% endif %}
         <a href="/admin/ui/orders/{{ order.id }}/receipt"
