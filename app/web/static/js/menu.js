@@ -246,6 +246,19 @@ function renderMenu(data) {
     // Обновляем badge и CTA существующих карточек
     if (!data.categories) return;
 
+    // Если в DOM нет ни одной карточки товара — создаём их из API
+    const menuContainer = document.getElementById('menu-container');
+    const hasExistingCards = menuContainer && menuContainer.querySelector('.product-card[data-product-id]');
+    if (menuContainer && !hasExistingCards) {
+        // Первичная отрисовка: строим DOM из данных API
+        menuContainer.innerHTML = '';
+        data.categories.forEach(category => {
+            const section = createCategoryElement(category);
+            menuContainer.appendChild(section);
+        });
+        return;
+    }
+
     data.categories.forEach(category => {
         let hasVisibleProducts = false;
 
@@ -272,6 +285,59 @@ function renderMenu(data) {
 
     // Обновляем upsell suggestions
     updateUpsellSuggestions(data);
+    
+    // Заполняем кнопки категорий из API (если контейнер пуст)
+    populateCategoryButtons(data.categories);
+}
+
+function populateCategoryButtons(categories) {
+    const container = document.getElementById('categoryButtons');
+    if (!container) return;
+    // Если уже есть кнопки — не дублируем
+    if (container.querySelector('.category-btn')) return;
+    
+    // Привязываем обработчик к существующей кнопке "Все меню"
+    const allBtn = document.querySelector('.category-btn[data-category-id="all"]');
+    if (allBtn && !allBtn._bound) {
+        allBtn._bound = true;
+        allBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            filterByCategory('all');
+        });
+    }
+
+    const activeCategoryBtn = document.querySelector('.category-btn.active');
+    const initialActiveId = activeCategoryBtn ? activeCategoryBtn.dataset.categoryId : 'all';
+
+    categories.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm rounded-pill category-btn';
+        btn.dataset.categoryId = cat.category_id;
+        btn.textContent = cat.name;
+        if (String(cat.category_id) === String(initialActiveId)) {
+            btn.classList.add('active');
+        }
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            filterByCategory(cat.category_id);
+        });
+        container.appendChild(btn);
+    });
+}
+
+function filterByCategory(categoryId) {
+    document.querySelectorAll('.category-btn').forEach(b => {
+        b.classList.toggle('active', String(b.dataset.categoryId) === String(categoryId));
+    });
+    // Показываем/скрываем секции категорий
+    document.querySelectorAll('[id^="category-"]').forEach(section => {
+        if (String(categoryId) === 'all') {
+            section.style.display = '';
+        } else {
+            const sid = section.id.replace('category-', '');
+            section.style.display = (sid === String(categoryId)) ? '' : 'none';
+        }
+    });
 }
 
 function updateProductCard(product) {
