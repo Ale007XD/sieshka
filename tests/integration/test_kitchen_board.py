@@ -89,12 +89,18 @@ async def client(
 
     app.include_router(web_router)
 
-    from app.web.routes import get_kitchen_service as web_get_service
+    from app.services.order_service import OrderService
+    from app.web.routes import get_kitchen_service as web_get_kitchen_service
+    from app.web.routes import get_order_service as web_get_order_service
 
-    async def _test_service() -> KitchenService:
+    async def _test_kitchen_service() -> KitchenService:
         return KitchenService(session_factory=session_factory)
 
-    app.dependency_overrides[web_get_service] = _test_service
+    async def _test_order_service() -> OrderService:
+        return OrderService(session_factory=session_factory)
+
+    app.dependency_overrides[web_get_kitchen_service] = _test_kitchen_service
+    app.dependency_overrides[web_get_order_service] = _test_order_service
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

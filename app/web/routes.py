@@ -119,12 +119,15 @@ async def kitchen_board(request: Request) -> Response:
 async def kitchen_board_partial(
     request: Request,
     service: KitchenService = Depends(get_kitchen_service),
+    order_service: OrderService = Depends(get_order_service),
 ) -> Response:
     tickets = await service.list_tickets()
     columns = _group_kitchen_tickets(tickets)
+    all_orders = await order_service.list_orders()
+    orders_by_id = {str(o.id): o for o in all_orders}
     templates = request.app.state.templates
     return templates.TemplateResponse(  # type: ignore[no-any-return]
-        request, "kitchen_board_partial.html", {"columns": columns}
+        request, "kitchen_board_partial.html", {"columns": columns, "orders": orders_by_id}
     )
 
 
@@ -134,14 +137,17 @@ async def kitchen_ticket_event(
     ticket_id: UUID,
     event: str,
     service: KitchenService = Depends(get_kitchen_service),
+    order_service: OrderService = Depends(get_order_service),
 ) -> Response:
     from app.domains.kitchen.fsm import KitchenEvent
     await service.transition_ticket(str(ticket_id), KitchenEvent(event))
     tickets = await service.list_tickets()
     columns = _group_kitchen_tickets(tickets)
+    all_orders = await order_service.list_orders()
+    orders_by_id = {str(o.id): o for o in all_orders}
     templates = request.app.state.templates
     return templates.TemplateResponse(  # type: ignore[no-any-return]
-        request, "kitchen_board_partial.html", {"columns": columns}
+        request, "kitchen_board_partial.html", {"columns": columns, "orders": orders_by_id}
     )
 
 

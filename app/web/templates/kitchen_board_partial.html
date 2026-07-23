@@ -23,11 +23,32 @@
     {% if col_tickets %}
     <div class="space-y-3">
       {% for ticket in col_tickets %}
+      {% set order = orders.get(ticket.order_id|string) %}
       <div class="bg-white rounded-lg shadow p-4 border border-gray-100">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-sm font-medium text-gray-900">{{ ticket.id|string|truncate(8, True, '…') }}</span>
-          <span class="text-xs text-gray-400">Заказ: {{ ticket.order_id|string|truncate(8, True, '…') }}</span>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-mono text-gray-400">{{ ticket.id|string|truncate(8, True, '') }}</span>
+          {% if order %}
+          <span class="text-xs px-2 py-0.5 rounded-full {% if order.delivery_mode == 'pickup' %}bg-blue-100 text-blue-700{% else %}bg-orange-100 text-orange-700{% endif %}">
+            {% if order.delivery_mode == 'pickup' %}Самовывоз{% else %}Доставка{% endif %}
+          </span>
+          {% endif %}
         </div>
+        <!-- Items -->
+        {% if order %}
+        <ul class="mb-2 space-y-0.5">
+          {% for item in order.items %}
+          <li class="text-sm text-gray-900 font-medium">
+            {{ item.name }} <span class="text-gray-500">× {{ item.qty }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% if order.delivery_mode != 'pickup' and order.delivery_address %}
+        <div class="text-xs text-gray-500 truncate border-t border-gray-100 pt-1 mb-2">
+          📍 {{ order.delivery_address }}
+        </div>
+        {% endif %}
+        {% endif %}
+        <!-- Action button -->
         <div class="mt-2">
           {% if ticket.state.value == 'NEW' %}
           <button
