@@ -53,8 +53,41 @@ class KitchenService:
                 state_writer=repo.write_state,
             )
             result = await fsm.handle_event(ticket_id, event)
-            await session.commit()
-            return result
+            if result.success:
+                await session.commit()
+            else:
+                return result
+
+        # Cross-domain: HANDED_OFF → advance order to PACKING atomically.
+        if event == KitchenEvent.HAND_OFF and result.success:
+            try:
+                from app.domains.orders.models import OrderEvent
+                from app.services.order_service import OrderService
+
+                async with self._session_factory() as session:
+                    row = await session.execute(
+                        text("SELECT order_id FROM kitchen_tickets WHERE id = :id"),
+                        {"id": UUID(ticket_id)},
+                    )
+                    order_id = row.scalar_one_or_none()
+
+                if order_id is not None:
+                    svc = OrderService(session_factory=self._session_factory)
+                    packing = await svc.transition_order(
+                        str(order_id), OrderEvent.START_PACKING
+                    )
+                    if not packing.success:
+                        logger.warning(
+                            "KitchenService: START_PACKING failed for order %s: %s",
+                            order_id, packing.reason,
+                        )
+            except Exception:
+                logger.exception(
+                    "KitchenService: error advancing order after HAND_OFF ticket=%s",
+                    ticket_id,
+                )
+
+        return result
 
     async def list_tickets(
         self,
