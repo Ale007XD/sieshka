@@ -45,5 +45,7 @@ class TestDashboardShell:
             assert "Kitchen" in html
             assert "Inventory" in html
             assert "Promotions" in html
+            assert "Menu" in html
+            assert "Zones" in html
+            assert "Schedule" in html
             assert "Stats" in html
-            assert "Receipts" in html
