@@ -129,6 +129,8 @@ class MenuService:
                     product_id=row._mapping["id"],
                     name=row._mapping["name"],
                     price_rub=row._mapping["price_rub"],
+                    image_url=row._mapping.get("image_url"),
+                    description=row._mapping.get("description"),
                     available=available,
                     cta_type=cta_type,
                     reason_code=reason_code,

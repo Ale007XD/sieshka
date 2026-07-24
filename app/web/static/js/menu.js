@@ -460,7 +460,6 @@ function createProductElement(product) {
     const ctaType = product.cta_type;
     const leadTimeMinutes = Number(product.lead_time_minutes || 0);
     
-    // Build product card with data attributes for cart integration
     col.innerHTML = `
         <div class="card h-100 product-card ${isAvailable ? '' : 'unavailable'}" 
              data-product-id="${product.product_id}"
@@ -468,6 +467,20 @@ function createProductElement(product) {
              data-price="${product.price_rub}"
              data-available="${isAvailable}"
              data-lead-time-minutes="${leadTimeMinutes}">
+            ${product.image_url ? `
+            <img src="${escapeHtml(product.image_url)}" class="card-img-top product-img" 
+                 alt="${escapeHtml(product.name)}" loading="lazy" 
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <div class="product-img-placeholder d-none bg-secondary text-white d-flex align-items-center justify-content-center" 
+                 style="height: 160px;">
+                <i class="bi bi-image fs-1"></i>
+            </div>
+            ` : `
+            <div class="product-img-placeholder bg-secondary text-white d-flex align-items-center justify-content-center" 
+                 style="height: 160px;">
+                <i class="bi bi-image fs-1"></i>
+            </div>
+            `}
             <div class="card-body">
                 <h5 class="card-title h6">${escapeHtml(product.name)}</h5>
                 <p class="card-text">

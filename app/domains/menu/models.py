@@ -31,6 +31,8 @@ class MenuProductItem(BaseModel):
     product_id: UUID
     name: str
     price_rub: int | None = None
+    image_url: str | None = None
+    description: str | None = None
     available: bool
     cta_type: str
     reason_code: str | None = None
