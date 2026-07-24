@@ -449,8 +449,26 @@ def _required_update_product_fields(
     if image_url is not None and not isinstance(image_url, str):
         return None
 
-    is_active = command.get("is_active")
-    if is_active is not None and not isinstance(is_active, bool):
+    is_active_raw = command.get("is_active")
+    is_active: bool | None
+    if is_active_raw is None or isinstance(is_active_raw, bool):
+        is_active = is_active_raw
+    elif isinstance(is_active_raw, str):
+        lowered = is_active_raw.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            is_active = True
+        elif lowered in {"false", "0", "no", "off", ""}:
+            is_active = False
+        else:
+            return None
+    elif isinstance(is_active_raw, int) and not isinstance(is_active_raw, bool):
+        if is_active_raw == 1:
+            is_active = True
+        elif is_active_raw == 0:
+            is_active = False
+        else:
+            return None
+    else:
         return None
 
     return (
