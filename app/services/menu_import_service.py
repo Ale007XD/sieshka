@@ -125,8 +125,13 @@ _HEADER_ALIASES: dict[str, str] = {
     "description": "description",
     "pricerub": "price_rub",
     "price": "price_rub",
+    "price(rub)": "price_rub",
     "photourl": "image_url",
     "photo": "image_url",
+    "image": "image_url",
+    "imageurl": "image_url",
+    "img": "image_url",
+    "url": "image_url",
 }
 
 

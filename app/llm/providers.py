@@ -8,12 +8,14 @@ from app.config import settings
 # Requires OPENAI_API_KEY + OPENAI_API_BASE env vars set BEFORE litellm import.
 # api_base must be https://openrouter.ai/api/v1
 openrouter_adapter = LiteLLMAdapter(
-    model="openrouter/meta-llama/llama-3.1-8b-instruct:free",
+    model="nvidia_nim/meta/llama3-70b-instruct",
     timeout=30.0,
     max_retries=2,
     temperature=0.0,
     stream=True,
     max_tokens=8192,
+    api_key=settings.NVIDIA_NIM_API_KEY,
+    api_base="https://integrate.api.nvidia.com/v1",
 )
 
 # Fallback 1: YandexGPT Pro

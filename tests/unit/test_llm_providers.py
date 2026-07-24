@@ -12,6 +12,7 @@ def _ensure(var: str, val: str) -> None:
 # module-load time, and pydantic-settings reads them at Settings() creation).
 _ensure("OPENAI_API_KEY", "test-openai-key")
 _ensure("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+_ensure("NVIDIA_NIM_API_KEY", "test-nvidia-key")
 _ensure("YANDEX_API_KEY", "test-yandex-key")
 _ensure("YANDEX_API_BASE", "https://llm.api.cloud.yandex.net/foundationModels/v1/completion")
 _ensure("YANDEX_MODEL", "openai/yandexgpt-pro")
@@ -28,12 +29,12 @@ from app.llm.providers import (  # noqa: E402
 )
 
 
-class TestOpenRouterConfig:
+class TestNvidiaNimConfig:
     def test_model_format(self) -> None:
         assert re.match(
-            r"^openrouter/[^/]+/[^:]+:free$",
+            r"^nvidia_nim/[^/]+/[^/]+$",
             openrouter_adapter.model,
-        ), f"Model {openrouter_adapter.model!r} does not match 'openrouter/vendor/model:free'"
+        ), f"Model {openrouter_adapter.model!r} does not match 'nvidia_nim/vendor/model'"
 
     def test_stream_and_max_tokens(self) -> None:
         assert openrouter_adapter._extra.get("stream") is True
@@ -42,11 +43,11 @@ class TestOpenRouterConfig:
     def test_is_litellm_adapter(self) -> None:
         assert isinstance(openrouter_adapter, LiteLLMAdapter)
 
-    def test_no_api_key_in_kwargs(self) -> None:
-        assert "api_key" not in openrouter_adapter._extra
+    def test_api_key_in_kwargs(self) -> None:
+        assert openrouter_adapter._extra.get("api_key") == "test-nvidia-key"
 
-    def test_no_api_base_in_kwargs(self) -> None:
-        assert "api_base" not in openrouter_adapter._extra
+    def test_api_base_in_kwargs(self) -> None:
+        assert openrouter_adapter._extra.get("api_base") == "https://integrate.api.nvidia.com/v1"
 
 
 class TestYandexGPTConfig:

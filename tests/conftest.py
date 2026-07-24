@@ -13,6 +13,7 @@ def _ensure(var: str, val: str) -> None:
 # so this root conftest must run before any test module is imported.
 _ensure("OPENAI_API_KEY", "test-openai-key")
 _ensure("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+_ensure("NVIDIA_NIM_API_KEY", "test-nvidia-key")
 _ensure("YANDEX_API_KEY", "test-yandex-key")
 _ensure("YANDEX_API_BASE", "https://llm.api.cloud.yandex.net/foundationModels/v1/completion")
 _ensure("YANDEX_MODEL", "openai/yandexgpt-pro")
