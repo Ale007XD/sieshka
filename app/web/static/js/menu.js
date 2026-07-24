@@ -454,60 +454,60 @@ function createCategoryElement(category) {
 
 function createProductElement(product) {
     const col = document.createElement('div');
-    col.className = 'col-6 col-md-4 col-lg-3';
+    col.className = 'col-12';
     
     const isAvailable = product.available;
     const ctaType = product.cta_type;
     const leadTimeMinutes = Number(product.lead_time_minutes || 0);
     
     col.innerHTML = `
-        <div class="card h-100 product-card ${isAvailable ? '' : 'unavailable'}" 
+        <div class="card product-card h-100 ${isAvailable ? '' : 'unavailable'}" 
              data-product-id="${product.product_id}"
              data-name="${escapeHtml(product.name)}"
              data-price="${product.price_rub}"
              data-available="${isAvailable}"
              data-lead-time-minutes="${leadTimeMinutes}">
-            ${product.image_url ? `
-            <img src="${escapeHtml(product.image_url)}" class="card-img-top product-img" 
-                 alt="${escapeHtml(product.name)}" loading="lazy" 
-                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-            <div class="product-img-placeholder d-none bg-secondary text-white d-flex align-items-center justify-content-center" 
-                 style="height: 160px;">
-                <i class="bi bi-image fs-1"></i>
-            </div>
-            ` : `
-            <div class="product-img-placeholder bg-secondary text-white d-flex align-items-center justify-content-center" 
-                 style="height: 160px;">
-                <i class="bi bi-image fs-1"></i>
-            </div>
-            `}
-            <div class="card-body">
-                <h5 class="card-title h6">${escapeHtml(product.name)}</h5>
-                <p class="card-text">
-                    <span class="price">${product.price_rub} ₽</span>
-                </p>
-                
-                ${product.badge_text ? `
-                    <span class="badge ${isAvailable ? 'bg-success' : 'bg-secondary'}">
-                        ${escapeHtml(product.badge_text)}
-                    </span>
-                ` : ''}
-                
-                ${product.next_available ? `
-                    <small class="d-block text-muted mt-1">
-                        ${escapeHtml(product.next_available)}
-                    </small>
-                ` : ''}
-                
-                ${product.reason_code ? `
-                    <small class="d-block text-muted mt-1 reason-code">
-                        ${REASON_LABELS[product.reason_code] || product.reason_code}
-                    </small>
-                ` : ''}
-            </div>
-            
-            <div class="card-footer">
-                ${renderProductControls(product, isAvailable, ctaType)}
+            <div class="row g-0">
+                <div class="col-md-3 col-4 product-card-img-col">
+                    ${product.image_url ? `
+                    <img src="${escapeHtml(product.image_url)}" class="product-img rounded-start w-100" 
+                         alt="${escapeHtml(product.name)}" loading="lazy">
+                    ` : `
+                    <div class="product-img-placeholder bg-secondary text-white d-flex align-items-center justify-content-center w-100">
+                        <i class="bi bi-image fs-1"></i>
+                    </div>
+                    `}
+                </div>
+                <div class="col-md-9 col-8">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <h5 class="card-title h6 mb-1">${escapeHtml(product.name)}</h5>
+                            <span class="price fw-bold">${product.price_rub} ₽</span>
+                        </div>
+                        ${product.description ? `
+                        <p class="card-text small text-muted mb-2 product-description">${escapeHtml(product.description)}</p>
+                        ` : ''}
+                        ${product.badge_text ? `
+                            <span class="badge ${isAvailable ? 'bg-success' : 'bg-secondary'} mb-2">
+                                ${escapeHtml(product.badge_text)}
+                            </span>
+                        ` : ''}
+                        ${product.next_available ? `
+                            <small class="d-block text-muted mt-1">
+                                ${escapeHtml(product.next_available)}
+                            </small>
+                        ` : ''}
+                        ${product.reason_code ? `
+                            <small class="d-block text-muted mt-1 reason-code">
+                                ${REASON_LABELS[product.reason_code] || product.reason_code}
+                            </small>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="card-footer">
+                        ${renderProductControls(product, isAvailable, ctaType)}
+                    </div>
+                </div>
             </div>
         </div>
     `;
