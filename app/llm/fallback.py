@@ -39,7 +39,7 @@ class FallbackLLMAdapter:
             ("YandexGPT", yandexgpt_adapter),
             ("GigaChat", gigachat_adapter),
         )
-        last_error: Exception | None = None
+        errors: list[tuple[str, Exception]] = []
         for name, adapter in providers:
             try:
                 result = await asyncio.wait_for(
@@ -51,9 +51,11 @@ class FallbackLLMAdapter:
                 return (str(result), None)
             except asyncio.TimeoutError:
                 logger.warning("FallbackLLMAdapter: %s timed out", name)
+                errors.append((name, TimeoutError(f"{name} timed out after {self._timeout}s")))
             except Exception as exc:  # noqa: BLE001 - try next provider
                 logger.error("FallbackLLMAdapter: %s failed: %s", name, exc)
-                last_error = exc
+                errors.append((name, exc))
+        summary = "; ".join(f"{name}: {exc}" for name, exc in errors)
         raise RuntimeError(
-            f"All LLM providers failed; last error: {last_error}"
-        ) from last_error
+            f"All LLM providers failed — {summary}"
+        ) from (errors[-1][1] if errors else None)
