@@ -19,7 +19,7 @@ from nano_vm.validator import ProgramValidator
 from nano_vm_mcp.handlers import GovernedToolExecutor
 
 from app.policy.policy_snapshot import PROMOTION_AGENT_POLICY_SNAPSHOT
-from app.programs.promotion_agent_program import PROGRAM_COLLECT_ORDER
+from app.programs.promotion_agent_program import PROGRAM_COLLECT_PROMOTION
 from app.tools.promotion_agent_tools import (
     collect_promotion_command,
     report_collect_failure,
@@ -96,14 +96,14 @@ class PromotionAgent:
             "start_date": input_data.get("start_date", ""),
         }
 
-        _report = ProgramValidator(PROGRAM_COLLECT_ORDER).validate()
+        _report = ProgramValidator(PROGRAM_COLLECT_PROMOTION).validate()
         if not _report.is_valid():
             raise RuntimeError(
-                f"Program '{PROGRAM_COLLECT_ORDER.name}' validation failed: "
+                f"Program '{PROGRAM_COLLECT_PROMOTION.name}' validation failed: "
                 f"{_report.summary()}"
             )
 
-        trace = await vm.run(PROGRAM_COLLECT_ORDER, context=context)
+        trace = await vm.run(PROGRAM_COLLECT_PROMOTION, context=context)
 
         if trace.status == TraceStatus.SUCCESS:
             confirm_step = next(

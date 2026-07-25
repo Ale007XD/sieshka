@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from nano_vm.models import Program, Step, StepType
 
-PROGRAM_COLLECT_ORDER = Program(
+PROGRAM_COLLECT_PROMOTION = Program(
     name="promotion_agent_collect",
     steps=[
         Step(

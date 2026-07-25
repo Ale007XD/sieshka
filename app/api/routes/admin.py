@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging  # noqa: F401 — used by upcoming try/except safety nets
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from app.services.trace_analyzer import ExecutionReceipt, TraceAnalyzer
 from app.services.zone_service import ZoneService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+logger = logging.getLogger(__name__)
 
 # Module-level cache of the most recent import report, so GET /admin/ui/menu
 # can display it. The dashboard has a single admin user; a process-global
@@ -139,7 +142,10 @@ async def menu_category_apply(
     categories = await _fetch_categories_ref()
     receipt = None
     if apply.trace_id is not None:
-        receipt = await analyzer.receipt(apply.trace_id)
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("menu_category_apply: trace %s not found for receipt", apply.trace_id)
     return {
         "ok": apply.applied,
         "error": apply.error,
@@ -162,7 +168,10 @@ async def menu_product_apply(
     products, counts = await service.get_admin_data()
     receipt = None
     if apply.trace_id is not None:
-        receipt = await analyzer.receipt(apply.trace_id)
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("menu_product_apply: trace %s not found for receipt", apply.trace_id)
     return {
         "ok": apply.applied,
         "error": apply.error,
@@ -280,7 +289,10 @@ async def schedule_apply(
     windows = await ScheduleService().get_admin_windows()
     receipt = None
     if apply.trace_id is not None:
-        receipt = await analyzer.receipt(apply.trace_id)
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("schedule_apply: trace %s not found for receipt", apply.trace_id)
     return {
         "ok": apply.applied,
         "error": apply.error,
@@ -344,7 +356,10 @@ async def zone_apply(
     zones = await ZoneService().list_all()
     receipt = None
     if apply.trace_id is not None:
-        receipt = await analyzer.receipt(apply.trace_id)
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("zone_apply: trace %s not found for receipt", apply.trace_id)
     return {
         "ok": apply.applied,
         "error": apply.error,

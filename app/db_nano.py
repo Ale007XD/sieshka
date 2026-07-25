@@ -45,7 +45,7 @@ class StoreCursorRepository:
             status=trace.status.value,
             steps_count=len(trace.steps),
             total_cost=trace.total_cost_usd() or 0.0,
-            trace=trace.model_dump(),
+            trace=trace.model_dump(mode="json"),
         )
 
     async def load(

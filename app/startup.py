@@ -22,7 +22,7 @@ from app.programs.order_programs import (
     PROGRAM_START_COOKING,
 )
 from app.programs.promotion_agent_program import (
-    PROGRAM_COLLECT_ORDER as PROMOTION_AGENT_PROGRAM,
+    PROGRAM_COLLECT_PROMOTION as PROMOTION_AGENT_PROGRAM,
 )
 from app.programs.support_agent_program import (
     PROGRAM_COLLECT_ORDER as SUPPORT_AGENT_PROGRAM,

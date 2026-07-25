@@ -267,7 +267,7 @@ class TestPromotionAgent:
         agent = PromotionAgent(vm=mock_vm)
 
         with patch(
-            "app.agents.promotion_agent.PROGRAM_COLLECT_ORDER",
+            "app.agents.promotion_agent.PROGRAM_COLLECT_PROMOTION",
             Program(
                 name="bad_program",
                 steps=[

@@ -225,6 +225,20 @@ class ZoneAgent:
         trace = await vm.run(PROGRAM_APPLY_ZONE, context={"command": command})
         trace_id = trace.trace_id
 
+        # Persist trace to SQLite store so receipt viewer works — same
+        # convention as menu_agent.py::_run_apply / order_service.py.
+        if trace.trace_id:
+            from app.db_nano import get_store
+
+            get_store().save_trace(
+                trace_id=trace.trace_id,
+                program_id=trace.program_name,
+                status=trace.status.value,
+                steps_count=len(trace.steps),
+                total_cost=trace.total_cost_usd() or 0.0,
+                trace=trace.model_dump(mode="json"),
+            )
+
         if trace.status == TraceStatus.SUCCESS:
             apply_step = next(
                 (s for s in trace.steps if s.step_id == "apply_command"), None
