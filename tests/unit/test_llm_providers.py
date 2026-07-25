@@ -36,8 +36,8 @@ class TestNvidiaNimConfig:
             openrouter_adapter.model,
         ), f"Model {openrouter_adapter.model!r} does not match 'nvidia_nim/vendor/model'"
 
-    def test_stream_and_max_tokens(self) -> None:
-        assert openrouter_adapter._extra.get("stream") is True
+    def test_no_stream_with_max_tokens(self) -> None:
+        assert "stream" not in openrouter_adapter._extra
         assert openrouter_adapter._extra.get("max_tokens") == 8192
 
     def test_is_litellm_adapter(self) -> None:
@@ -58,8 +58,8 @@ class TestYandexGPTConfig:
         assert yandexgpt_adapter._extra.get("api_key") == "test-yandex-key"
         assert yandexgpt_adapter._extra.get("api_base") == "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
-    def test_stream_and_max_tokens(self) -> None:
-        assert yandexgpt_adapter._extra.get("stream") is True
+    def test_no_stream_with_max_tokens(self) -> None:
+        assert "stream" not in yandexgpt_adapter._extra
         assert yandexgpt_adapter._extra.get("max_tokens") == 8192
 
     def test_is_litellm_adapter(self) -> None:
@@ -74,8 +74,8 @@ class TestGigaChatConfig:
         assert gigachat_adapter._extra.get("api_key") == "test-gigachat-key"
         assert gigachat_adapter._extra.get("api_base") == "https://gigachat.devices.sberbank.ru/api/v1"
 
-    def test_stream_and_max_tokens(self) -> None:
-        assert gigachat_adapter._extra.get("stream") is True
+    def test_no_stream_with_max_tokens(self) -> None:
+        assert "stream" not in gigachat_adapter._extra
         assert gigachat_adapter._extra.get("max_tokens") == 8192
 
     def test_is_litellm_adapter(self) -> None:

@@ -12,7 +12,6 @@ openrouter_adapter = LiteLLMAdapter(
     timeout=30.0,
     max_retries=2,
     temperature=0.0,
-    stream=True,
     max_tokens=8192,
     api_key=settings.NVIDIA_NIM_API_KEY,
     api_base=settings.NVIDIA_NIM_API_BASE,
@@ -26,7 +25,6 @@ yandexgpt_adapter = LiteLLMAdapter(
     temperature=0.0,
     api_key=settings.YANDEX_API_KEY,
     api_base=settings.YANDEX_API_BASE,
-    stream=True,
     max_tokens=8192,
 )
 
@@ -38,6 +36,5 @@ gigachat_adapter = LiteLLMAdapter(
     temperature=0.0,
     api_key=settings.GIGACHAT_API_KEY,
     api_base=settings.GIGACHAT_API_BASE,
-    stream=True,
     max_tokens=8192,
 )
