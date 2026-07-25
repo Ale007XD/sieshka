@@ -35,7 +35,7 @@ class FallbackLLMAdapter:
         )
 
         providers = (
-            ("OpenRouter", openrouter_adapter),
+            ("OpenRouter/NIM", openrouter_adapter),
             ("YandexGPT", yandexgpt_adapter),
             ("GigaChat", gigachat_adapter),
         )

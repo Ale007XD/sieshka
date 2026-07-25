@@ -22,8 +22,6 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_API_BASE: str = "https://openrouter.ai/api/v1"
 
-    NVIDIA_NIM_API_KEY: str = ""
-
     YANDEX_API_KEY: str = ""
     YANDEX_API_BASE: str = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     YANDEX_MODEL: str = "openai/yandexgpt-pro"
@@ -31,6 +29,10 @@ class Settings(BaseSettings):
     GIGACHAT_API_KEY: str = ""
     GIGACHAT_API_BASE: str = "https://gigachat.devices.sberbank.ru/api/v1"
     GIGACHAT_MODEL: str = "openai/GigaChat-Pro"
+
+    NVIDIA_NIM_API_KEY: str = ""
+    NVIDIA_NIM_API_BASE: str = "https://integrate.api.nvidia.com/v1"
+    NVIDIA_NIM_MODEL: str = "nvidia_nim/meta/llama-3.1-70b-instruct"
 
     # nano-vm MCP (M3+)
     NANO_VM_MCP_HOST: str = "localhost"
