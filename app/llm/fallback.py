@@ -22,7 +22,7 @@ class FallbackLLMAdapter:
     so tests can monkeypatch ``app.llm.providers.*_adapter.complete``.
     """
 
-    def __init__(self, timeout: float = 15.0) -> None:
+    def __init__(self, timeout: float = 35.0) -> None:
         self._timeout = timeout
 
     async def complete(
