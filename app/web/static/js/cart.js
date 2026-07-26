@@ -875,17 +875,14 @@ const CartManager = (function () {
     const offcanvasBody = document.getElementById('offcanvasCartBody');
     if (offcanvasBody) {
       offcanvasBody.addEventListener('click', (e) => {
-        console.log('[cart-js] click on', e.target, 'tagName=', e.target.tagName);
         const target = e.target.closest('[data-action]');
-        if (!target) { console.log('[cart-js] no [data-action] ancestor'); return; }
-        console.log('[cart-js] target=', target, 'action=', target.dataset.action);
+        if (!target) return;
 
         const action = target.dataset.action;
         const itemEl = target.closest('[data-product-id]');
-        if (!itemEl) { console.log('[cart-js] no [data-product-id] ancestor'); return; }
-        console.log('[cart-js] itemEl=', itemEl, 'productId=', itemEl.dataset.productId);
+        if (!itemEl) return;
 
-        const productId = parseInt(itemEl.dataset.productId, 10);
+        const productId = itemEl.dataset.productId;
         const price = parseInt(itemEl.dataset.price, 10);
         const name = itemEl.dataset.name;
         const leadTimeMinutes = parseInt(itemEl.dataset.leadTimeMinutes || '0', 10);
@@ -918,7 +915,7 @@ const CartManager = (function () {
         const itemEl = target.closest('[data-product-id]');
         if (!itemEl) return;
 
-        const productId = parseInt(itemEl.dataset.productId, 10);
+        const productId = itemEl.dataset.productId;
 
         switch (action) {
           case 'inc':
@@ -946,7 +943,7 @@ const CartManager = (function () {
         const itemEl = target.closest('[data-product-id]');
         if (!itemEl) return;
 
-        const productId = parseInt(itemEl.dataset.productId, 10);
+        const productId = itemEl.dataset.productId;
         const price = parseInt(itemEl.dataset.price, 10);
         const name = itemEl.dataset.name;
         const leadTimeMinutes = parseInt(itemEl.dataset.leadTimeMinutes || '0', 10);
