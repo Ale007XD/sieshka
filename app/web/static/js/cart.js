@@ -522,7 +522,7 @@ const CartManager = (function () {
 
     const controls = menuContainer.querySelectorAll('.product-card[data-product-id]');
     controls.forEach(el => {
-      const productId = parseInt(el.dataset.productId, 10);
+      const productId = el.dataset.productId;
       if (!productId) return;
 
       const qty = getItemQty(productId);
