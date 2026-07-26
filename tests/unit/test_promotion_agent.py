@@ -15,9 +15,13 @@ from app.tools.promotion_agent_tools import (
 )
 
 _VALID_PROMOTION_COMMAND_JSON = (
-    '{"promotion_id": "550e8400-e29b-41d4-a716-446655440000", '
-    '"discount": 20.0, '
-    '"start_date": "2024-06-01"}'
+    '{"action": "create", "name": "Летняя", '
+    '"discount": 20.0, "target_promotion_name": null}'
+)
+
+_VALID_TRANSITION_COMMAND_JSON = (
+    '{"action": "activate", "name": null, '
+    '"discount": null, "target_promotion_name": "Летняя"}'
 )
 
 _INVALID_PROMOTION_COMMAND_JSON = "not valid json"
@@ -100,8 +104,15 @@ def _make_trace_pending() -> Trace:
 
 
 class TestValidatePromotionCommand:
-    async def test_valid_json(self) -> None:
+    async def test_valid_json_create(self) -> None:
         result = await validate_promotion_command(_VALID_PROMOTION_COMMAND_JSON)
+        assert result == 1
+
+    async def test_valid_json_transition(self) -> None:
+        """action=activate/expire/archive only needs target_promotion_name —
+        no DB check happens here (that's validate_apply_promotion_command's
+        job); this is a structural-shape check only."""
+        result = await validate_promotion_command(_VALID_TRANSITION_COMMAND_JSON)
         assert result == 1
 
     async def test_empty_input(self) -> None:
@@ -112,25 +123,45 @@ class TestValidatePromotionCommand:
         result = await validate_promotion_command("not json")
         assert result == 0
 
-    async def test_missing_promotion_id(self) -> None:
-        result = await validate_promotion_command('{"discount": 20.0, "start_date": "2024-06-01"}')
-        assert result == 0
-
-    async def test_missing_discount(self) -> None:
+    async def test_missing_action(self) -> None:
         result = await validate_promotion_command(
-            '{"promotion_id": "x", "start_date": "2024-06-01"}'
+            '{"name": "X", "discount": 20.0, "target_promotion_name": null}'
         )
         assert result == 0
 
-    async def test_discount_not_number(self) -> None:
+    async def test_invalid_action_value(self) -> None:
         result = await validate_promotion_command(
-            '{"promotion_id": "x", "discount": "twenty", '
-            '"start_date": "2024-06-01"}'
+            '{"action": "delete", "name": "X", "discount": 20.0, '
+            '"target_promotion_name": null}'
         )
         assert result == 0
 
-    async def test_missing_start_date(self) -> None:
-        result = await validate_promotion_command('{"promotion_id": "x", "discount": 20.0}')
+    async def test_create_missing_name(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": null, "discount": 20.0, '
+            '"target_promotion_name": null}'
+        )
+        assert result == 0
+
+    async def test_create_missing_discount(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "X", "discount": null, '
+            '"target_promotion_name": null}'
+        )
+        assert result == 0
+
+    async def test_create_discount_not_number(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "X", "discount": "twenty", '
+            '"target_promotion_name": null}'
+        )
+        assert result == 0
+
+    async def test_transition_missing_target_promotion_name(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "activate", "name": null, "discount": null, '
+            '"target_promotion_name": null}'
+        )
         assert result == 0
 
 
@@ -154,17 +185,14 @@ class TestPromotionAgent:
 
         agent = PromotionAgent(vm=mock_vm)
         result = await agent.manage_promotion({
-            "input_text": "Create a 20% off summer sale",
-            "promotion_id": "550e8400-e29b-41d4-a716-446655440000",
-            "discount": 20.0,
-            "start_date": "2024-06-01",
+            "input_text": "Создай акцию Летняя, скидка 20%",
         })
 
         assert result.success is True
         assert result.command is not None
-        assert result.command["promotion_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert result.command["action"] == "create"
+        assert result.command["name"] == "Летняя"
         assert result.command["discount"] == 20.0
-        assert result.command["start_date"] == "2024-06-01"
         assert result.error is None
 
     async def test_manage_promotion_invalid_json(self) -> None:
@@ -175,7 +203,6 @@ class TestPromotionAgent:
         agent = PromotionAgent(vm=mock_vm)
         result = await agent.manage_promotion({
             "input_text": "invalid input",
-            "promotion_id": "x",
         })
 
         assert result.success is False
@@ -190,7 +217,6 @@ class TestPromotionAgent:
         agent = PromotionAgent(vm=mock_vm)
         result = await agent.manage_promotion({
             "input_text": "sale",
-            "promotion_id": "x",
         })
 
         assert result.success is False
@@ -218,17 +244,14 @@ class TestPromotionAgent:
             mock_build.return_value = vm
 
             result = await agent.manage_promotion({
-                "input_text": "Create a 20% off summer sale",
-                "promotion_id": "550e8400-e29b-41d4-a716-446655440000",
-                "discount": 20.0,
-                "start_date": "2024-06-01",
+                "input_text": "Создай акцию Летняя, скидка 20%",
             })
 
         assert result.success is True
         assert result.command is not None
-        assert result.command["promotion_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert result.command["action"] == "create"
+        assert result.command["name"] == "Летняя"
         assert result.command["discount"] == 20.0
-        assert result.command["start_date"] == "2024-06-01"
 
     async def test_real_vm_invalid_json(self) -> None:
         """Real VM with MockLLMAdapter returning invalid JSON → failure path."""
@@ -252,7 +275,6 @@ class TestPromotionAgent:
 
             result = await agent.manage_promotion({
                 "input_text": "bad input",
-                "promotion_id": "x",
             })
 
         assert result.success is False
@@ -279,5 +301,4 @@ class TestPromotionAgent:
             with pytest.raises(RuntimeError, match="Program \'bad_program\' validation failed"):
                 await agent.manage_promotion({
                     "input_text": "test",
-                    "promotion_id": "x",
                 })
