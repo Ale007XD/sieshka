@@ -246,6 +246,9 @@ function renderMenu(data) {
     // Обновляем badge и CTA существующих карточек
     if (!data.categories) return;
 
+    // Заполняем кнопки категорий из API (всегда, и при первой отрисовке тоже)
+    populateCategoryButtons(data.categories);
+
     // Если в DOM нет ни одной карточки товара — создаём их из API
     const menuContainer = document.getElementById('menu-container');
     const hasExistingCards = menuContainer && menuContainer.querySelector('.product-card[data-product-id]');
@@ -256,6 +259,7 @@ function renderMenu(data) {
             const section = createCategoryElement(category);
             menuContainer.appendChild(section);
         });
+        updateUpsellSuggestions(data);
         return;
     }
 
@@ -274,7 +278,7 @@ function renderMenu(data) {
         if (categorySection) {
             const activeCategoryBtn = document.querySelector('.category-btn.active');
             const activeCategoryId = activeCategoryBtn ? activeCategoryBtn.dataset.categoryId : 'all';
-            
+
             if (activeCategoryId !== 'all' && String(category.category_id) !== String(activeCategoryId)) {
                 categorySection.style.display = 'none';
             } else {
@@ -285,9 +289,6 @@ function renderMenu(data) {
 
     // Обновляем upsell suggestions
     updateUpsellSuggestions(data);
-    
-    // Заполняем кнопки категорий из API (если контейнер пуст)
-    populateCategoryButtons(data.categories);
 }
 
 function populateCategoryButtons(categories) {
