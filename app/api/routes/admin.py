@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from nano_vm_mcp.store import ProgramStore
 
 from app.agents.menu_agent import MenuAgent
+from app.agents.promotion_agent import PromotionAgent
 from app.agents.schedule_agent import ScheduleAgent
 from app.agents.zone_agent import ZoneAgent
 from app.db_nano import get_store as get_nano_store
@@ -439,3 +440,47 @@ def _zone_view(zones: list[Any]) -> list[dict[str, Any]]:
         }
         for z in zones
     ]
+
+
+@router.post("/promotions/apply")
+async def promotion_apply(
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Run a free-text promotion instruction through PromotionAgent end-to-end.
+
+    Collect phase (LLM parse) -> apply phase (governed write). Same shape as
+    zone_apply/schedule_apply.
+    """
+    instruction = payload.get("instruction", "")
+    agent = PromotionAgent()
+    collect = await agent.manage_promotion({"input_text": instruction})
+    if not collect.success or collect.command is None:
+        from app.services.promotion_service import PromotionService
+
+        promotions = await PromotionService().list_promotions()
+        return {
+            "ok": False,
+            "error": collect.error or "unparseable instruction",
+            "command": None,
+            "receipt": None,
+            "promotions": [p.model_dump(mode="json") for p in promotions],
+        }
+
+    apply = await agent.apply_promotion(collect.command)
+    from app.services.promotion_service import PromotionService
+
+    promotions = await PromotionService().list_promotions()
+    receipt = None
+    if apply.trace_id is not None:
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("promotion_apply: trace %s not found for receipt", apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "command": collect.command,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "promotions": [p.model_dump(mode="json") for p in promotions],
+    }

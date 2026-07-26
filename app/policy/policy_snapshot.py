@@ -133,6 +133,12 @@ SUPPORT_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_collect_failure": ["support:read"],
 }
 
+PROMOTION_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_apply_promotion_command": ["promotion:read"],
+    "apply_promotion_command": ["promotion:write"],
+    "report_invalid_promotion_command": ["promotion:read"],
+}
+
 ORDER_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": ORDER_AGENT_TOOL_CAPABILITIES,
 }
@@ -163,6 +169,10 @@ SCHEDULE_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
 
 PROMOTION_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": PROMOTION_AGENT_TOOL_CAPABILITIES,
+}
+
+PROMOTION_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": PROMOTION_AGENT_APPLY_TOOL_CAPABILITIES,
 }
 
 SUPPORT_AGENT_POLICY_CONFIG: dict[str, object] = {
@@ -268,6 +278,12 @@ ZONE_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 PROMOTION_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     PROMOTION_AGENT_POLICY_CONFIG,
     policy_id="promotion-agent-v1",
+    version="1.0.0",
+)
+
+PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    PROMOTION_AGENT_APPLY_POLICY_CONFIG,
+    policy_id="promotion-agent-apply-v1",
     version="1.0.0",
 )
 
