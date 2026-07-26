@@ -875,12 +875,15 @@ const CartManager = (function () {
     const offcanvasBody = document.getElementById('offcanvasCartBody');
     if (offcanvasBody) {
       offcanvasBody.addEventListener('click', (e) => {
+        console.log('[cart-js] click on', e.target, 'tagName=', e.target.tagName);
         const target = e.target.closest('[data-action]');
-        if (!target) return;
+        if (!target) { console.log('[cart-js] no [data-action] ancestor'); return; }
+        console.log('[cart-js] target=', target, 'action=', target.dataset.action);
 
         const action = target.dataset.action;
         const itemEl = target.closest('[data-product-id]');
-        if (!itemEl) return;
+        if (!itemEl) { console.log('[cart-js] no [data-product-id] ancestor'); return; }
+        console.log('[cart-js] itemEl=', itemEl, 'productId=', itemEl.dataset.productId);
 
         const productId = parseInt(itemEl.dataset.productId, 10);
         const price = parseInt(itemEl.dataset.price, 10);
