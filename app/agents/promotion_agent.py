@@ -8,6 +8,7 @@ Agent output goes through GovernedToolExecutor — never directly to repository/
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from collections.abc import Callable
@@ -17,12 +18,22 @@ from typing import Any, Protocol
 from nano_vm.models import Program, Trace, TraceStatus
 from nano_vm.validator import ProgramValidator
 from nano_vm_mcp.handlers import GovernedToolExecutor
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.policy.policy_snapshot import PROMOTION_AGENT_POLICY_SNAPSHOT
-from app.programs.promotion_agent_program import PROGRAM_COLLECT_PROMOTION
+from app.policy.policy_snapshot import (
+    PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT,
+    PROMOTION_AGENT_POLICY_SNAPSHOT,
+)
+from app.programs.promotion_agent_program import (
+    PROGRAM_APPLY_PROMOTION,
+    PROGRAM_COLLECT_PROMOTION,
+)
 from app.tools.promotion_agent_tools import (
+    apply_promotion_command,
     collect_promotion_command,
     report_collect_failure,
+    report_invalid_promotion_command,
+    validate_apply_promotion_command,
     validate_promotion_command,
 )
 
@@ -37,6 +48,22 @@ class PromotionAgentResult:
     error: str | None = None
 
 
+@dataclass
+class PromotionApplyResult:
+    """Outcome of the apply phase — same contract as ZoneApplyResult/MenuApplyResult.
+
+    applied=True  -> the command landed in Postgres (Trace SUCCESS, valid branch).
+    applied=False + error is None -> command rejected by validate (invalid
+        branch reached its terminal cleanly; nothing written).
+    applied=False + error set -> the apply write failed (Trace FAILED; raised).
+    """
+
+    applied: bool
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    trace_id: str | None = None
+
+
 class _VMProtocol(Protocol):
     async def run(self, program: Program, context: dict[str, Any] | None = None) -> Trace: ...
     def register_tool(self, name: str, fn: Callable[..., Any]) -> None: ...
@@ -49,17 +76,24 @@ class PromotionAgent:
         agent = PromotionAgent()
         result = await agent.manage_promotion({
             "input_text": "Create a 20% off summer sale",
-            "promotion_id": "promo-uuid-here",
         })
         if result.success:
             command = result.command  # validated structured command dict
+            apply = await agent.apply_promotion(command)
     """
 
     ALLOWED = "create/modify promotion config (metadata only)"
     FORBIDDEN = "execute promotions directly against customers"
 
-    def __init__(self, vm: _VMProtocol | None = None) -> None:
+    def __init__(
+        self,
+        vm: _VMProtocol | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+        apply_vm: _VMProtocol | None = None,
+    ) -> None:
         self._vm = vm
+        self._session_factory = session_factory
+        self._apply_vm = apply_vm
 
     def _build_vm(self) -> _VMProtocol:
         from nano_vm.vm import ExecutionVM
@@ -78,12 +112,31 @@ class PromotionAgent:
             vm.register_tool(name, governed)
         return vm
 
+    def _build_apply_vm(self, session: AsyncSession) -> _VMProtocol:
+        """Session-bound VM for the apply phase — same wiring shape as
+        ZoneAgent._build_apply_vm / MenuAgent._build_apply_vm."""
+        from nano_vm.adapters import MockLLMAdapter
+        from nano_vm.vm import ExecutionVM
+
+        from app.db_nano import StoreCursorRepository, get_store
+
+        cursor = StoreCursorRepository(get_store())
+        vm = ExecutionVM(llm=MockLLMAdapter(""), cursor_repository=cursor)
+        executor = GovernedToolExecutor(policy=PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT)
+        for name, fn in _APPLY_TOOLS.items():
+            governed = _governed_tool(fn, name, executor)
+            if name in _APPLY_SESSION_TOOLS:
+                vm.register_tool(name, functools.partial(governed, session=session))
+            else:
+                vm.register_tool(name, governed)
+        return vm
+
     async def manage_promotion(self, input_data: dict[str, Any]) -> PromotionAgentResult:
         """Process raw promotion input and return a structured command.
 
         Args:
-            input_data: dict with keys 'input_text', 'promotion_id',
-                       'discount' (optional), 'start_date' (optional).
+            input_data: dict with key 'input_text' (the natural-language
+                        instruction).
 
         Returns:
             PromotionAgentResult with success flag and structured command dict.
@@ -91,9 +144,6 @@ class PromotionAgent:
         vm = self._vm if self._vm is not None else self._build_vm()
         context: dict[str, Any] = {
             "input_text": input_data.get("input_text", ""),
-            "promotion_id": input_data.get("promotion_id", ""),
-            "discount": input_data.get("discount", 0),
-            "start_date": input_data.get("start_date", ""),
         }
 
         _report = ProgramValidator(PROGRAM_COLLECT_PROMOTION).validate()
@@ -138,6 +188,81 @@ class PromotionAgent:
             success=False, error=error_msg,
         )
 
+    async def apply_promotion(self, command: dict[str, Any]) -> PromotionApplyResult:
+        """Apply a confirmed command via the governed apply Program.
+
+        Commit/rollback owned here (caller of the write tools), not inside
+        the tool — same convention as apply_zone/apply_menu/apply_category.
+        """
+        _report = ProgramValidator(PROGRAM_APPLY_PROMOTION).validate()
+        if not _report.is_valid():
+            raise RuntimeError(
+                f"Program '{PROGRAM_APPLY_PROMOTION.name}' validation failed: "
+                f"{_report.summary()}"
+            )
+
+        if self._apply_vm is not None:
+            return await self._run_apply(self._apply_vm, command, session=None)
+
+        if self._session_factory is None:
+            from app.db import async_session_factory
+
+            self._session_factory = async_session_factory
+
+        async with self._session_factory() as session:
+            vm = self._build_apply_vm(session)
+            return await self._run_apply(vm, command, session=session)
+
+    async def _run_apply(
+        self,
+        vm: _VMProtocol,
+        command: dict[str, Any],
+        session: AsyncSession | None,
+    ) -> PromotionApplyResult:
+        trace = await vm.run(PROGRAM_APPLY_PROMOTION, context={"command": command})
+
+        if trace.trace_id:
+            from app.db_nano import get_store
+
+            get_store().save_trace(
+                trace_id=trace.trace_id,
+                program_id=trace.program_name,
+                status=trace.status.value,
+                steps_count=len(trace.steps),
+                total_cost=trace.total_cost_usd() or 0.0,
+                trace=trace.model_dump(mode="json"),
+            )
+
+        if trace.status == TraceStatus.SUCCESS:
+            apply_step = next(
+                (s for s in trace.steps if s.step_id == "apply_command"), None
+            )
+            if apply_step is not None and apply_step.output is not None:
+                if session is not None:
+                    await session.commit()
+                out = apply_step.output
+                result = out if isinstance(out, dict) else {"output": out}
+                return PromotionApplyResult(applied=True, result=result, trace_id=trace.trace_id)
+
+            if session is not None:
+                await session.rollback()
+            invalid_step = next(
+                (s for s in trace.steps if s.step_id == "report_invalid"), None
+            )
+            reason = (
+                str(invalid_step.output)
+                if invalid_step and invalid_step.output
+                else "command rejected"
+            )
+            logger.info("apply_promotion: command rejected (%s)", reason)
+            return PromotionApplyResult(applied=False, error=None, trace_id=trace.trace_id)
+
+        if session is not None:
+            await session.rollback()
+        error_msg = trace.error or "apply execution failed"
+        logger.error("apply_promotion: apply failed — %s", error_msg)
+        return PromotionApplyResult(applied=False, error=error_msg, trace_id=trace.trace_id)
+
 
 def _governed_tool(
     fn: Callable[..., Any],
@@ -155,3 +280,14 @@ _AGENT_TOOLS: dict[str, Callable[..., Any]] = {
     "collect_promotion_command": collect_promotion_command,
     "report_collect_failure": report_collect_failure,
 }
+
+_APPLY_TOOLS: dict[str, Callable[..., Any]] = {
+    "validate_apply_promotion_command": validate_apply_promotion_command,
+    "apply_promotion_command": apply_promotion_command,
+    "report_invalid_promotion_command": report_invalid_promotion_command,
+}
+
+_APPLY_SESSION_TOOLS: frozenset[str] = frozenset({
+    "validate_apply_promotion_command",
+    "apply_promotion_command",
+})
