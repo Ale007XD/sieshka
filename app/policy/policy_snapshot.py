@@ -217,6 +217,22 @@ MENU_AGENT_UPDATE_PRODUCT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_
     version="1.0.0",
 )
 
+MENU_AGENT_UPDATE_CATEGORY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_update_category_command": ["menu:read"],
+    "apply_update_category_command": ["menu:write"],
+    "report_invalid_update_category_command": ["menu:read"],
+}
+
+MENU_AGENT_UPDATE_CATEGORY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": MENU_AGENT_UPDATE_CATEGORY_TOOL_CAPABILITIES,
+}
+
+MENU_AGENT_UPDATE_CATEGORY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    MENU_AGENT_UPDATE_CATEGORY_POLICY_CONFIG,
+    policy_id="menu-agent-update-category-v1",
+    version="1.0.0",
+)
+
 SCHEDULE_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     SCHEDULE_AGENT_POLICY_CONFIG,
     policy_id="schedule-agent-v1",

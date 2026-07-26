@@ -112,6 +112,35 @@ async def _fetch_categories_ref() -> list[dict[str, Any]]:
         ]
 
 
+async def _fetch_categories_full() -> list[dict[str, Any]]:
+    """Full categories list (active + inactive) for the management table —
+    same 'show everything for reference' convention as ZoneService.list_all()."""
+    from sqlalchemy import text as sql_text
+
+    from app.db import async_session_factory
+
+    async with async_session_factory() as session:
+        rows = await session.execute(
+            sql_text(
+                "SELECT c.id, c.name, c.menu_period, c.sort, c.is_active, "
+                "p.name AS parent_name "
+                "FROM categories c LEFT JOIN categories p ON c.parent_category_id = p.id "
+                "ORDER BY c.sort, c.name"
+            )
+        )
+        return [
+            {
+                "id": str(r._mapping["id"]),
+                "name": r._mapping["name"],
+                "parent_name": r._mapping["parent_name"],
+                "menu_period": r._mapping["menu_period"],
+                "sort": r._mapping["sort"],
+                "is_active": r._mapping["is_active"],
+            }
+            for r in rows.fetchall()
+        ]
+
+
 def _product_view(products: list[Any]) -> list[dict[str, Any]]:
     return [
         {
@@ -152,6 +181,34 @@ async def menu_category_apply(
         "result": apply.result,
         "receipt": receipt.model_dump() if receipt is not None else None,
         "categories": categories,
+    }
+
+
+@router.patch("/menu/categories/{category_id}/apply")
+async def menu_category_update(
+    category_id: UUID,
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Update one category from a structured admin form."""
+    agent = MenuAgent()
+    command = {**payload, "category_id": str(category_id)}
+    apply = await agent.update_category(command)
+    categories_full = await _fetch_categories_full()
+    categories_ref = await _fetch_categories_ref()
+    receipt = None
+    if apply.trace_id is not None:
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("menu_category_update: trace %s not found for receipt", apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "result": apply.result,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "categories": categories_ref,
+        "categories_full": categories_full,
     }
 
 
@@ -219,6 +276,7 @@ async def menu_admin_ui(
     """Render the menu admin page: product table + upload form + last report."""
     products, counts = await service.get_admin_data()
     categories = await _fetch_categories_ref()
+    categories_full = await _fetch_categories_full()
     return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
         request,
         "menu_admin.html",
@@ -226,10 +284,12 @@ async def menu_admin_ui(
             "products": _product_view(products),
             "counts": counts.model_dump(),
             "categories": categories,
+            "categories_full": categories_full,
             "report": _last_menu_import_report,
             "form_action": "/admin/menu/import-csv",
             "category_form_action": "/admin/menu/categories/apply",
             "product_form_action": "/admin/menu/products/apply",
+            "category_update_form_action_base": "/admin/menu/categories",
         },
     )
 

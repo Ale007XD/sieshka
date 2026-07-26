@@ -31,26 +31,31 @@ from app.policy.policy_snapshot import (
     MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT,
     MENU_AGENT_APPLY_POLICY_SNAPSHOT,
     MENU_AGENT_POLICY_SNAPSHOT,
+    MENU_AGENT_UPDATE_CATEGORY_POLICY_SNAPSHOT,
     MENU_AGENT_UPDATE_PRODUCT_POLICY_SNAPSHOT,
 )
 from app.programs.menu_agent_program import (
     PROGRAM_APPLY_CATEGORY,
     PROGRAM_APPLY_MENU,
     PROGRAM_COLLECT_ORDER,
+    PROGRAM_UPDATE_CATEGORY,
     PROGRAM_UPDATE_PRODUCT,
 )
 from app.tools.menu_agent_tools import (
     apply_category_command,
     apply_menu_command,
+    apply_update_category_command,
     apply_update_product_command,
     collect_menu_command,
     report_collect_failure,
     report_invalid_category_command,
     report_invalid_command,
+    report_invalid_update_category_command,
     report_invalid_update_product_command,
     validate_apply_category_command,
     validate_apply_command,
     validate_menu_command,
+    validate_update_category_command,
     validate_update_product_command,
 )
 
@@ -341,6 +346,44 @@ class MenuAgent:
                 vm, PROGRAM_UPDATE_PRODUCT, command, session=session
             )
 
+    async def update_category(self, command: dict[str, Any]) -> MenuApplyResult:
+        """Update an existing category via the governed update Program.
+
+        Command schema: {category_id: str (UUID), name?: str,
+                         parent_category?: str, menu_period?: str, sort?: int,
+                         is_active?: bool}
+        Only non-None fields are written; absent fields are left unchanged.
+        Commit/rollback at-caller convention, same as apply_menu/apply_category.
+        """
+        _report = ProgramValidator(PROGRAM_UPDATE_CATEGORY).validate()
+        if not _report.is_valid():
+            raise RuntimeError(
+                f"Program '{PROGRAM_UPDATE_CATEGORY.name}' validation failed: "
+                f"{_report.summary()}"
+            )
+
+        if self._apply_vm is not None:
+            return await self._run_apply(
+                self._apply_vm, PROGRAM_UPDATE_CATEGORY, command, session=None
+            )
+
+        if self._session_factory is None:
+            from app.db import async_session_factory
+
+            self._session_factory = async_session_factory
+
+        async with self._session_factory() as session:
+            vm = self._build_update_category_vm(session)
+            return await self._run_apply(
+                vm, PROGRAM_UPDATE_CATEGORY, command, session=session
+            )
+
+    def _build_update_category_vm(self, session: AsyncSession) -> _VMProtocol:
+        return self._build_generic_apply_vm(
+            session, _UPDATE_CATEGORY_TOOLS, _UPDATE_CATEGORY_SESSION_TOOLS,
+            MENU_AGENT_UPDATE_CATEGORY_POLICY_SNAPSHOT,
+        )
+
     async def _run_apply(
         self,
         vm: _VMProtocol,
@@ -445,4 +488,16 @@ _UPDATE_PRODUCT_TOOLS: dict[str, Callable[..., Any]] = {
 _UPDATE_PRODUCT_SESSION_TOOLS: frozenset[str] = frozenset({
     "validate_update_product_command",
     "apply_update_product_command",
+})
+
+_UPDATE_CATEGORY_TOOLS: dict[str, Callable[..., Any]] = {
+    "validate_update_category_command": validate_update_category_command,
+    "apply_update_category_command": apply_update_category_command,
+    "report_invalid_update_category_command": report_invalid_update_category_command,
+}
+
+# Category update-phase tools that need the closure-injected session.
+_UPDATE_CATEGORY_SESSION_TOOLS: frozenset[str] = frozenset({
+    "validate_update_category_command",
+    "apply_update_category_command",
 })

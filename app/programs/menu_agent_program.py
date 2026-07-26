@@ -226,3 +226,48 @@ PROGRAM_UPDATE_PRODUCT = Program(
         ),
     ],
 )
+
+
+# ---------------------------------------------------------------------------
+# UPDATE phase — category update. Same 4-step CONVENTION shape as
+# PROGRAM_UPDATE_PRODUCT. Command dict: {category_id: str, name?: str,
+#                parent_category?: str, menu_period?: str, sort?: int,
+#                is_active?: bool}
+# ---------------------------------------------------------------------------
+
+PROGRAM_UPDATE_CATEGORY = Program(
+    name="menu_agent_update_category",
+    steps=[
+        Step(
+            id="validate_command",
+            type=StepType.TOOL,
+            tool="validate_update_category_command",
+            args={"command": "$command"},
+            output_key="validation_result",
+            next_step="check_valid",
+        ),
+        Step(
+            id="check_valid",
+            type=StepType.CONDITION,
+            condition="$validate_command.output < 1",
+            then="report_invalid",
+            otherwise="apply_command",
+        ),
+        Step(
+            id="apply_command",
+            type=StepType.TOOL,
+            tool="apply_update_category_command",
+            args={"command": "$command"},
+            output_key="apply_result",
+            is_terminal=True,
+        ),
+        Step(
+            id="report_invalid",
+            type=StepType.TOOL,
+            tool="report_invalid_update_category_command",
+            args={"reason": "$validate_command.output"},
+            output_key="invalid_result",
+            is_terminal=True,
+        ),
+    ],
+)

@@ -194,8 +194,6 @@ async def apply_menu_command(
     description = command.get("description")
     image_url = command.get("image_url")
 
-    # Re-resolve the category AT WRITE TIME under a row lock, so a concurrent
-    # apply cannot delete/rename it out from under us between the two SELECTs.
     cat = await session.execute(
         text(
             "SELECT id FROM categories WHERE lower(name) = lower(:name) FOR UPDATE"
@@ -214,9 +212,6 @@ async def apply_menu_command(
         )
     category_id: UUID = cat_matches[0]._mapping["id"]
 
-    # Re-check name-not-in-use AT WRITE TIME. A concurrent apply that inserted
-    # the same product name between validate and now must lose here, not silently
-    # create a duplicate.
     prod = await session.execute(
         text("SELECT id FROM products WHERE lower(name) = lower(:name)"),
         {"name": name},
@@ -544,7 +539,6 @@ async def apply_update_product_command(
         raise ValueError("apply_update_product_command: malformed command")
     product_id, name, category, price_rub, description, image_url, is_active = parsed
 
-    # Re-check product exists and lock the row.
     existing = await session.execute(
         text("SELECT id FROM products WHERE id = :id FOR UPDATE"),
         {"id": product_id},
@@ -556,7 +550,6 @@ async def apply_update_product_command(
         )
         raise ValueError(f"product not found at write time: {product_id!r}")
 
-    # Resolve category if provided.
     category_id: UUID | None = None
     if category is not None:
         cat = await session.execute(
@@ -605,4 +598,218 @@ async def apply_update_product_command(
 async def report_invalid_update_product_command(reason: str, **kwargs: object) -> str:
     """Terminal tool: invalid-branch terminal for the product update phase."""
     logger.warning("report_invalid_update_product_command: %s", reason)
+    return f"INVALID:{reason}"
+
+
+# ---------------------------------------------------------------------------
+# UPDATE phase — category update (mirrors product update above)
+# ---------------------------------------------------------------------------
+
+
+def _required_update_category_fields(
+    command: Any,
+) -> tuple[UUID, str | None, str | None, str | None, int | None, bool | None] | None:
+    """Extract (category_id, name?, parent_category?, menu_period?, sort?, is_active?).
+
+    Only category_id is mandatory. Absent (None) fields are left unchanged at
+    write time via COALESCE — same convention as _required_update_product_fields.
+    """
+    if not isinstance(command, dict):
+        return None
+    raw_id = command.get("category_id")
+    if not isinstance(raw_id, str):
+        return None
+    try:
+        category_id = UUID(raw_id)
+    except (ValueError, AttributeError):
+        return None
+
+    name = command.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        return None
+
+    parent_category = command.get("parent_category")
+    if parent_category is not None and (
+        not isinstance(parent_category, str) or not parent_category.strip()
+    ):
+        return None
+
+    menu_period = command.get("menu_period")
+    if menu_period is not None and menu_period not in ("both", "delivery", "pickup"):
+        return None
+
+    sort = command.get("sort")
+    if sort is not None and (isinstance(sort, bool) or not isinstance(sort, int)):
+        return None
+
+    is_active = command.get("is_active")
+    if is_active is not None and not isinstance(is_active, bool):
+        return None
+
+    return (
+        category_id,
+        name.strip() if name else None,
+        parent_category.strip() if parent_category else None,
+        menu_period,
+        sort,
+        is_active,
+    )
+
+
+async def validate_update_category_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> int:
+    """Early-rejection convenience for category update. Numeric sentinel.
+
+    NOT the enforcement point — apply_update_category_command re-verifies at
+    write time (TOCTOU, same shape as validate_update_product_command).
+    """
+    parsed = _required_update_category_fields(command)
+    if parsed is None:
+        logger.warning("validate_update_category_command: malformed command")
+        return 0
+    category_id, name, parent_category, _menu_period, _sort, _is_active = parsed
+
+    existing = await session.execute(
+        text("SELECT id FROM categories WHERE id = :id"),
+        {"id": category_id},
+    )
+    if not existing.fetchall():
+        logger.warning(
+            "validate_update_category_command: category_id '%s' not found", category_id
+        )
+        return 0
+
+    if name is not None:
+        dup = await session.execute(
+            text(
+                "SELECT id FROM categories WHERE lower(name) = lower(:name) AND id != :id"
+            ),
+            {"name": name, "id": category_id},
+        )
+        if dup.fetchall():
+            logger.warning(
+                "validate_update_category_command: name '%s' already in use", name
+            )
+            return 0
+
+    if parent_category is not None:
+        parent = await session.execute(
+            text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
+            {"name": parent_category},
+        )
+        parent_matches = parent.fetchall()
+        if len(parent_matches) != 1:
+            logger.warning(
+                "validate_update_category_command: parent '%s' resolves to %d rows",
+                parent_category, len(parent_matches),
+            )
+            return 0
+        if parent_matches[0]._mapping["id"] == category_id:
+            logger.warning(
+                "validate_update_category_command: category cannot be its own parent"
+            )
+            return 0
+
+    logger.info("validate_update_category_command: category_id '%s' valid", category_id)
+    return 1
+
+
+async def apply_update_category_command(
+    session: AsyncSession,
+    command: Any,
+    **kwargs: object,
+) -> dict[str, Any]:
+    """Terminal tool: update an existing category row.
+
+    is_terminal, no downstream CONDITION → MUST raise on any write failure
+    (CONSTRAINTS.md "Terminal TOOL step failure propagation").
+
+    TOCTOU RE-CHECK: category row locked with FOR UPDATE; name-uniqueness and
+    parent resolution re-verified inside the same transaction (same discipline
+    as apply_update_product_command). Only fields present and non-None in the
+    command are updated — absent fields left unchanged via COALESCE.
+
+    KNOWN LIMITATION (same class as apply_update_product_command): COALESCE
+    can't distinguish "clear this field to NULL" from "field not provided" —
+    a category can be re-parented but not un-parented back to top-level via
+    this tool. If that's needed later, add an explicit sentinel (e.g. empty
+    string) handled separately, don't silently special-case None.
+    """
+    parsed = _required_update_category_fields(command)
+    if parsed is None:
+        raise ValueError("apply_update_category_command: malformed command")
+    category_id, name, parent_category, menu_period, sort, is_active = parsed
+
+    existing = await session.execute(
+        text("SELECT id FROM categories WHERE id = :id FOR UPDATE"),
+        {"id": category_id},
+    )
+    if not existing.fetchall():
+        logger.error(
+            "apply_update_category_command: category_id '%s' not found at write time",
+            category_id,
+        )
+        raise ValueError(f"category not found at write time: {category_id!r}")
+
+    if name is not None:
+        dup = await session.execute(
+            text(
+                "SELECT id FROM categories WHERE lower(name) = lower(:name) AND id != :id"
+            ),
+            {"name": name, "id": category_id},
+        )
+        if dup.fetchall():
+            logger.error(
+                "apply_update_category_command: name '%s' already in use at write time",
+                name,
+            )
+            raise ValueError(f"category name already in use at write time: {name!r}")
+
+    parent_id: UUID | None = None
+    if parent_category is not None:
+        parent = await session.execute(
+            text(
+                "SELECT id FROM categories WHERE lower(name) = lower(:name) FOR UPDATE"
+            ),
+            {"name": parent_category},
+        )
+        parent_matches = parent.fetchall()
+        if len(parent_matches) != 1:
+            raise ValueError(
+                f"parent category not uniquely resolvable at write time: "
+                f"{parent_category!r} ({len(parent_matches)} matches)"
+            )
+        parent_id = parent_matches[0]._mapping["id"]
+        if parent_id == category_id:
+            raise ValueError("category cannot be its own parent")
+
+    await session.execute(
+        text(
+            "UPDATE categories SET "
+            "name = COALESCE(:name, name), "
+            "parent_category_id = COALESCE(:parent_id, parent_category_id), "
+            "menu_period = COALESCE(:menu_period, menu_period), "
+            "sort = COALESCE(:sort, sort), "
+            "is_active = COALESCE(:is_active, is_active) "
+            "WHERE id = :id"
+        ),
+        {
+            "id": category_id,
+            "name": name,
+            "parent_id": parent_id,
+            "menu_period": menu_period,
+            "sort": sort,
+            "is_active": is_active,
+        },
+    )
+    logger.info("apply_update_category_command: updated category '%s'", category_id)
+    return {"applied": True, "category_id": str(category_id)}
+
+
+async def report_invalid_update_category_command(reason: str, **kwargs: object) -> str:
+    """Terminal tool: invalid-branch terminal for the category update phase."""
+    logger.warning("report_invalid_update_category_command: %s", reason)
     return f"INVALID:{reason}"
