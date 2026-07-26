@@ -967,3 +967,10 @@ button:focus-visible,
 body.lightbox-open {
   overflow: hidden;
 }
+
+/* Картинки в меню/разметке кликабельны для лайтбокса */
+.menu-card img:not(.no-lightbox),
+.product-img:not(.no-lightbox),
+.gallery img:not(.no-lightbox) {
+  cursor: zoom-in;
+}
