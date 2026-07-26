@@ -2,9 +2,18 @@
 {% block title %}Меню — Sieshka{% endblock %}
 {% block content %}
 <section class="menu-page">
-  <h1>Меню</h1>
+  <h1 class="mb-3">Меню</h1>
+  
+  <div class="d-flex align-items-center gap-2 overflow-x-auto mb-4" id="categoryButtons" style="scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none;">
+    <button class="btn btn-sm rounded-pill category-btn active" data-category-id="all" style="white-space: nowrap; min-width: 100px;">
+      <i class="bi bi-grid-fill me-1"></i>Все меню
+    </button>
+  </div>
+
   <div id="menu-status" class="menu-status" role="status">Загрузка меню…</div>
-  <div id="menu-root" class="menu-root"></div>
+  <div id="menu-root" class="menu-root">
+    <div id="menu-container"></div>
+  </div>
 </section>
 {% endblock %}
 {% block scripts %}

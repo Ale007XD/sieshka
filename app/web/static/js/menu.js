@@ -313,7 +313,8 @@ function populateCategoryButtons(categories) {
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm rounded-pill category-btn';
         btn.dataset.categoryId = cat.category_id;
-        btn.textContent = cat.name;
+        btn.style.whiteSpace = 'nowrap';
+        btn.innerHTML = `<i class="bi bi-circle-fill me-1" style="font-size: 8px; color: var(--brand-primary);"></i>${cat.name}`;
         if (String(cat.category_id) === String(initialActiveId)) {
             btn.classList.add('active');
         }
