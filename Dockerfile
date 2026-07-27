@@ -6,6 +6,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
+# GigaChat (Sber) uses a TLS chain signed by the Russian Ministry of Digital
+# Development root CA, which is not in the standard ca-certificates bundle.
+# litellm's native gigachat/ provider only disables SSL verification for its
+# OAuth token exchange (authenticator.py) and file uploads (file_handler.py) —
+# NOT for the actual /chat/completions call, so without this the real chat
+# request fails with SSLCertVerificationError even with a valid API key.
+RUN mkdir -p /usr/local/share/ca-certificates/russian_trusted \
+    && curl -fsSL -o /usr/local/share/ca-certificates/russian_trusted/russian_trusted_root_ca.crt \
+       https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt \
+    && curl -fsSL -o /usr/local/share/ca-certificates/russian_trusted/russian_trusted_sub_ca.crt \
+       https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt \
+    && update-ca-certificates
+
 COPY pyproject.toml ./
 COPY app ./app
 
