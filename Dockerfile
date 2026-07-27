@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl \
+    gcc libpq-dev curl openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # GigaChat (Sber) uses a TLS chain signed by the Russian Ministry of Digital
@@ -33,9 +33,26 @@ RUN pip install --no-cache-dir --break-system-packages -e ".[nano]"
 # MUST run AFTER pip install (needs certifi already installed + resolvable),
 # and should be the LAST cert-related step so a later pip reinstall of
 # certifi doesn't silently wipe this out.
+#
+# INCIDENT (2026-07-27): an earlier version of this step used plain
+# `curl ... >> "$CERTIFI_CACERT"` with no validation. One of the two fetches
+# silently returned non-PEM content (curl's `-f` only catches HTTP 4xx/5xx,
+# not a 200 OK with the wrong body), corrupting cacert.pem as a whole —
+# litellm creates an SSL context from this file eagerly at import time
+# (litellm/fine_tuning/main.py), so the corrupted bundle crashed the entire
+# app on startup (ssl.SSLError: [X509] PEM lib), not just the GigaChat path.
+# Each fetched file is now validated with `openssl x509 -noout` BEFORE being
+# appended — an invalid/non-PEM response fails the build instead of
+# silently shipping a broken image.
 RUN CERTIFI_CACERT=$(python3 -c "import certifi; print(certifi.where())") \
-    && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt >> "$CERTIFI_CACERT" \
-    && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt >> "$CERTIFI_CACERT"
+    && curl -fsSL -o /tmp/russian_root.crt \
+       https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt \
+    && curl -fsSL -o /tmp/russian_sub.crt \
+       https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt \
+    && openssl x509 -in /tmp/russian_root.crt -noout -text > /dev/null \
+    && openssl x509 -in /tmp/russian_sub.crt -noout -text > /dev/null \
+    && cat /tmp/russian_root.crt /tmp/russian_sub.crt >> "$CERTIFI_CACERT" \
+    && rm /tmp/russian_root.crt /tmp/russian_sub.crt
 
 EXPOSE 8000
 
