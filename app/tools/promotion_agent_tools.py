@@ -182,7 +182,10 @@ async def validate_apply_promotion_command(
         if effect_type == "PERCENT_DISCOUNT":
             assert discount is not None
             if discount < 0 or discount > 100:
-                logger.warning("validate_apply_promotion_command: discount %s out of range", discount)
+                logger.warning(
+                    "validate_apply_promotion_command: discount %s out of range",
+                    discount,
+                )
                 return 0
         if effect_type == "FIXED_AMOUNT" and (discount is None or discount <= 0):
             logger.warning("validate_apply_promotion_command: fixed amount must be > 0")
