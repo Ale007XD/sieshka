@@ -24,6 +24,19 @@ COPY app ./app
 
 RUN pip install --no-cache-dir --break-system-packages -e ".[nano]"
 
+# httpx (used internally by litellm) verifies TLS against certifi's OWN
+# cacert.pem bundle by default — NOT the system /etc/ssl/certs store that
+# update-ca-certificates manages. Adding the Russian root CA to the OS trust
+# store alone (see earlier RUN block) fixes curl/system tools, but litellm's
+# actual GigaChat /chat/completions call still fails with the same
+# SSLCertVerificationError until certifi's bundle itself is patched.
+# MUST run AFTER pip install (needs certifi already installed + resolvable),
+# and should be the LAST cert-related step so a later pip reinstall of
+# certifi doesn't silently wipe this out.
+RUN CERTIFI_CACERT=$(python3 -c "import certifi; print(certifi.where())") \
+    && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt >> "$CERTIFI_CACERT" \
+    && curl -fsSL https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt >> "$CERTIFI_CACERT"
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
