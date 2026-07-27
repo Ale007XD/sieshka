@@ -154,3 +154,4 @@ class CheckoutRequest(BaseModel):
     items: list[CheckoutItem]
     idempotency_key: str
     client_max_uid: int | None = None  # MAX mini-app user id; persisted only
+    promo_code: str | None = None  # separate from `comment` — see checkout.html

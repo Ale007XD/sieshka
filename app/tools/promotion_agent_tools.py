@@ -104,8 +104,9 @@ async def report_collect_failure(reason: str, **kwargs: object) -> str:
 
 def _required_apply_fields(
     command: Any,
-) -> tuple[str, str | None, float | None, str | None] | None:
-    """Extract (action, name?, discount?, target_promotion_name?) if well-formed.
+) -> tuple[str, str | None, float | None, str | None, str, str | None] | None:
+    """Extract (action, name?, discount?, target_promotion_name?,
+    effect_type, trigger_code?) if well-formed.
 
     Shared by validator and write step so both agree on one definition of
     "well-formed apply command" — same pattern as menu/zone/category tools.
@@ -132,9 +133,23 @@ def _required_apply_fields(
     ):
         return None
 
+    effect_type = command.get("effect_type", "PERCENT_DISCOUNT")
+    if effect_type not in ("PERCENT_DISCOUNT", "FIXED_AMOUNT", "FREE_DELIVERY"):
+        return None
+
+    trigger_code = command.get("trigger_code")
+    if trigger_code is not None and (
+        not isinstance(trigger_code, str) or not trigger_code.strip()
+    ):
+        return None
+
     if action == "create":
-        if name is None or discount is None:
+        if name is None:
             return None
+        if effect_type in ("PERCENT_DISCOUNT", "FIXED_AMOUNT") and discount is None:
+            return None
+        if effect_type == "FREE_DELIVERY":
+            discount = None  # ignored for this effect type, not an error if provided
     else:
         if target_promotion_name is None:
             return None
@@ -144,6 +159,8 @@ def _required_apply_fields(
         name.strip() if name else None,
         float(discount) if discount is not None else None,
         target_promotion_name.strip() if target_promotion_name else None,
+        effect_type,
+        trigger_code.strip() if trigger_code else None,
     )
 
 
@@ -158,12 +175,15 @@ async def validate_apply_promotion_command(
     if parsed is None:
         logger.warning("validate_apply_promotion_command: malformed command")
         return 0
-    action, name, discount, target_promotion_name = parsed
+    action, name, discount, target_promotion_name, effect_type, trigger_code = parsed
 
     if action == "create":
-        assert name is not None and discount is not None
-        if discount < 0 or discount > 100:
+        assert name is not None
+        if effect_type == "PERCENT_DISCOUNT" and (discount < 0 or discount > 100):
             logger.warning("validate_apply_promotion_command: discount %s out of range", discount)
+            return 0
+        if effect_type == "FIXED_AMOUNT" and (discount is None or discount <= 0):
+            logger.warning("validate_apply_promotion_command: fixed amount must be > 0")
             return 0
         existing = await session.execute(
             text("SELECT id FROM promotions WHERE lower(name) = lower(:name)"),
@@ -172,6 +192,17 @@ async def validate_apply_promotion_command(
         if existing.fetchall():
             logger.warning("validate_apply_promotion_command: name '%s' already in use", name)
             return 0
+        if trigger_code is not None:
+            dupe_code = await session.execute(
+                text("SELECT id FROM promotions WHERE lower(trigger_code) = lower(:code)"),
+                {"code": trigger_code},
+            )
+            if dupe_code.fetchall():
+                logger.warning(
+                    "validate_apply_promotion_command: trigger_code '%s' already in use",
+                    trigger_code,
+                )
+                return 0
         return 1
 
     assert target_promotion_name is not None
@@ -218,7 +249,7 @@ async def apply_promotion_command(
     parsed = _required_apply_fields(command)
     if parsed is None:
         raise ValueError("apply_promotion_command: malformed command")
-    action, name, discount, target_promotion_name = parsed
+    action, name, discount, target_promotion_name, effect_type, trigger_code = parsed
 
     if action == "create":
         assert name is not None and discount is not None

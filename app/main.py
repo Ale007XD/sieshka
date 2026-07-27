@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.api.routes import checkout as checkout_module
 from app.api.routes.admin import router as admin_router
 from app.api.routes.checkout import router as checkout_router
 from app.api.routes.delivery import router as delivery_router
@@ -52,6 +53,7 @@ app.state.templates = Jinja2Templates(directory=str(templates_dir))
 
 app.include_router(orders_router)
 app.include_router(checkout_router)
+app.include_router(checkout_module.promo_router)
 app.include_router(admin_router, dependencies=[Depends(get_current_username)])
 app.include_router(kitchen_router)
 app.include_router(delivery_router)

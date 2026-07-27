@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -138,6 +139,7 @@ class OrderService:
         customer_id: UUID,
         items: list[OrderItem],
         total_rub: int,
+        promo_code: str | None = None,
     ) -> OrderRead:
         """Persist a checkout-built order with a typed, price-snapshotted item list.
 
@@ -158,10 +160,10 @@ class OrderService:
                 text(
                     "INSERT INTO orders "
                     "(customer_id, items, delivery_address, state, delivery_mode, "
-                    " zone_id, comment, client_max_uid, total_rub, payment_method) "
+                    " zone_id, comment, client_max_uid, total_rub, payment_method, promo_code) "
                     "VALUES (:customer_id, :items, :delivery_address, :state, "
                     " :delivery_mode, :zone_id, :comment, :client_max_uid, "
-                    " :total_rub, :payment_method) "
+                    " :total_rub, :payment_method, :promo_code) "
                     "RETURNING id, customer_id, state, items, delivery_address, trace_id"
                 ),
                 {
@@ -175,6 +177,7 @@ class OrderService:
                     "client_max_uid": data.client_max_uid,
                     "total_rub": total_rub,
                     "payment_method": data.payment_method,
+                    "promo_code": promo_code,
                 },
             )
             await session.commit()
@@ -560,17 +563,102 @@ def _coerce_items(raw_items: list[object]) -> list[OrderItem]:
     return coerced
 
 
-def compute_checkout_total(items: list[OrderItem], delivery_mode: str) -> int:
+@dataclass(frozen=True)
+class PromoEffect:
+    """Resolved effect of a valid promo code — read-only lookup result.
+
+    discount_rub is always the FINAL rub amount to subtract from goods total
+    (already converted from percent if effect_type was PERCENT_DISCOUNT), so
+    compute_checkout_total() never needs to know which effect_type produced it.
+    free_delivery, separately, zeroes the delivery fee component.
+    """
+
+    promotion_id: UUID
+    applied_code: str
+    discount_rub: int
+    free_delivery: bool
+
+
+async def resolve_promo_effect(
+    session: AsyncSession,
+    promo_code: str | None,
+    goods_total: int,
+) -> PromoEffect | None:
+    """Look up an ACTIVE promotion by trigger_code and resolve its effect.
+
+    Read-only — does not mutate promotions or orders. Returns None on any
+    invalid/unknown/inactive code (checkout proceeds with full price; an
+    invalid code is never a hard error at order-creation time).
+    """
+    if not promo_code or not promo_code.strip():
+        return None
+    code = promo_code.strip()
+
+    row = await session.execute(
+        text(
+            "SELECT id, discount, effect_type FROM promotions "
+            "WHERE lower(trigger_code) = lower(:code) AND state = 'ACTIVE'"
+        ),
+        {"code": code},
+    )
+    matches = row.fetchall()
+    if len(matches) != 1:
+        logger.info("resolve_promo_effect: code %r resolves to %d active rows", code, len(matches))
+        return None
+
+    promo_id = matches[0]._mapping["id"]
+    effect_type = matches[0]._mapping["effect_type"]
+    discount_val = matches[0]._mapping["discount"]
+
+    if effect_type == "PERCENT_DISCOUNT":
+        discount_rub = int(goods_total * float(discount_val) / 100)
+        return PromoEffect(
+            promotion_id=promo_id,
+            applied_code=code,
+            discount_rub=discount_rub,
+            free_delivery=False,
+        )
+    if effect_type == "FIXED_AMOUNT":
+        discount_rub = min(int(discount_val), goods_total)  # never go negative
+        return PromoEffect(
+            promotion_id=promo_id,
+            applied_code=code,
+            discount_rub=discount_rub,
+            free_delivery=False,
+        )
+    if effect_type == "FREE_DELIVERY":
+        return PromoEffect(
+            promotion_id=promo_id,
+            applied_code=code,
+            discount_rub=0,
+            free_delivery=True,
+        )
+
+    logger.warning("resolve_promo_effect: unknown effect_type %r for code %r", effect_type, code)
+    return None
+
+
+def compute_checkout_total(
+    items: list[OrderItem],
+    delivery_mode: str,
+    promo_effect: PromoEffect | None = None,
+) -> int:
     """Server-authoritative total in RUB.
 
     Sum(product.price_rub * qty) + flat DELIVERY_FEE (from settings, identical
     to GET /api/config/delivery-fee) when delivery_mode != "pickup", else 0.
+    An optional resolved PromoEffect (see resolve_promo_effect) subtracts a
+    fixed/percent discount from goods and/or zeroes the delivery fee.
 
     "model output is not execution authority" applied to money — a client
     total is never accepted; this is the only number that counts.
     """
     goods = sum(item.price_rub * item.qty for item in items)
+    if promo_effect is not None:
+        goods = max(0, goods - promo_effect.discount_rub)
     if delivery_mode == "pickup":
+        return goods
+    if promo_effect is not None and promo_effect.free_delivery:
         return goods
     return goods + settings.DELIVERY_FEE
 

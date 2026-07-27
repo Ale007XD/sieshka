@@ -21,6 +21,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.db import async_session_factory
 from app.domains.orders.models import CheckoutRequest, OrderEvent
 from app.services.customer_service import CustomerService
 from app.services.idempotency import IdempotencyService
@@ -29,16 +30,29 @@ from app.services.order_service import (
     OrderService,
     compute_checkout_total,
     resolve_checkout_items,
+    resolve_promo_effect,
 )
 from app.services.payment_service import PaymentService
 
 router = APIRouter(prefix="/api/orders", tags=["checkout"])
+promo_router = APIRouter(prefix="/api/promo", tags=["promo"])
 
 
 class CheckoutResponse(BaseModel):
     ok: bool
     order_id: str
     confirmation_token: str | None = None
+
+
+class PromoCheckRequest(BaseModel):
+    code: str
+    subtotal: int
+
+
+class PromoCheckResponse(BaseModel):
+    valid: bool
+    discount_rub: int = 0
+    free_delivery: bool = False
 
 
 def get_order_service() -> OrderService:
@@ -132,13 +146,17 @@ async def checkout(
 
     customer = await customer_service.find_or_create_by_phone(body.name, body.phone)
     items = await resolve_checkout_items(body.items, menu_service)
-    total_rub = compute_checkout_total(items, body.delivery_mode)
+    goods_total = sum(item.price_rub * item.qty for item in items)
+    async with async_session_factory() as session:
+        promo_effect = await resolve_promo_effect(session, body.promo_code, goods_total)
+    total_rub = compute_checkout_total(items, body.delivery_mode, promo_effect)
 
     order = await order_service.create_order_from_checkout(
         data=body,
         customer_id=customer.id,
         items=items,
         total_rub=total_rub,
+        promo_code=promo_effect.applied_code if promo_effect else None,
     )
 
     if body.payment_method == "yookassa_card":
@@ -196,3 +214,18 @@ async def checkout(
         },
     )
     return CheckoutResponse(ok=True, order_id=str(order.id))
+
+
+@promo_router.post("/check", response_model=PromoCheckResponse)
+async def check_promo_code(body: PromoCheckRequest) -> PromoCheckResponse:
+    """Read-only preview for the checkout "Apply" button — does not create or
+    mutate anything, just lets the customer see the effect before submitting."""
+    async with async_session_factory() as session:
+        effect = await resolve_promo_effect(session, body.code, body.subtotal)
+    if effect is None:
+        return PromoCheckResponse(valid=False)
+    return PromoCheckResponse(
+        valid=True,
+        discount_rub=effect.discount_rub,
+        free_delivery=effect.free_delivery,
+    )
