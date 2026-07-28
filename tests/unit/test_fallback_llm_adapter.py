@@ -2,6 +2,11 @@
 
 Verifies the provider hot-switch chain: tries GigaChat -> NvidiaNIM ->
 surfaces the first successful text, and raises when all fail.
+
+Yandex is deliberately NOT part of this chain (2026-07-27 decision — not
+configured/used for admin-agent LLM calls). It remains a real hop in the
+separate Program-based PROVIDER_FALLBACK FSM (app/programs/
+llm_fallback_program.py) — that is a different mechanism, not tested here.
 """
 from __future__ import annotations
 
@@ -27,35 +32,28 @@ async def _err(*args: object, **kwargs: object) -> tuple[str, None]:
 
 
 async def test_returns_first_provider_text() -> None:
+    """GigaChat is tried first — succeeds immediately, NvidiaNIM never called."""
     adapter = FallbackLLMAdapter(timeout=2.0)
-    with patch("app.llm.providers.nvidia_nim_adapter.complete", _make_text("or")):
-        out, _meta = await adapter.complete([{"role": "user", "content": "hi"}])
-    assert out == "or"
-
-
-async def test_falls_through_to_yandex() -> None:
-    adapter = FallbackLLMAdapter(timeout=1.0)
-    with patch("app.llm.providers.nvidia_nim_adapter.complete", _timeout), patch(
-        "app.llm.providers.yandexgpt_adapter.complete", _make_text("yg")
-    ):
-        out, _meta = await adapter.complete([{"role": "user", "content": "hi"}])
-    assert out == "yg"
-
-
-async def test_falls_through_to_gigachat() -> None:
-    adapter = FallbackLLMAdapter(timeout=1.0)
-    with patch("app.llm.providers.nvidia_nim_adapter.complete", _timeout), patch(
-        "app.llm.providers.yandexgpt_adapter.complete", _timeout
-    ), patch("app.llm.providers.gigachat_adapter.complete", _make_text("gc")):
+    with patch("app.llm.providers.gigachat_adapter.complete", _make_text("gc")):
         out, _meta = await adapter.complete([{"role": "user", "content": "hi"}])
     assert out == "gc"
 
 
+async def test_falls_through_to_nvidia_nim() -> None:
+    """GigaChat fails/times out -> NvidiaNIM (the only other hop) succeeds."""
+    adapter = FallbackLLMAdapter(timeout=1.0)
+    with patch("app.llm.providers.gigachat_adapter.complete", _timeout), patch(
+        "app.llm.providers.nvidia_nim_adapter.complete", _make_text("nim")
+    ):
+        out, _meta = await adapter.complete([{"role": "user", "content": "hi"}])
+    assert out == "nim"
+
+
 async def test_all_fail_raises() -> None:
     adapter = FallbackLLMAdapter(timeout=1.0)
-    with patch("app.llm.providers.nvidia_nim_adapter.complete", _err), patch(
-        "app.llm.providers.yandexgpt_adapter.complete", _err
-    ), patch("app.llm.providers.gigachat_adapter.complete", _err):
+    with patch("app.llm.providers.gigachat_adapter.complete", _err), patch(
+        "app.llm.providers.nvidia_nim_adapter.complete", _err
+    ):
         try:
             await adapter.complete([{"role": "user", "content": "hi"}])
         except RuntimeError:

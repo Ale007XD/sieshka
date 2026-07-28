@@ -1,9 +1,9 @@
 """Integration tests for provider fallback FSM — three scenarios.
 
-1. OpenRouter succeeds — no switch, Trace shows single attempt
-2. OpenRouter times out → YandexGPT succeeds — Trace shows exactly one switch_event
-3. OpenRouter times out → YandexGPT times out → GigaChat succeeds — Trace shows two switch_events
-4. OpenRouter non-timeout failure — does NOT trigger fallback switch
+1. NvidiaNIM succeeds — no switch, Trace shows single attempt
+2. NvidiaNIM times out → YandexGPT succeeds — Trace shows exactly one switch_event
+3. NvidiaNIM times out → YandexGPT times out → GigaChat succeeds — Trace shows two switch_events
+4. NvidiaNIM non-timeout failure — does NOT trigger fallback switch
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ async def mock_http_error(*args: object, **kwargs: object) -> tuple[str, None]:
 class TestProviderFallback:
     """Provider fallback FSM — three scenarios + non-timeout edge case."""
 
-    async def test_openrouter_succeeds_no_switch(self, nano_vm: ExecutionVM) -> None:
-        """OpenRouter succeeds — only attempt_nvidia_nim runs, no fallback."""
+    async def test_nvidia_nim_succeeds_no_switch(self, nano_vm: ExecutionVM) -> None:
+        """NvidiaNIM succeeds — only attempt_nvidia_nim runs, no fallback."""
         program = PROVIDER_FALLBACK
         with patch("app.llm.providers.nvidia_nim_adapter.complete", mock_success):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
@@ -74,17 +74,17 @@ class TestProviderFallback:
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
             "attempt_nvidia_nim",
-            "check_openrouter",
-            "success_openrouter",
+            "check_nvidia_nim",
+            "success_nvidia_nim",
         ]
         assert trace.steps[0].output == 1
         # debt 3.4: real LLM text propagates to terminal output
         assert trace.steps[-1].output == "response ok"
 
-    async def test_openrouter_timeout_yandex_succeeds_one_switch(
+    async def test_nvidia_nim_timeout_yandex_succeeds_one_switch(
         self, nano_vm: ExecutionVM,
     ) -> None:
-        """OpenRouter times out → YandexGPT succeeds → exactly one switch."""
+        """NvidiaNIM times out → YandexGPT succeeds → exactly one switch."""
         program = PROVIDER_FALLBACK
         with patch("app.llm.providers.nvidia_nim_adapter.complete", mock_timeout), patch(
             "app.llm.providers.yandexgpt_adapter.complete", mock_success
@@ -94,7 +94,7 @@ class TestProviderFallback:
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
             "attempt_nvidia_nim",
-            "check_openrouter",
+            "check_nvidia_nim",
             "attempt_yandexgpt",
             "check_yandexgpt",
             "success_yandexgpt",
@@ -104,7 +104,7 @@ class TestProviderFallback:
         assert trace.steps[-1].output == "response ok"
 
     async def test_two_hop_switch_to_gigachat(self, nano_vm: ExecutionVM) -> None:
-        """Both OpenRouter and YandexGPT time out → GigaChat succeeds → two switches."""
+        """Both NvidiaNIM and YandexGPT time out → GigaChat succeeds → two switches."""
         program = PROVIDER_FALLBACK
         with patch(
             "app.llm.providers.nvidia_nim_adapter.complete", mock_timeout
@@ -118,7 +118,7 @@ class TestProviderFallback:
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
             "attempt_nvidia_nim",
-            "check_openrouter",
+            "check_nvidia_nim",
             "attempt_yandexgpt",
             "check_yandexgpt",
             "attempt_gigachat",
