@@ -62,10 +62,10 @@ async def _attempt_provider(
         return str(result)
 
 
-async def attempt_openrouter(prompt: str, timeout_seconds: float = 15.0, **kwargs: object) -> int:
-    from app.llm.providers import openrouter_adapter
+async def attempt_nvidia_nim(prompt: str, timeout_seconds: float = 15.0, **kwargs: object) -> int:
+    from app.llm.providers import nvidia_nim_adapter
 
-    text = await _attempt_provider(openrouter_adapter, "OpenRouter", prompt, timeout_seconds)
+    text = await _attempt_provider(nvidia_nim_adapter, "NvidiaNIM", prompt, timeout_seconds)
     if text is not None:
         _capture_text(kwargs, text)
     return 1 if text is not None else 0

@@ -11,7 +11,7 @@ def _ensure(var: str, val: str) -> None:
 # Must set env vars BEFORE importing app.llm.providers (litellm reads them at
 # module-load time, and pydantic-settings reads them at Settings() creation).
 _ensure("OPENAI_API_KEY", "test-openai-key")
-_ensure("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+_ensure("OPENAI_API_BASE", "https://nvidia_nim.ai/api/v1")
 _ensure("NVIDIA_NIM_API_KEY", "test-nvidia-key")
 _ensure("YANDEX_API_KEY", "test-yandex-key")
 _ensure("YANDEX_API_BASE", "https://llm.api.cloud.yandex.net/foundationModels/v1/completion")
@@ -24,7 +24,7 @@ from nano_vm.adapters.litellm_adapter import LiteLLMAdapter  # noqa: E402
 
 from app.llm.providers import (  # noqa: E402
     gigachat_adapter,
-    openrouter_adapter,
+    nvidia_nim_adapter,
     yandexgpt_adapter,
 )
 
@@ -33,21 +33,21 @@ class TestNvidiaNimConfig:
     def test_model_format(self) -> None:
         assert re.match(
             r"^nvidia_nim/[^/]+/[^/]+$",
-            openrouter_adapter.model,
-        ), f"Model {openrouter_adapter.model!r} does not match 'nvidia_nim/vendor/model'"
+            nvidia_nim_adapter.model,
+        ), f"Model {nvidia_nim_adapter.model!r} does not match 'nvidia_nim/vendor/model'"
 
     def test_no_stream_with_max_tokens(self) -> None:
-        assert "stream" not in openrouter_adapter._extra
-        assert openrouter_adapter._extra.get("max_tokens") == 8192
+        assert "stream" not in nvidia_nim_adapter._extra
+        assert nvidia_nim_adapter._extra.get("max_tokens") == 8192
 
     def test_is_litellm_adapter(self) -> None:
-        assert isinstance(openrouter_adapter, LiteLLMAdapter)
+        assert isinstance(nvidia_nim_adapter, LiteLLMAdapter)
 
     def test_api_key_in_kwargs(self) -> None:
-        assert openrouter_adapter._extra.get("api_key") == "test-nvidia-key"
+        assert nvidia_nim_adapter._extra.get("api_key") == "test-nvidia-key"
 
     def test_api_base_in_kwargs(self) -> None:
-        assert openrouter_adapter._extra.get("api_base") == "https://integrate.api.nvidia.com/v1"
+        assert nvidia_nim_adapter._extra.get("api_base") == "https://integrate.api.nvidia.com/v1"
 
 
 class TestYandexGPTConfig:

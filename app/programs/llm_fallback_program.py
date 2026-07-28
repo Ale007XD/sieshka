@@ -1,6 +1,6 @@
 """Provider fallback program — two-hop hot-switch FSM.
 
-Primary = OpenRouter free tier; on TIMEOUT → YandexGPT Pro;
+Primary = NvidiaNIM free tier; on TIMEOUT → YandexGPT Pro;
 on TIMEOUT → GigaChat (last resort).
 
 Multi-hop next_step chain. Requires llm-nano-vm>=0.8.7 (BUG-NEXTSTEP-01/02 fix).
@@ -14,19 +14,19 @@ PROVIDER_FALLBACK = Program(
     name="provider_fallback",
     steps=[
         Step(
-            id="attempt_openrouter",
+            id="attempt_nvidia_nim",
             type=StepType.TOOL,
-            tool="attempt_openrouter",
+            tool="attempt_nvidia_nim",
             args={"prompt": "$prompt", "timeout_seconds": 15},
-            output_key="openrouter_result",
-            next_step="check_openrouter",
+            output_key="nvidia_nim_result",
+            next_step="check_nvidia_nim",
         ),
         Step(
-            id="check_openrouter",
+            id="check_nvidia_nim",
             type=StepType.CONDITION,
-            condition="$openrouter_result.output < 1",
+            condition="$nvidia_nim_result.output < 1",
             then="attempt_yandexgpt",
-            otherwise="success_openrouter",
+            otherwise="success_nvidia_nim",
         ),
         Step(
             id="attempt_yandexgpt",
@@ -52,10 +52,10 @@ PROVIDER_FALLBACK = Program(
             next_step="success_gigachat",
         ),
         Step(
-            id="success_openrouter",
+            id="success_nvidia_nim",
             type=StepType.TOOL,
             tool="finalize_success",
-            args={"result": "$openrouter_result.output"},
+            args={"result": "$nvidia_nim_result.output"},
             output_key="final_result",
             is_terminal=True,
         ),

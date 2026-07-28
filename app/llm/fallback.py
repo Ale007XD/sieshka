@@ -1,7 +1,7 @@
 """app/llm/fallback.py — FallbackLLMAdapter: provider hot-switch chain.
 
-Mirrors the PROVIDER_FALLBACK nano-vm Program: tries OpenRouter -> YandexGPT
--> GigaChat, each wrapped in an asyncio timeout, surfacing the first
+Mirrors the PROVIDER_FALLBACK nano-vm Program: tries GigaChat -> NvidiaNIM
+, each wrapped in an asyncio timeout, surfacing the first
 successful text. Used as the LLM adapter for the agent programs so they
 inherit the same provider resilience (debt 3.5) without changing the agent
 programs themselves (their StepType.LLM step stays intact).
@@ -30,14 +30,12 @@ class FallbackLLMAdapter:
     ) -> tuple[str, dict[str, Any] | None]:
         from app.llm.providers import (
             gigachat_adapter,
-            openrouter_adapter,
-            yandexgpt_adapter,
+            nvidia_nim_adapter,
         )
 
         providers = (
-            ("OpenRouter/NIM", openrouter_adapter),
-            ("YandexGPT", yandexgpt_adapter),
             ("GigaChat", gigachat_adapter),
+            ("NvidiaNIM", nvidia_nim_adapter),
         )
         errors: list[tuple[str, Exception]] = []
         for name, adapter in providers:

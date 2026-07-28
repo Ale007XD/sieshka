@@ -4,10 +4,8 @@ from nano_vm.adapters.litellm_adapter import LiteLLMAdapter
 
 from app.config import settings
 
-# Primary: OpenRouter free tier
-# Requires OPENAI_API_KEY + OPENAI_API_BASE env vars set BEFORE litellm import.
-# api_base must be https://openrouter.ai/api/v1
-openrouter_adapter = LiteLLMAdapter(
+# Primary: Nvidia NIM
+nvidia_nim_adapter = LiteLLMAdapter(
     model=settings.NVIDIA_NIM_MODEL,
     timeout=30.0,
     max_retries=2,

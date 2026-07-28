@@ -12,7 +12,7 @@ from app.tools.kitchen_tools import (
 )
 from app.tools.llm_fallback_tools import (
     attempt_gigachat,
-    attempt_openrouter,
+    attempt_nvidia_nim,
     attempt_yandexgpt,
     finalize_success,
 )
@@ -69,7 +69,7 @@ __all__ = [
     "apply_menu_command",
     "apply_update_product_command",
     "attempt_gigachat",
-    "attempt_openrouter",
+    "attempt_nvidia_nim",
     "attempt_yandexgpt",
     "check_inventory_stock",
     "collect_menu_command",

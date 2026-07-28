@@ -24,7 +24,7 @@ from app.db_nano import StoreCursorRepository
 from app.programs.llm_fallback_program import PROVIDER_FALLBACK
 from app.tools.llm_fallback_tools import (
     attempt_gigachat,
-    attempt_openrouter,
+    attempt_nvidia_nim,
     attempt_yandexgpt,
     finalize_success,
 )
@@ -41,7 +41,7 @@ def nano_vm() -> Generator[ExecutionVM, None, None]:
         store = ProgramStore(path)
         cursor = StoreCursorRepository(store)
         vm = ExecutionVM(llm=cast(MockLLMAdapter, None), cursor_repository=cursor)
-        for fn in (attempt_openrouter, attempt_yandexgpt, attempt_gigachat, finalize_success):
+        for fn in (attempt_nvidia_nim, attempt_yandexgpt, attempt_gigachat, finalize_success):
             vm.register_tool(fn.__name__, fn)
         yield vm
         store.close()
@@ -66,14 +66,14 @@ class TestProviderFallback:
     """Provider fallback FSM — three scenarios + non-timeout edge case."""
 
     async def test_openrouter_succeeds_no_switch(self, nano_vm: ExecutionVM) -> None:
-        """OpenRouter succeeds — only attempt_openrouter runs, no fallback."""
+        """OpenRouter succeeds — only attempt_nvidia_nim runs, no fallback."""
         program = PROVIDER_FALLBACK
-        with patch("app.llm.providers.openrouter_adapter.complete", mock_success):
+        with patch("app.llm.providers.nvidia_nim_adapter.complete", mock_success):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.SUCCESS
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
-            "attempt_openrouter",
+            "attempt_nvidia_nim",
             "check_openrouter",
             "success_openrouter",
         ]
@@ -86,14 +86,14 @@ class TestProviderFallback:
     ) -> None:
         """OpenRouter times out → YandexGPT succeeds → exactly one switch."""
         program = PROVIDER_FALLBACK
-        with patch("app.llm.providers.openrouter_adapter.complete", mock_timeout), patch(
+        with patch("app.llm.providers.nvidia_nim_adapter.complete", mock_timeout), patch(
             "app.llm.providers.yandexgpt_adapter.complete", mock_success
         ):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.SUCCESS
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
-            "attempt_openrouter",
+            "attempt_nvidia_nim",
             "check_openrouter",
             "attempt_yandexgpt",
             "check_yandexgpt",
@@ -107,7 +107,7 @@ class TestProviderFallback:
         """Both OpenRouter and YandexGPT time out → GigaChat succeeds → two switches."""
         program = PROVIDER_FALLBACK
         with patch(
-            "app.llm.providers.openrouter_adapter.complete", mock_timeout
+            "app.llm.providers.nvidia_nim_adapter.complete", mock_timeout
         ), patch(
             "app.llm.providers.yandexgpt_adapter.complete", mock_timeout
         ), patch(
@@ -117,7 +117,7 @@ class TestProviderFallback:
         assert trace.status == TraceStatus.SUCCESS
         step_ids = [s.step_id for s in trace.steps]
         assert step_ids == [
-            "attempt_openrouter",
+            "attempt_nvidia_nim",
             "check_openrouter",
             "attempt_yandexgpt",
             "check_yandexgpt",
@@ -134,11 +134,11 @@ class TestProviderFallback:
     ) -> None:
         """Non-timeout error (e.g. HTTP 500) does NOT route through fallback."""
         program = PROVIDER_FALLBACK
-        with patch("app.llm.providers.openrouter_adapter.complete", mock_http_error):
+        with patch("app.llm.providers.nvidia_nim_adapter.complete", mock_http_error):
             trace: Trace = await nano_vm.run(program, context={"prompt": "hello"})
         assert trace.status == TraceStatus.FAILED
         step_ids = [s.step_id for s in trace.steps]
-        assert step_ids == ["attempt_openrouter"]
+        assert step_ids == ["attempt_nvidia_nim"]
         assert trace.steps[0].status == StepStatus.FAILED
 
 
