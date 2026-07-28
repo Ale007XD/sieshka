@@ -39,6 +39,8 @@ PROGRAM_COLLECT_ZONE = Program(
                 '  - "target_zone_name": the name of the EXISTING zone this '
                 'instruction refers to (string) when action=update or '
                 'action=deactivate; otherwise null\n'
+                '  - "delivery_fee_rub": positive integer delivery fee in RUB '
+                'when action=create or action=update changes the fee; otherwise null\n'
                 "\n"
                 'The verbs "deactivate", "disable", "remove" and "delete" all mean '
                 'action="deactivate" (a soft retirement — the zone is no longer '
@@ -58,6 +60,10 @@ PROGRAM_COLLECT_ZONE = Program(
                 '  "поменяй время доставки для Города на 30 минут" -> '
                 '{"action": "update", "name": null, '
                 '"delivery_time_minutes": 30, "target_zone_name": "Город"}\n'
+                '  "поставь для зоны Балахня доставку 150 рублей" -> '
+                '{"action": "update", "name": null, '
+                '"delivery_time_minutes": null, "target_zone_name": "Балахня", '
+                '"delivery_fee_rub": 150}\n'
                 "\n"
                 "Instruction:\n"
                 "$input_text"

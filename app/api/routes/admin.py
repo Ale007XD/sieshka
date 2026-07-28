@@ -384,6 +384,7 @@ async def zones_admin_ui(
         "zones_admin.html",
         {
             "zones": zones,
+            "zones_json": _zone_view(zones),
             "form_action": "/admin/zones/apply",
         },
     )
@@ -430,6 +431,51 @@ async def zone_apply(
     }
 
 
+@router.patch("/zones/{zone_id}/apply")
+async def zone_update(
+    zone_id: UUID,
+    payload: dict[str, Any],
+    analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+) -> dict[str, Any]:
+    """Update one zone from a structured admin form — the form IS the
+    confirmed command, no LLM collect phase (same no-LLM convention as menu
+    product/category direct-edit rows).
+
+    target_zone_name is resolved from the CURRENT name via zone_id (the tool
+    only knows how to resolve by name), then apply_zone_command re-resolves
+    it AGAIN under FOR UPDATE — if the name changed between these two reads
+    (concurrent rename), that re-resolution correctly fails closed instead of
+    silently touching a different row.
+    """
+    zone = await ZoneService().get_by_id(zone_id)
+    if zone is None:
+        raise HTTPException(status_code=404, detail="zone not found")
+
+    agent = ZoneAgent()
+    command = {
+        "action": "update",
+        "target_zone_name": zone.name,
+        "name": payload.get("name"),
+        "delivery_time_minutes": payload.get("delivery_time_minutes"),
+        "delivery_fee_rub": payload.get("delivery_fee_rub"),
+    }
+    apply = await agent.apply_zone(command)
+    zones = await ZoneService().list_all()
+    receipt = None
+    if apply.trace_id is not None:
+        try:
+            receipt = await analyzer.receipt(apply.trace_id)
+        except ValueError:
+            logger.warning("zone_update: trace %s not found for receipt", apply.trace_id)
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "result": apply.result,
+        "receipt": receipt.model_dump() if receipt is not None else None,
+        "zones": _zone_view(zones),
+    }
+
+
 def _zone_view(zones: list[Any]) -> list[dict[str, Any]]:
     return [
         {
@@ -437,6 +483,7 @@ def _zone_view(zones: list[Any]) -> list[dict[str, Any]]:
             "name": z.name,
             "delivery_time_minutes": z.delivery_time_minutes,
             "is_active": z.is_active,
+            "delivery_fee_rub": z.delivery_fee_rub,
         }
         for z in zones
     ]

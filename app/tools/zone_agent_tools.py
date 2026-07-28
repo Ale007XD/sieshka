@@ -8,7 +8,7 @@ COLLECT phase (NOT mutation):
   - stops at a terminal JSON command; writes NOTHING to Postgres.
 
 APPLY phase (the ONLY phase allowed to write to DeliveryZone):
-  - validate_apply_zone_command  [TOOL] numeric sentinel 0/1 for CONDITION
+  - validate_apply_zone_command  [TOOL numeric sentinel 0/1 for CONDITION]
   - apply_zone_command           [TOOL, is_terminal] the ONE write step
   - report_invalid_zone_command  [TOOL, is_terminal] invalid-branch terminal
 
@@ -17,8 +17,9 @@ Command schema (structured output of the LLM, consumed by both phases):
     "action": "create" | "update" | "deactivate",
     "name": str | None,                       # for create (the new zone name)
     "delivery_time_minutes": int | None,      # for create / update
-    "target_zone_name": str | None            # for update / deactivate (which
+    "target_zone_name": str | None,            # for update / deactivate (which
                                               #   existing zone this refers to)
+    "delivery_fee_rub": int | None,            # for create / update (optional)
   }
   "deactivate" or "delete" in the parsed intent both map to is_active=False
   (SOFT delete only — see apply_zone_command note).
@@ -72,6 +73,7 @@ def _required_command_shape(command: Any) -> dict[str, Any] | None:
     name = command.get("name")
     delivery_time_minutes = command.get("delivery_time_minutes")
     target_zone_name = command.get("target_zone_name")
+    delivery_fee_rub = command.get("delivery_fee_rub")
 
     normalized: dict[str, Any] = {
         "action": action,
@@ -82,10 +84,16 @@ def _required_command_shape(command: Any) -> dict[str, Any] | None:
             if isinstance(target_zone_name, str) and target_zone_name.strip()
             else None
         ),
+        "delivery_fee_rub": delivery_fee_rub,
     }
 
+    if delivery_fee_rub is not None:
+        if isinstance(delivery_fee_rub, bool) or not isinstance(delivery_fee_rub, int):
+            return None
+        if delivery_fee_rub < 0:
+            return None
+
     if action == "create":
-        # create requires a name + a positive integer delivery_time_minutes.
         if normalized["name"] is None:
             return None
         if isinstance(delivery_time_minutes, bool) or not isinstance(
@@ -94,15 +102,19 @@ def _required_command_shape(command: Any) -> dict[str, Any] | None:
             return None
         if delivery_time_minutes <= 0:
             return None
+        # delivery_fee_rub is OPTIONAL on create — falls back to the column's
+        # DB default (99) if not specified, matching the pre-existing global
+        # flat fee so a zone created without mentioning a fee behaves exactly
+        # as it always has.
     elif action in ("update", "deactivate"):
-        # update/deactivate require a target zone name to resolve.
         if normalized["target_zone_name"] is None:
             return None
         if action == "update":
-            # update requires at least one of name/delivery_time_minutes to
-            # actually change something; delivery_time_minutes, if present,
-            # must be a positive integer.
-            if normalized["name"] is None and delivery_time_minutes is None:
+            if (
+                normalized["name"] is None
+                and delivery_time_minutes is None
+                and delivery_fee_rub is None
+            ):
                 return None
             if delivery_time_minutes is not None:
                 if isinstance(delivery_time_minutes, bool) or not isinstance(
@@ -305,20 +317,24 @@ async def apply_zone_command(
             result = await session.execute(
                 text(
                     "INSERT INTO delivery_zones "
-                    "(name, delivery_time_minutes, is_active) "
-                    "VALUES (:name, :dtm, TRUE) "
-                    "RETURNING id, name, delivery_time_minutes, is_active"
+                    "(name, delivery_time_minutes, is_active"
+                    + (", delivery_fee_rub" if parsed["delivery_fee_rub"] is not None else "")
+                    + ") VALUES (:name, :dtm, TRUE"
+                    + (", :fee" if parsed["delivery_fee_rub"] is not None else "")
+                    + ") RETURNING id, name, delivery_time_minutes, is_active, delivery_fee_rub"
                 ),
                 {
                     "name": parsed["name"],
                     "dtm": parsed["delivery_time_minutes"],
+                    **({"fee": parsed["delivery_fee_rub"]}
+                       if parsed["delivery_fee_rub"] is not None else {}),
                 },
             )
         except IntegrityError as err:
             if _is_unique_violation(err):
                 logger.error(
                     "apply_zone_command: unique_violation on create '%s' "
-                    "(raced at write time)",
+                    "( raced at write time)",
                     parsed["name"],
                 )
                 raise ValueError(
@@ -338,6 +354,7 @@ async def apply_zone_command(
             "name": row["name"],
             "delivery_time_minutes": row["delivery_time_minutes"],
             "is_active": row["is_active"],
+            "delivery_fee_rub": row["delivery_fee_rub"],
         }
 
     # ----- update / deactivate ----------------------------------------------
@@ -393,14 +410,16 @@ async def apply_zone_command(
                 text(
                     "UPDATE delivery_zones SET "
                     "name = COALESCE(:name, name), "
-                    "delivery_time_minutes = COALESCE(:dtm, delivery_time_minutes) "
+                    "delivery_time_minutes = COALESCE(:dtm, delivery_time_minutes), "
+                    "delivery_fee_rub = COALESCE(:fee, delivery_fee_rub) "
                     "WHERE id = :id "
-                    "RETURNING id, name, delivery_time_minutes, is_active"
+                    "RETURNING id, name, delivery_time_minutes, is_active, delivery_fee_rub"
                 ),
                 {
                     "id": zone_id,
                     "name": new_name,
                     "dtm": parsed["delivery_time_minutes"],
+                    "fee": parsed["delivery_fee_rub"],
                 },
             )
         except IntegrityError as err:
@@ -426,6 +445,7 @@ async def apply_zone_command(
             "name": row["name"],
             "delivery_time_minutes": row["delivery_time_minutes"],
             "is_active": row["is_active"],
+            "delivery_fee_rub": row["delivery_fee_rub"],
         }
 
     # action == deactivate (covers both "deactivate" and "delete" intents)

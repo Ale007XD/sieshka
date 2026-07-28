@@ -33,6 +33,7 @@ from app.services.order_service import (
     resolve_promo_effect,
 )
 from app.services.payment_service import PaymentService
+from app.services.zone_service import ZoneService
 
 router = APIRouter(prefix="/api/orders", tags=["checkout"])
 promo_router = APIRouter(prefix="/api/promo", tags=["promo"])
@@ -149,7 +150,15 @@ async def checkout(
     goods_total = sum(item.price_rub * item.qty for item in items)
     async with async_session_factory() as session:
         promo_effect = await resolve_promo_effect(session, body.promo_code, goods_total)
-    total_rub = compute_checkout_total(items, body.delivery_mode, promo_effect)
+    zone_fee: int | None = None
+    if body.zone_id is not None:
+        zone = await ZoneService().get_by_id(body.zone_id)
+        if zone is not None:
+            zone_fee = zone.delivery_fee_rub
+
+    total_rub = compute_checkout_total(
+        items, body.delivery_mode, promo_effect, delivery_fee=zone_fee,
+    )
 
     order = await order_service.create_order_from_checkout(
         data=body,

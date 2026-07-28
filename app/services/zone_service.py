@@ -33,7 +33,8 @@ class ZoneService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, external_id, name, delivery_time_minutes, is_active "
+                    "SELECT id, external_id, name, delivery_time_minutes, "
+                    "is_active, delivery_fee_rub "
                     "FROM delivery_zones "
                     "ORDER BY is_active DESC, delivery_time_minutes, lower(name)"
                 )
@@ -46,6 +47,7 @@ class ZoneService:
                 name=row._mapping["name"],
                 delivery_time_minutes=row._mapping["delivery_time_minutes"],
                 is_active=row._mapping["is_active"],
+                delivery_fee_rub=row._mapping["delivery_fee_rub"],
             )
             for row in rows
         ]
@@ -60,7 +62,8 @@ class ZoneService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, external_id, name, delivery_time_minutes, is_active "
+                    "SELECT id, external_id, name, delivery_time_minutes, "
+                    "is_active, delivery_fee_rub "
                     "FROM delivery_zones WHERE id = :id"
                 ),
                 {"id": zone_id},
@@ -74,4 +77,5 @@ class ZoneService:
             name=row._mapping["name"],
             delivery_time_minutes=row._mapping["delivery_time_minutes"],
             is_active=row._mapping["is_active"],
+            delivery_fee_rub=row._mapping["delivery_fee_rub"],
         )

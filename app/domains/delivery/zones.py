@@ -4,10 +4,11 @@ DeliveryZone is reference data (delivery time estimates + availability per zone)
 NOT a stateful entity. It is intentionally separate from the courier-assignment
 DeliveryFSM in app/domains/delivery/fsm.py.
 
-Ground-truth corrected (2026-07-06): real exported data carries NO price field.
-Delivery pricing is a single FLAT fee (see sprint_m7_menu_domain /
-GET /api/config/delivery-fee) identical regardless of zone. Zones affect ETA
-and availability (is_active) only, never price.
+SUPERSEDED (2026-07-28, migrations/013_delivery_zones_fee.sql): the flat-fee
+decision above no longer holds. delivery_fee_rub is now per-zone, authoritative
+for compute_checkout_total() via ZoneService.get_by_id(). settings.DELIVERY_FEE
+remains only as a fallback for pickup orders (no zone_id) or an unresolvable
+zone_id — it is NOT the source of truth for delivery pricing anymore.
 """
 from __future__ import annotations
 
@@ -22,3 +23,4 @@ class DeliveryZone(BaseModel):
     name: str
     delivery_time_minutes: int
     is_active: bool = True
+    delivery_fee_rub: int = 99

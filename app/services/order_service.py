@@ -642,11 +642,15 @@ def compute_checkout_total(
     items: list[OrderItem],
     delivery_mode: str,
     promo_effect: PromoEffect | None = None,
+    delivery_fee: int | None = None,
 ) -> int:
     """Server-authoritative total in RUB.
 
-    Sum(product.price_rub * qty) + flat DELIVERY_FEE (from settings, identical
-    to GET /api/config/delivery-fee) when delivery_mode != "pickup", else 0.
+    Sum(product.price_rub * qty) + per-zone delivery_fee_rub (resolved by the
+    caller from the order's zone_id via ZoneService) when delivery_mode !=
+    "pickup", else 0. `delivery_fee` is None only for pickup orders or when
+    the caller couldn't resolve a zone (falls back to settings.DELIVERY_FEE —
+    the pre-per-zone-fee global default — rather than silently charging 0).
     An optional resolved PromoEffect (see resolve_promo_effect) subtracts a
     fixed/percent discount from goods and/or zeroes the delivery fee.
 
@@ -658,9 +662,10 @@ def compute_checkout_total(
         goods = max(0, goods - promo_effect.discount_rub)
     if delivery_mode == "pickup":
         return goods
+    fee = delivery_fee if delivery_fee is not None else settings.DELIVERY_FEE
     if promo_effect is not None and promo_effect.free_delivery:
-        return goods
-    return goods + settings.DELIVERY_FEE
+        fee = 0
+    return goods + fee
 
 
 async def resolve_checkout_items(
