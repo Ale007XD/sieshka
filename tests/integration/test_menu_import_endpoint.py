@@ -74,6 +74,10 @@ async def client(
 
     app.dependency_overrides[get_menu_import_service] = _test_service
 
+    from app.api.routes.admin import get_db_session_factory
+
+    app.dependency_overrides[get_db_session_factory] = lambda: session_factory
+
     # Replicate app/main.py's template wiring so GET /admin/ui/menu renders.
     templates_dir = Path(__file__).resolve().parents[2] / "app" / "web" / "templates"
     app.state.templates = Jinja2Templates(directory=str(templates_dir))

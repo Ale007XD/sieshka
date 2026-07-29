@@ -27,6 +27,7 @@ from app.services.idempotency import IdempotencyService
 from app.services.menu_service import MenuService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService
+from app.services.zone_service import ZoneService
 
 
 @pytest.fixture
@@ -99,12 +100,16 @@ async def client(
         # before assuming otherwise.
         return PaymentService(session_factory=session_factory)
 
+    async def _zone_svc() -> ZoneService:
+        return ZoneService(session_factory=session_factory)
+
     from app.api.routes.checkout import (
         get_customer_service,
         get_idempotency_service,
         get_menu_service,
         get_order_service,
         get_payment_service,
+        get_zone_service,
     )
 
     app.dependency_overrides[get_order_service] = _order_svc
@@ -112,6 +117,7 @@ async def client(
     app.dependency_overrides[get_menu_service] = _menu_svc
     app.dependency_overrides[get_idempotency_service] = _idempotency_svc
     app.dependency_overrides[get_payment_service] = _payment_svc
+    app.dependency_overrides[get_zone_service] = _zone_svc
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

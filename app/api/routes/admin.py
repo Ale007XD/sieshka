@@ -7,15 +7,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from nano_vm_mcp.store import ProgramStore
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.menu_agent import MenuAgent
 from app.agents.promotion_agent import PromotionAgent
 from app.agents.schedule_agent import ScheduleAgent
 from app.agents.zone_agent import ZoneAgent
+from app.db import async_session_factory
 from app.db_nano import get_store as get_nano_store
 from app.domains.orders.models import OrderRead, OrderState
 from app.services.menu_import_service import ImportReport, MenuImportService
 from app.services.order_service import OrderService
+from app.services.promotion_service import PromotionService
 from app.services.schedule_service import ScheduleService
 from app.services.trace_analyzer import ExecutionReceipt, TraceAnalyzer
 from app.services.zone_service import ZoneService
@@ -44,6 +47,25 @@ def get_trace_analyzer() -> TraceAnalyzer:
 
 def get_transitions_store() -> ProgramStore:
     return get_nano_store()
+
+
+def get_zone_service() -> ZoneService:
+    return ZoneService()
+
+
+def get_promotion_service() -> PromotionService:
+    return PromotionService()
+
+
+def get_db_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Single DI seam for the module-level free functions below
+    (_fetch_categories_ref/_fetch_categories_full) that don't belong to any
+    Service class. Production default is the real app.db.async_session_factory;
+    tests override this provider the same way they override get_zone_service,
+    instead of the functions reaching for app.db directly and silently hitting
+    the wrong database (found via test_ui_renders_with_auth failing against
+    an un-migrated real DB — same root cause class as the ZoneService bug)."""
+    return async_session_factory
 
 
 @router.get("/orders")
@@ -90,7 +112,9 @@ async def import_menu_csv(
     return report
 
 
-async def _fetch_categories_ref() -> list[dict[str, Any]]:
+async def _fetch_categories_ref(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> list[dict[str, Any]]:
     """Lightweight read-only categories list for admin dropdowns.
 
     TODO: belongs in MenuImportService.list_categories() long-term (parity
@@ -99,9 +123,7 @@ async def _fetch_categories_ref() -> list[dict[str, Any]]:
     """
     from sqlalchemy import text as sql_text
 
-    from app.db import async_session_factory
-
-    async with async_session_factory() as session:
+    async with session_factory() as session:
         rows = await session.execute(
             sql_text(
                 "SELECT id, name FROM categories WHERE is_active = TRUE ORDER BY name"
@@ -113,14 +135,14 @@ async def _fetch_categories_ref() -> list[dict[str, Any]]:
         ]
 
 
-async def _fetch_categories_full() -> list[dict[str, Any]]:
+async def _fetch_categories_full(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> list[dict[str, Any]]:
     """Full categories list (active + inactive) for the management table —
     same 'show everything for reference' convention as ZoneService.list_all()."""
     from sqlalchemy import text as sql_text
 
-    from app.db import async_session_factory
-
-    async with async_session_factory() as session:
+    async with session_factory() as session:
         rows = await session.execute(
             sql_text(
                 "SELECT c.id, c.name, c.menu_period, c.sort, c.is_active, "
@@ -161,6 +183,7 @@ def _product_view(products: list[Any]) -> list[dict[str, Any]]:
 async def menu_category_apply(
     payload: dict[str, Any],
     analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_db_session_factory),
 ) -> dict[str, Any]:
     """Create one category from a structured admin form.
 
@@ -169,7 +192,7 @@ async def menu_category_apply(
     """
     agent = MenuAgent()
     apply = await agent.apply_category(payload)
-    categories = await _fetch_categories_ref()
+    categories = await _fetch_categories_ref(session_factory)
     receipt = None
     if apply.trace_id is not None:
         try:
@@ -190,13 +213,14 @@ async def menu_category_update(
     category_id: UUID,
     payload: dict[str, Any],
     analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_db_session_factory),
 ) -> dict[str, Any]:
     """Update one category from a structured admin form."""
     agent = MenuAgent()
     command = {**payload, "category_id": str(category_id)}
     apply = await agent.update_category(command)
-    categories_full = await _fetch_categories_full()
-    categories_ref = await _fetch_categories_ref()
+    categories_full = await _fetch_categories_full(session_factory)
+    categories_ref = await _fetch_categories_ref(session_factory)
     receipt = None
     if apply.trace_id is not None:
         try:
@@ -273,11 +297,12 @@ async def menu_product_update(
 async def menu_admin_ui(
     request: Request,
     service: MenuImportService = Depends(get_menu_import_service),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_db_session_factory),
 ) -> HTMLResponse:
     """Render the menu admin page: product table + upload form + last report."""
     products, counts = await service.get_admin_data()
-    categories = await _fetch_categories_ref()
-    categories_full = await _fetch_categories_full()
+    categories = await _fetch_categories_ref(session_factory)
+    categories_full = await _fetch_categories_full(session_factory)
     return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
         request,
         "menu_admin.html",
@@ -363,10 +388,6 @@ async def schedule_apply(
     }
 
 
-def get_zone_service() -> ZoneService:
-    return ZoneService()
-
-
 @router.get("/ui/zones", response_class=HTMLResponse)
 async def zones_admin_ui(
     request: Request,
@@ -395,6 +416,7 @@ async def zone_apply(
     payload: dict[str, Any],
     request: Request,
     analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    service: ZoneService = Depends(get_zone_service),
 ) -> dict[str, Any]:
     """Run a free-text zone instruction through the ZoneAgent end-to-end.
 
@@ -405,7 +427,7 @@ async def zone_apply(
     agent = ZoneAgent()
     collect = await agent.collect_zone({"input_text": instruction})
     if not collect.success or collect.command is None:
-        zones = await ZoneService().list_all()
+        zones = await service.list_all()
         return {
             "ok": False,
             "error": collect.error or "unparseable instruction",
@@ -415,7 +437,7 @@ async def zone_apply(
         }
 
     apply = await agent.apply_zone(collect.command)
-    zones = await ZoneService().list_all()
+    zones = await service.list_all()
     receipt = None
     if apply.trace_id is not None:
         try:
@@ -436,6 +458,7 @@ async def zone_update(
     zone_id: UUID,
     payload: dict[str, Any],
     analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    service: ZoneService = Depends(get_zone_service),
 ) -> dict[str, Any]:
     """Update one zone from a structured admin form — the form IS the
     confirmed command, no LLM collect phase (same no-LLM convention as menu
@@ -447,7 +470,7 @@ async def zone_update(
     (concurrent rename), that re-resolution correctly fails closed instead of
     silently touching a different row.
     """
-    zone = await ZoneService().get_by_id(zone_id)
+    zone = await service.get_by_id(zone_id)
     if zone is None:
         raise HTTPException(status_code=404, detail="zone not found")
 
@@ -460,7 +483,7 @@ async def zone_update(
         "delivery_fee_rub": payload.get("delivery_fee_rub"),
     }
     apply = await agent.apply_zone(command)
-    zones = await ZoneService().list_all()
+    zones = await service.list_all()
     receipt = None
     if apply.trace_id is not None:
         try:
@@ -493,6 +516,7 @@ def _zone_view(zones: list[Any]) -> list[dict[str, Any]]:
 async def promotion_apply(
     payload: dict[str, Any],
     analyzer: TraceAnalyzer = Depends(get_trace_analyzer),
+    service: PromotionService = Depends(get_promotion_service),
 ) -> dict[str, Any]:
     """Run a free-text promotion instruction through PromotionAgent end-to-end.
 
@@ -503,9 +527,7 @@ async def promotion_apply(
     agent = PromotionAgent()
     collect = await agent.manage_promotion({"input_text": instruction})
     if not collect.success or collect.command is None:
-        from app.services.promotion_service import PromotionService
-
-        promotions = await PromotionService().list_promotions()
+        promotions = await service.list_promotions()
         return {
             "ok": False,
             "error": collect.error or "unparseable instruction",
@@ -515,9 +537,7 @@ async def promotion_apply(
         }
 
     apply = await agent.apply_promotion(collect.command)
-    from app.services.promotion_service import PromotionService
-
-    promotions = await PromotionService().list_promotions()
+    promotions = await service.list_promotions()
     receipt = None
     if apply.trace_id is not None:
         try:
