@@ -25,11 +25,13 @@ from app.api.routes.checkout import (
     get_menu_service,
     get_order_service,
     get_payment_service,
+    get_zone_service,
 )
 from app.api.routes.checkout import (
     router as checkout_router,
 )
 from app.domains.customer.models import Customer
+from app.domains.delivery.zones import DeliveryZone
 from app.domains.menu.models import MenuProductItem
 from app.domains.orders.models import OrderRead, OrderState
 
@@ -55,12 +57,27 @@ def _build_app() -> tuple[FastAPI, dict]:
     menu_svc.get_product_snapshot = AsyncMock(side_effect=_product_snapshot)
     payment_svc = AsyncMock()
     idem_svc = AsyncMock()
+    zone_svc = AsyncMock()
+    # Default: a resolvable zone with a flat 99-RUB fee, matching the
+    # pre-per-zone-fee global default — most tests don't care about the
+    # exact fee value, only that zone_id resolves without error.
+    zone_svc.get_by_id = AsyncMock(
+        return_value=DeliveryZone(
+            id=uuid4(),
+            external_id=None,
+            name="Test Zone",
+            delivery_time_minutes=30,
+            is_active=True,
+            delivery_fee_rub=99,
+        )
+    )
 
     app.dependency_overrides[get_order_service] = lambda: order_svc
     app.dependency_overrides[get_customer_service] = lambda: customer_svc
     app.dependency_overrides[get_menu_service] = lambda: menu_svc
     app.dependency_overrides[get_payment_service] = lambda: payment_svc
     app.dependency_overrides[get_idempotency_service] = lambda: idem_svc
+    app.dependency_overrides[get_zone_service] = lambda: zone_svc
 
     return app, {
         "order": order_svc,
@@ -68,6 +85,7 @@ def _build_app() -> tuple[FastAPI, dict]:
         "menu": menu_svc,
         "payment": payment_svc,
         "idem": idem_svc,
+        "zone": zone_svc,
     }
 
 

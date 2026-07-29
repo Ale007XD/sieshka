@@ -76,6 +76,10 @@ def get_idempotency_service() -> IdempotencyService:
     return IdempotencyService()
 
 
+def get_zone_service() -> ZoneService:
+    return ZoneService()
+
+
 _IDEMPOTENCY_PREFIX = "checkout:"
 
 
@@ -111,6 +115,7 @@ async def checkout(
     menu_service: MenuService = Depends(get_menu_service),
     payment_service: PaymentService = Depends(get_payment_service),
     idempotency: IdempotencyService = Depends(get_idempotency_service),
+    zone_service: ZoneService = Depends(get_zone_service),
 ) -> CheckoutResponse:
     if body.payment_method not in ("yookassa_card", "cash"):
         raise HTTPException(
@@ -152,7 +157,7 @@ async def checkout(
         promo_effect = await resolve_promo_effect(session, body.promo_code, goods_total)
     zone_fee: int | None = None
     if body.zone_id is not None:
-        zone = await ZoneService().get_by_id(body.zone_id)
+        zone = await zone_service.get_by_id(body.zone_id)
         if zone is not None:
             zone_fee = zone.delivery_fee_rub
 
