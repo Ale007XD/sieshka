@@ -73,11 +73,13 @@ async def seeded(
         # Isolate this fixture's rows: the test DB is session-scoped, so prior
         # test functions' seeds would otherwise collide on unique constraints
         # (delivery_zones.lower(name), products, etc.). All PKs are UUID, so
-        # RESTART IDENTITY is unnecessary; CASCADE handles the order_items
-        # and promotions FKs.
+        # RESTART IDENTITY is unnecessary; CASCADE handles the real FKs
+        # (products.category_id -> categories, orders.zone_id -> delivery_zones,
+        # kitchen_tickets/delivery_tasks/payments -> orders). There is no
+        # order_items table — orders.items is JSONB (001_initial_schema.sql);
+        # promo_code on orders is a plain VARCHAR, not an FK to promotions.
         for table in (
             "orders",
-            "order_items",
             "promotions",
             "products",
             "categories",
