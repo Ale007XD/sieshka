@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from typing import NamedTuple
 from unittest.mock import AsyncMock, patch
 
@@ -47,26 +46,8 @@ async def session_factory(
     postgres_dsn: str,
 ) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     engine = create_async_engine(postgres_dsn)
-    schema = (
-        Path(__file__).resolve().parents[2] / "migrations" / "001_initial_schema.sql"
-    ).read_text()
-    checkout_sql = (
-        Path(__file__).resolve().parents[2] / "migrations" / "010_checkout_columns.sql"
-    ).read_text()
-    menu_sql = (
-        Path(__file__).resolve().parents[2] / "migrations" / "004_menu.sql"
-    ).read_text()
-
-    raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
-    import asyncpg
-
-    conn = await asyncpg.connect(raw_dsn)
-    try:
-        await conn.execute(schema)
-        await conn.execute(checkout_sql)
-        await conn.execute(menu_sql)
-    finally:
-        await conn.close()
+    # Schema is prepared once by Alembic (conftest.py).
+    # Do not replay raw SQL migrations here — it causes schema drift.
 
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     yield factory
@@ -91,13 +72,20 @@ async def seeded(
     async with session_factory() as session:
         # Isolate this fixture's rows: the test DB is session-scoped, so prior
         # test functions' seeds would otherwise collide on unique constraints
-        # (delivery_zones.lower(name), products, etc.).
-        await session.execute(
-            text(
-                "TRUNCATE TABLE orders, delivery_zones, products, categories "
-                "RESTART IDENTITY CASCADE"
+        # (delivery_zones.lower(name), products, etc.). All PKs are UUID, so
+        # RESTART IDENTITY is unnecessary; CASCADE handles the order_items
+        # and promotions FKs.
+        for table in (
+            "orders",
+            "order_items",
+            "promotions",
+            "products",
+            "categories",
+            "delivery_zones",
+        ):
+            await session.execute(
+                text(f"TRUNCATE TABLE {table} CASCADE")
             )
-        )
         await session.execute(
             text(
                 "INSERT INTO categories (id, name, menu_period, is_active) "

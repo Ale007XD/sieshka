@@ -67,6 +67,10 @@ def postgres_dsn() -> str:
     try:
         alembic_cfg = Config("alembic.ini")
         command.upgrade(alembic_cfg, "head")
+
+    # IMPORTANT:
+    # Alembic is the single source of truth for integration-test schema.
+    # Individual tests must never replay raw SQL schema files.
     finally:
         settings.DATABASE_URL = original_database_url
 
