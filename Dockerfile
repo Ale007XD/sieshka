@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 RUN pip install --no-cache-dir --break-system-packages -e ".[nano]"
 
@@ -55,9 +57,13 @@ RUN CERTIFI_CACERT=$(python3 -c "import certifi; print(certifi.where())") \
 
 ENV SSL_CERT_FILE=/etc/ssl/custom/combined_ca_bundle.pem
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
