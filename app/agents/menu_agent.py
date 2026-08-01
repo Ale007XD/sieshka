@@ -75,9 +75,12 @@ class MenuApplyResult:
     """Outcome of the apply phase.
 
     applied=True  → the command landed in Postgres (Trace SUCCESS, valid branch).
-    applied=False + error is None → command was rejected by validate (invalid
-        branch reached its terminal cleanly; nothing written).
-    applied=False + error set → the apply write failed (Trace FAILED; raised).
+    applied=False + error set → either the command was rejected by validate
+        (Trace SUCCESS, invalid branch — error is the human-readable rejection
+        reason from the relevant validate_* tool's diagnostics side-channel)
+        or the apply write itself failed (Trace FAILED; raised).
+    Both rejection classes now always carry a message (2026-07-31 fix — see
+    zone_agent.py::ZoneApplyResult for the full rationale).
     """
 
     applied: bool
@@ -116,7 +119,7 @@ class MenuAgent:
         self._store = get_store()
         self._apply_vm = apply_vm
 
-    def _build_vm(self) -> _VMProtocol:
+    def _build_vm(self, diagnostics: dict[str, str] | None = None) -> _VMProtocol:
         from nano_vm.vm import ExecutionVM
 
         from app.db_nano import StoreCursorRepository, get_store
@@ -130,22 +133,30 @@ class MenuAgent:
         executor = GovernedToolExecutor(policy=MENU_AGENT_POLICY_SNAPSHOT)
         for name, fn in _AGENT_TOOLS.items():
             governed = _governed_tool(fn, name, executor)
-            vm.register_tool(name, governed)
+            if name == "validate_menu_command" and diagnostics is not None:
+                vm.register_tool(name, functools.partial(governed, diagnostics=diagnostics))
+            else:
+                vm.register_tool(name, governed)
         return vm
 
-    def _build_apply_vm(self, session: AsyncSession) -> _VMProtocol:
+    def _build_apply_vm(
+        self, session: AsyncSession, diagnostics: dict[str, str] | None = None
+    ) -> _VMProtocol:
         """Session-bound VM for the apply phase.
 
         The write tools take a `session` first parameter closure-injected via
         functools.partial (never serialised in Trace — CONSTRAINTS.md
-        "Tool-authoring: side-effect session boundary"). Every tool is wrapped
-        by GovernedToolExecutor so menu:write is enforced on the write step.
+        "Tool-authoring: side-effect session boundary"). Every tool is wrapped by
+        GovernedToolExecutor so menu:write is enforced on the write step.
         """
         return self._build_generic_apply_vm(
             session, _APPLY_TOOLS, _APPLY_SESSION_TOOLS, MENU_AGENT_APPLY_POLICY_SNAPSHOT,
+            diagnostics,
         )
 
-    def _build_apply_category_vm(self, session: AsyncSession) -> _VMProtocol:
+    def _build_apply_category_vm(
+        self, session: AsyncSession, diagnostics: dict[str, str] | None = None
+    ) -> _VMProtocol:
         """Session-bound VM for the category apply phase. Same wiring shape as
         _build_apply_vm — separate tool set (category tools), same policy
         snapshot family (menu:* capability domain), own PolicySnapshot per the
@@ -153,7 +164,7 @@ class MenuAgent:
         names + snapshot pre-provisioned: MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT)."""
         return self._build_generic_apply_vm(
             session, _APPLY_CATEGORY_TOOLS, _APPLY_CATEGORY_SESSION_TOOLS,
-            MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT,
+            MENU_AGENT_APPLY_CATEGORY_POLICY_SNAPSHOT, diagnostics,
         )
 
     def _build_generic_apply_vm(
@@ -162,6 +173,7 @@ class MenuAgent:
         tools: dict[str, Callable[..., Any]],
         session_tools: frozenset[str],
         policy: Any,
+        diagnostics: dict[str, str] | None = None,
     ) -> _VMProtocol:
         from nano_vm.adapters import MockLLMAdapter
         from nano_vm.vm import ExecutionVM
@@ -176,7 +188,17 @@ class MenuAgent:
         executor = GovernedToolExecutor(policy=policy)
         for name, fn in tools.items():
             governed = _governed_tool(fn, name, executor)
-            if name in session_tools:
+            # Every apply-phase tool-set dict follows the convention that its
+            # validate_* entry is the one that decides the rejection reason —
+            # generic across all 4 tool-set dicts (_APPLY_TOOLS,
+            # _APPLY_CATEGORY_TOOLS, _UPDATE_PRODUCT_TOOLS,
+            # _UPDATE_CATEGORY_TOOLS), so a name-prefix check suffices instead
+            # of one special case per dict.
+            if name.startswith("validate_") and diagnostics is not None:
+                vm.register_tool(
+                    name, functools.partial(governed, session=session, diagnostics=diagnostics)
+                )
+            elif name in session_tools:
                 vm.register_tool(name, functools.partial(governed, session=session))
             else:
                 vm.register_tool(name, governed)
@@ -192,7 +214,8 @@ class MenuAgent:
         Returns:
             MenuAgentResult with success flag and structured command dict.
         """
-        vm = self._vm if self._vm is not None else self._build_vm()
+        diagnostics: dict[str, str] = {}
+        vm = self._vm if self._vm is not None else self._build_vm(diagnostics)
         context: dict[str, Any] = {
             "input_text": input_data.get("input_text", ""),
             "menu_id": input_data.get("menu_id", ""),
@@ -228,13 +251,20 @@ class MenuAgent:
             fail_step = next(
                 (s for s in trace.steps if s.step_id == "validation_failed"), None
             )
+            # diagnostics["reason"] (set by validate_menu_command itself) is
+            # the real message — fail_step.output is only ever
+            # "FAILED:0"/"FAILED:1" (2026-07-31 finding, see
+            # zone_agent_tools.py::validate_zone_command's docstring).
+            error_msg = (
+                diagnostics.get("reason")
+                or (str(fail_step.output) if fail_step and fail_step.output else None)
+                or "Command validation failed"
+            )
             if fail_step:
-                raw = str(fail_step.output) if fail_step.output else ""
-                error_msg = raw or "Command validation failed"
                 return MenuAgentResult(success=False, error=error_msg)
 
             return MenuAgentResult(
-                success=False, error="No command output in trace",
+                success=False, error=diagnostics.get("reason") or "No command output in trace",
             )
 
         error_msg = trace.error or "Agent execution failed"
@@ -261,9 +291,13 @@ class MenuAgent:
                 f"{_report.summary()}"
             )
 
+        diagnostics: dict[str, str] = {}
+
         # Injected VM (tests) takes over session wiring itself.
         if self._apply_vm is not None:
-            return await self._run_apply(self._apply_vm, PROGRAM_APPLY_MENU, command, session=None)
+            return await self._run_apply(
+                self._apply_vm, PROGRAM_APPLY_MENU, command, session=None, diagnostics=diagnostics
+            )
 
         if self._session_factory is None:
             from app.db import async_session_factory
@@ -271,8 +305,10 @@ class MenuAgent:
             self._session_factory = async_session_factory
 
         async with self._session_factory() as session:
-            vm = self._build_apply_vm(session)
-            return await self._run_apply(vm, PROGRAM_APPLY_MENU, command, session=session)
+            vm = self._build_apply_vm(session, diagnostics)
+            return await self._run_apply(
+                vm, PROGRAM_APPLY_MENU, command, session=session, diagnostics=diagnostics
+            )
 
     async def apply_category(self, command: dict[str, Any]) -> MenuApplyResult:
         """Apply a confirmed category command to Postgres via the governed apply Program.
@@ -293,9 +329,12 @@ class MenuAgent:
                 f"{_report.summary()}"
             )
 
+        diagnostics: dict[str, str] = {}
+
         if self._apply_vm is not None:
             return await self._run_apply(
-                self._apply_vm, PROGRAM_APPLY_CATEGORY, command, session=None
+                self._apply_vm, PROGRAM_APPLY_CATEGORY, command, session=None,
+                diagnostics=diagnostics,
             )
 
         if self._session_factory is None:
@@ -304,9 +343,9 @@ class MenuAgent:
             self._session_factory = async_session_factory
 
         async with self._session_factory() as session:
-            vm = self._build_apply_category_vm(session)
+            vm = self._build_apply_category_vm(session, diagnostics)
             return await self._run_apply(
-                vm, PROGRAM_APPLY_CATEGORY, command, session=session
+                vm, PROGRAM_APPLY_CATEGORY, command, session=session, diagnostics=diagnostics
             )
 
     async def update_product(self, command: dict[str, Any]) -> MenuApplyResult:
@@ -325,9 +364,12 @@ class MenuAgent:
                 f"{_report.summary()}"
             )
 
+        diagnostics: dict[str, str] = {}
+
         if self._apply_vm is not None:
             return await self._run_apply(
-                self._apply_vm, PROGRAM_UPDATE_PRODUCT, command, session=None
+                self._apply_vm, PROGRAM_UPDATE_PRODUCT, command, session=None,
+                diagnostics=diagnostics,
             )
 
         if self._session_factory is None:
@@ -341,9 +383,10 @@ class MenuAgent:
                 _UPDATE_PRODUCT_TOOLS,
                 _UPDATE_PRODUCT_SESSION_TOOLS,
                 MENU_AGENT_UPDATE_PRODUCT_POLICY_SNAPSHOT,
+                diagnostics,
             )
             return await self._run_apply(
-                vm, PROGRAM_UPDATE_PRODUCT, command, session=session
+                vm, PROGRAM_UPDATE_PRODUCT, command, session=session, diagnostics=diagnostics
             )
 
     async def update_category(self, command: dict[str, Any]) -> MenuApplyResult:
@@ -362,9 +405,12 @@ class MenuAgent:
                 f"{_report.summary()}"
             )
 
+        diagnostics: dict[str, str] = {}
+
         if self._apply_vm is not None:
             return await self._run_apply(
-                self._apply_vm, PROGRAM_UPDATE_CATEGORY, command, session=None
+                self._apply_vm, PROGRAM_UPDATE_CATEGORY, command, session=None,
+                diagnostics=diagnostics,
             )
 
         if self._session_factory is None:
@@ -373,15 +419,17 @@ class MenuAgent:
             self._session_factory = async_session_factory
 
         async with self._session_factory() as session:
-            vm = self._build_update_category_vm(session)
+            vm = self._build_update_category_vm(session, diagnostics)
             return await self._run_apply(
-                vm, PROGRAM_UPDATE_CATEGORY, command, session=session
+                vm, PROGRAM_UPDATE_CATEGORY, command, session=session, diagnostics=diagnostics
             )
 
-    def _build_update_category_vm(self, session: AsyncSession) -> _VMProtocol:
+    def _build_update_category_vm(
+        self, session: AsyncSession, diagnostics: dict[str, str] | None = None
+    ) -> _VMProtocol:
         return self._build_generic_apply_vm(
             session, _UPDATE_CATEGORY_TOOLS, _UPDATE_CATEGORY_SESSION_TOOLS,
-            MENU_AGENT_UPDATE_CATEGORY_POLICY_SNAPSHOT,
+            MENU_AGENT_UPDATE_CATEGORY_POLICY_SNAPSHOT, diagnostics,
         )
 
     async def _run_apply(
@@ -390,7 +438,10 @@ class MenuAgent:
         program: Program,
         command: dict[str, Any],
         session: AsyncSession | None,
+        diagnostics: dict[str, str] | None = None,
     ) -> MenuApplyResult:
+        if diagnostics is None:
+            diagnostics = {}
         trace = await vm.run(program, context={"command": command})
 
         # Persist trace to SQLite store so receipt viewer works.
@@ -421,13 +472,18 @@ class MenuAgent:
             invalid_step = next(
                 (s for s in trace.steps if s.step_id == "report_invalid"), None
             )
+            # diagnostics["reason"] (set by whichever validate_* tool ran) is
+            # the real message — invalid_step.output is only ever
+            # "INVALID:0"/"INVALID:1" (same DSL numeric-sentinel-as-reason
+            # dead end across all 4 agent flows; see zone_agent.py::_run_apply
+            # for the full rationale).
             reason = (
-                str(invalid_step.output)
-                if invalid_step and invalid_step.output
-                else "command rejected"
+                diagnostics.get("reason")
+                or (str(invalid_step.output) if invalid_step and invalid_step.output else None)
+                or "command rejected"
             )
             logger.info("_run_apply: command rejected (%s)", reason)
-            return MenuApplyResult(applied=False, error=None, trace_id=trace.trace_id)
+            return MenuApplyResult(applied=False, error=reason, trace_id=trace.trace_id)
 
         # Trace FAILED — the write raised. Roll back; surface the error.
         if session is not None:

@@ -55,32 +55,51 @@ _ACTION_TO_EVENT: dict[str, PromotionEvent] = {
 # ---------------------------------------------------------------------------
 
 
-async def validate_promotion_command(llm_output: str, **kwargs: object) -> int:
-    """Returns 1 if LLM output is a well-formed promotion command, 0 otherwise."""
-    if not llm_output or not llm_output.strip():
-        logger.warning("validate_promotion_command: empty LLM output")
+async def validate_promotion_command(
+    llm_output: str,
+    diagnostics: dict[str, str] | None = None,
+    **kwargs: object,
+) -> int:
+    """Returns 1 if LLM output is a well-formed promotion command, 0 otherwise.
+
+    `diagnostics` is a closure-injected side-channel (same convention as
+    `session` elsewhere, never passed through Step.args) so the calling agent
+    method can surface a real reason — see zone_agent_tools.py::
+    validate_zone_command's docstring for why the CONDITION-branching 0/1
+    return value can't double as that message (2026-07-31 finding, same bug
+    was present here too: report_collect_failure's `reason` arg is bound via
+    "$validate_command.output", which is always just the numeric sentinel).
+    """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_promotion_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
+
+    if not llm_output or not llm_output.strip():
+        return _reject("empty instruction — nothing to parse")
     try:
         data = json.loads(llm_output)
     except (json.JSONDecodeError, ValueError):
-        logger.warning("validate_promotion_command: invalid JSON")
-        return 0
+        return _reject("could not parse a command from the instruction")
     if not isinstance(data, dict):
-        return 0
+        return _reject("parsed command is not an object")
     action = data.get("action")
     if action not in ("create", "activate", "expire", "archive"):
-        logger.warning("validate_promotion_command: invalid action %r", action)
-        return 0
+        return _reject(
+            "could not map the instruction to a supported action "
+            "(create, activate, expire, archive)"
+        )
     if action == "create":
         if not isinstance(data.get("name"), str) or not data["name"].strip():
-            return 0
+            return _reject("action=create requires a non-empty 'name'")
         discount = data.get("discount")
         if isinstance(discount, bool) or not isinstance(discount, (int, float)):
-            return 0
+            return _reject("action=create requires a numeric 'discount'")
     else:
         target = data.get("target_promotion_name")
         if not isinstance(target, str) or not target.strip():
-            return 0
+            return _reject(f"action={action!r} requires 'target_promotion_name'")
     logger.info("validate_promotion_command: valid command (action=%s)", action)
     return 1
 
@@ -167,14 +186,24 @@ def _required_apply_fields(
 async def validate_apply_promotion_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience. NOT the enforcement point — apply_promotion_command
-    re-verifies everything at write time (TOCTOU)."""
+    re-verifies everything at write time (TOCTOU).
+
+    `diagnostics` is a closure-injected side-channel for a human-readable
+    reason — see validate_promotion_command's docstring.
+    """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_apply_promotion_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
+        return 0
+
     parsed = _required_apply_fields(command)
     if parsed is None:
-        logger.warning("validate_apply_promotion_command: malformed command")
-        return 0
+        return _reject("malformed command")
     action, name, discount, target_promotion_name, effect_type, trigger_code = parsed
 
     if action == "create":
@@ -182,32 +211,22 @@ async def validate_apply_promotion_command(
         if effect_type == "PERCENT_DISCOUNT":
             assert discount is not None
             if discount < 0 or discount > 100:
-                logger.warning(
-                    "validate_apply_promotion_command: discount %s out of range",
-                    discount,
-                )
-                return 0
+                return _reject(f"discount {discount} out of range (0-100)")
         if effect_type == "FIXED_AMOUNT" and (discount is None or discount <= 0):
-            logger.warning("validate_apply_promotion_command: fixed amount must be > 0")
-            return 0
+            return _reject("fixed-amount discount must be > 0")
         existing = await session.execute(
             text("SELECT id FROM promotions WHERE lower(name) = lower(:name)"),
             {"name": name},
         )
         if existing.fetchall():
-            logger.warning("validate_apply_promotion_command: name '%s' already in use", name)
-            return 0
+            return _reject(f"a promotion named {name!r} already exists")
         if trigger_code is not None:
             dupe_code = await session.execute(
                 text("SELECT id FROM promotions WHERE lower(trigger_code) = lower(:code)"),
                 {"code": trigger_code},
             )
             if dupe_code.fetchall():
-                logger.warning(
-                    "validate_apply_promotion_command: trigger_code '%s' already in use",
-                    trigger_code,
-                )
-                return 0
+                return _reject(f"trigger_code {trigger_code!r} already in use")
         return 1
 
     assert target_promotion_name is not None
@@ -217,20 +236,20 @@ async def validate_apply_promotion_command(
     )
     matches = row.fetchall()
     if len(matches) != 1:
-        logger.warning(
-            "validate_apply_promotion_command: '%s' resolves to %d rows",
-            target_promotion_name, len(matches),
+        return _reject(
+            f"promotion {target_promotion_name!r} not found"
+            if len(matches) == 0
+            else f"promotion name {target_promotion_name!r} matches "
+            f"{len(matches)} rows (expected exactly 1)"
         )
-        return 0
 
     current_state = PromotionState(matches[0]._mapping["state"])
     event = _ACTION_TO_EVENT[action]
     if (current_state, event) not in PROMOTION_TRANSITIONS:
-        logger.warning(
-            "validate_apply_promotion_command: %s not allowed from state %s",
-            event, current_state,
+        return _reject(
+            f"cannot {action} promotion {target_promotion_name!r} — "
+            f"it is currently {current_state.value}"
         )
-        return 0
 
     logger.info("validate_apply_promotion_command: action=%s valid at validate time", action)
     return 1

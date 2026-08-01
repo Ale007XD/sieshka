@@ -31,20 +31,23 @@ PROGRAM_COLLECT_ZONE = Program(
                 "You manage the delivery zones of a food delivery business.\n"
                 "Turn the instruction below into a JSON command with EXACTLY these "
                 "fields:\n"
-                '  - "action": one of "create", "update", "deactivate"\n'
+                '  - "action": one of "create", "update", "deactivate", "activate"\n'
                 '  - "name": the NEW zone name (string) when action=create or '
                 'when action=update renames a zone; otherwise null\n'
                 '  - "delivery_time_minutes": positive integer ETA in minutes '
                 'when action=create or action=update changes the ETA; otherwise null\n'
                 '  - "target_zone_name": the name of the EXISTING zone this '
-                'instruction refers to (string) when action=update or '
-                'action=deactivate; otherwise null\n'
+                'instruction refers to (string) when action=update, '
+                'action=deactivate, or action=activate; otherwise null\n'
                 '  - "delivery_fee_rub": positive integer delivery fee in RUB '
                 'when action=create or action=update changes the fee; otherwise null\n'
                 "\n"
                 'The verbs "deactivate", "disable", "remove" and "delete" all mean '
                 'action="deactivate" (a soft retirement — the zone is no longer '
                 "offered to new customers but its history is preserved).\n"
+                'The verbs "activate", "reactivate", "restore", "enable", '
+                '"включи", "верни", "активируй" all mean action="activate" — '
+                "bringing a previously retired (deactivated) zone back to active.\n"
                 "\n"
                 "Examples:\n"
                 '  "Добавь зону Балахня, 15 минут" -> '
@@ -52,6 +55,10 @@ PROGRAM_COLLECT_ZONE = Program(
                 '"delivery_time_minutes": 15, "target_zone_name": null}\n'
                 '  "деактивируй зону Отдалённые районы" -> '
                 '{"action": "deactivate", "name": null, '
+                '"delivery_time_minutes": null, '
+                '"target_zone_name": "Отдалённые районы"}\n'
+                '  "активируй зону Отдалённые районы" -> '
+                '{"action": "activate", "name": null, '
                 '"delivery_time_minutes": null, '
                 '"target_zone_name": "Отдалённые районы"}\n'
                 '  "переименуй зону Город в Город-Центр" -> '

@@ -14,15 +14,20 @@ APPLY phase (the ONLY phase allowed to write to DeliveryZone):
 
 Command schema (structured output of the LLM, consumed by both phases):
   {
-    "action": "create" | "update" | "deactivate",
+    "action": "create" | "update" | "deactivate" | "activate",
     "name": str | None,                       # for create (the new zone name)
     "delivery_time_minutes": int | None,      # for create / update
-    "target_zone_name": str | None,            # for update / deactivate (which
-                                              #   existing zone this refers to)
+    "target_zone_name": str | None,            # for update / deactivate /
+                                              #   activate (which existing
+                                              #   zone this refers to)
     "delivery_fee_rub": int | None,            # for create / update (optional)
   }
   "deactivate" or "delete" in the parsed intent both map to is_active=False
-  (SOFT delete only — see apply_zone_command note).
+  (SOFT delete only — see apply_zone_command note). "activate"/"reactivate"/
+  "restore"/"включи"/"верни" map to is_active=True on a currently-retired zone
+  (the inverse of deactivate — added 2026-07-31 after a support gap: retired
+  zones were resolvable and editable-looking in the admin UI but had no path
+  back to active short of manual SQL).
 
 CONSTRAINTS (same discipline as menu_agent_tools.py / schedule_agent_tools.py):
   - Numeric sentinel returns (0/1) for CONDITION-consumed validators only.
@@ -55,7 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-_VALID_ACTIONS = ("create", "update", "deactivate")
+_VALID_ACTIONS = ("create", "update", "deactivate", "activate")
 
 
 def _required_command_shape(command: Any) -> dict[str, Any] | None:
@@ -106,7 +111,7 @@ def _required_command_shape(command: Any) -> dict[str, Any] | None:
         # DB default (99) if not specified, matching the pre-existing global
         # flat fee so a zone created without mentioning a fee behaves exactly
         # as it always has.
-    elif action in ("update", "deactivate"):
+    elif action in ("update", "deactivate", "activate"):
         if normalized["target_zone_name"] is None:
             return None
         if action == "update":
@@ -131,24 +136,53 @@ def _required_command_shape(command: Any) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-async def validate_zone_command(llm_output: str, **kwargs: object) -> int:
+async def validate_zone_command(
+    llm_output: str,
+    diagnostics: dict[str, str] | None = None,
+    **kwargs: object,
+) -> int:
     """Returns 1 if the LLM output is a parseable zone command, else 0.
 
     Ambiguous phrasing (no clear action, or an action whose required fields are
     absent) is rejected as unparseable — we do NOT default-guess.
+
+    `diagnostics` (closure-injected, same non-serialized side-channel
+    convention as `session` elsewhere — never passed through Step.args) lets
+    the CALLING agent method surface a real reason to the user. The CONDITION
+    step still branches on the plain 0/1 return value (ASTEngine numeric-
+    sentinel requirement, unchanged) — that value was never meant to double as
+    a human-readable message, and reusing it as one (via
+    "$validate_command.output" in report_collect_failure's args) is exactly
+    what produced the old "FAILED:0" dead-end (2026-07-31 finding).
     """
     if not llm_output or not llm_output.strip():
-        logger.warning("validate_zone_command: empty LLM output")
+        reason = "empty instruction — nothing to parse"
+        logger.warning("validate_zone_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
     try:
         data = json.loads(llm_output)
     except (json.JSONDecodeError, ValueError):
+        reason = "could not parse a command from the instruction"
         logger.warning("validate_zone_command: invalid JSON")
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
 
     parsed = _required_command_shape(data)
     if parsed is None:
-        logger.warning("validate_zone_command: malformed command shape")
+        action = data.get("action") if isinstance(data, dict) else None
+        if action not in _VALID_ACTIONS:
+            reason = (
+                f"could not map the instruction to a supported action "
+                f"({', '.join(_VALID_ACTIONS)})"
+            )
+        else:
+            reason = f"required fields missing for action={action!r}"
+        logger.warning("validate_zone_command: malformed command shape (%s)", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
     logger.info("validate_zone_command: parseable command")
     return 1
@@ -174,6 +208,7 @@ async def report_collect_failure(reason: str, **kwargs: object) -> str:
 async def validate_apply_zone_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience for the apply phase. Numeric sentinel.
@@ -182,10 +217,17 @@ async def validate_apply_zone_command(
     active-name uniqueness / target-resolution invariants hold. Returns 0
     otherwise. Not the enforcement point — apply_zone_command re-verifies at
     write time inside the same transaction (TOCTOU).
+
+    `diagnostics` is a closure-injected side-channel (same convention as
+    `session`) for a human-readable reason — see validate_zone_command's
+    docstring for why this can't just be the numeric return value.
     """
     parsed = _required_command_shape(command)
     if parsed is None:
-        logger.warning("validate_apply_zone_command: malformed command")
+        reason = "malformed command"
+        logger.warning("validate_apply_zone_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
 
     action = parsed["action"]
@@ -199,10 +241,13 @@ async def validate_apply_zone_command(
             {"name": parsed["name"]},
         )
         if dup.fetchall():
+            reason = f"a zone named {parsed['name']!r} is already active"
             logger.warning(
                 "validate_apply_zone_command: active zone name '%s' already in use",
                 parsed["name"],
             )
+            if diagnostics is not None:
+                diagnostics["reason"] = reason
             return 0
 
     elif action in ("update", "deactivate"):
@@ -216,10 +261,74 @@ async def validate_apply_zone_command(
         )
         rows = matches.fetchall()
         if len(rows) != 1:
+            reason = (
+                f"zone {parsed['target_zone_name']!r} not found among active "
+                f"zones (retired zones can only be reactivated, not edited "
+                f"directly)"
+                if len(rows) == 0
+                else f"zone name {parsed['target_zone_name']!r} matches "
+                f"{len(rows)} active zones (expected exactly 1)"
+            )
             logger.warning(
                 "validate_apply_zone_command: target '%s' resolves to %d rows",
                 parsed["target_zone_name"], len(rows),
             )
+            if diagnostics is not None:
+                diagnostics["reason"] = reason
+            return 0
+
+    elif action == "activate":
+        assert parsed["target_zone_name"] is not None
+        # Mirror of update/deactivate's target resolution, but among RETIRED
+        # zones — "activate" only makes sense for a zone that is currently
+        # inactive. A currently-active zone matching this name means there is
+        # nothing to reactivate (or the instruction targeted the wrong zone).
+        matches = await session.execute(
+            text(
+                "SELECT id FROM delivery_zones "
+                "WHERE lower(name) = lower(:name) AND NOT is_active"
+            ),
+            {"name": parsed["target_zone_name"]},
+        )
+        rows = matches.fetchall()
+        if len(rows) != 1:
+            reason = (
+                f"zone {parsed['target_zone_name']!r} not found among retired "
+                f"zones (it may already be active, or may not exist)"
+                if len(rows) == 0
+                else f"zone name {parsed['target_zone_name']!r} matches "
+                f"{len(rows)} retired zones (expected exactly 1)"
+            )
+            logger.warning(
+                "validate_apply_zone_command: activate target '%s' resolves "
+                "to %d retired-zone rows",
+                parsed["target_zone_name"], len(rows),
+            )
+            if diagnostics is not None:
+                diagnostics["reason"] = reason
+            return 0
+        # A DIFFERENT zone could hold the same name and already be active
+        # (e.g. created fresh while this one was retired) — reactivating
+        # would then collide with it under the partial unique index.
+        dup = await session.execute(
+            text(
+                "SELECT id FROM delivery_zones "
+                "WHERE lower(name) = lower(:name) AND is_active"
+            ),
+            {"name": parsed["target_zone_name"]},
+        )
+        if dup.fetchall():
+            reason = (
+                f"cannot reactivate {parsed['target_zone_name']!r} — a "
+                f"different zone with the same name is already active"
+            )
+            logger.warning(
+                "validate_apply_zone_command: activate target '%s' collides "
+                "with a currently-active zone of the same name",
+                parsed["target_zone_name"],
+            )
+            if diagnostics is not None:
+                diagnostics["reason"] = reason
             return 0
 
     logger.info("validate_apply_zone_command: valid at validate time")
@@ -271,6 +380,11 @@ async def apply_zone_command(
                    delete only). The retired row stays resolvable for any past
                    order's zone_id; the public GET /api/delivery-zones filters to
                    is_active = TRUE so it silently drops out of the offer set.
+      activate   : the inverse of deactivate — is_active = TRUE on a currently
+                   RETIRED row (target resolved among is_active=FALSE rows, not
+                   TRUE). Re-checks for a same-name collision against a
+                   DIFFERENT currently-active zone before writing (a fresh zone
+                   could have taken the name while this one was retired).
 
     TOCTOU RE-CHECK: validate_apply_zone_command ran earlier, in its own step,
     and must not be trusted here. A concurrent second agent invocation could
@@ -350,6 +464,90 @@ async def apply_zone_command(
         return {
             "applied": True,
             "action": "create",
+            "id": str(row["id"]),
+            "name": row["name"],
+            "delivery_time_minutes": row["delivery_time_minutes"],
+            "is_active": row["is_active"],
+            "delivery_fee_rub": row["delivery_fee_rub"],
+        }
+
+    # ----- activate -----------------------------------------------------------
+    if action == "activate":
+        assert parsed["target_zone_name"] is not None
+        # Re-resolve among RETIRED zones under a row lock — mirror image of
+        # update/deactivate's "resolve among ACTIVE zones" below. A concurrent
+        # second activate (or a rename away from this name) between validate
+        # and here must not silently touch the wrong row.
+        target = await session.execute(
+            text(
+                "SELECT id, name FROM delivery_zones "
+                "WHERE lower(name) = lower(:name) AND NOT is_active FOR UPDATE"
+            ),
+            {"name": parsed["target_zone_name"]},
+        )
+        matches = target.fetchall()
+        if len(matches) != 1:
+            logger.error(
+                "apply_zone_command: activate target '%s' resolves to %d "
+                "retired-zone rows at write time (expected exactly 1)",
+                parsed["target_zone_name"], len(matches),
+            )
+            raise ValueError(
+                f"retired zone not uniquely resolvable at write time: "
+                f"{parsed['target_zone_name']!r} ({len(matches)} matches)"
+            )
+        zone_id = matches[0]._mapping["id"]
+
+        # A DIFFERENT zone could hold the same name and already be active
+        # (created fresh while this one was retired) — re-check at write time,
+        # same partial-index guard as create/rename, before flipping is_active.
+        dup = await session.execute(
+            text(
+                "SELECT id FROM delivery_zones "
+                "WHERE lower(name) = lower(:name) AND is_active AND id <> :self"
+            ),
+            {"name": parsed["target_zone_name"], "self": zone_id},
+        )
+        if dup.fetchall():
+            logger.error(
+                "apply_zone_command: cannot activate '%s' — a different zone "
+                "with the same name is active at write time",
+                parsed["target_zone_name"],
+            )
+            raise ValueError(
+                f"zone name already in use by an active zone: "
+                f"{parsed['target_zone_name']!r}"
+            )
+
+        try:
+            result = await session.execute(
+                text(
+                    "UPDATE delivery_zones SET is_active = TRUE WHERE id = :id "
+                    "RETURNING id, name, delivery_time_minutes, is_active, "
+                    "delivery_fee_rub"
+                ),
+                {"id": zone_id},
+            )
+        except IntegrityError as err:
+            if _is_unique_violation(err):
+                logger.error(
+                    "apply_zone_command: unique_violation activating '%s' "
+                    "(raced at write time)",
+                    parsed["target_zone_name"],
+                )
+                raise ValueError(
+                    f"zone name already in use by an active zone: "
+                    f"{parsed['target_zone_name']!r}"
+                ) from err
+            raise
+        row = result.one()._mapping
+        logger.info(
+            "apply_zone_command: activated zone id=%s ('%s')",
+            zone_id, row["name"],
+        )
+        return {
+            "applied": True,
+            "action": "activate",
             "id": str(row["id"]),
             "name": row["name"],
             "delivery_time_minutes": row["delivery_time_minutes"],

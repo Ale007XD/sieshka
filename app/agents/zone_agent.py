@@ -59,9 +59,14 @@ class ZoneApplyResult:
     """Outcome of the apply phase.
 
     applied=True  -> the command landed in Postgres (Trace SUCCESS, valid branch).
-    applied=False + error is None -> command rejected by validate (invalid
-        branch reached its terminal cleanly; nothing written).
-    applied=False + error set -> the apply write failed (Trace FAILED; raised).
+    applied=False + error set -> either the command was rejected by validate
+        (Trace SUCCESS, invalid branch — error is the human-readable rejection
+        reason from validate_apply_zone_command's diagnostics side-channel) or
+        the apply write itself failed (Trace FAILED; raised).
+    Both rejection classes now always carry a message (2026-07-31 fix — error
+    used to be None on validate-rejection, which the caller had no way to
+    explain to the user; see validate_apply_zone_command's docstring for why
+    this couldn't just be read off the Trace/DSL directly).
     """
 
     applied: bool
@@ -93,7 +98,7 @@ class ZoneAgent:
         self._session_factory = session_factory
         self._apply_vm = apply_vm
 
-    def _build_vm(self) -> _VMProtocol:
+    def _build_vm(self, diagnostics: dict[str, str] | None = None) -> _VMProtocol:
         from nano_vm.vm import ExecutionVM
 
         from app.db_nano import StoreCursorRepository, get_store
@@ -107,15 +112,23 @@ class ZoneAgent:
         executor = GovernedToolExecutor(policy=ZONE_AGENT_POLICY_SNAPSHOT)
         for name, fn in _AGENT_TOOLS.items():
             governed = _governed_tool(fn, name, executor)
-            vm.register_tool(name, governed)
+            if name == "validate_zone_command" and diagnostics is not None:
+                vm.register_tool(name, functools.partial(governed, diagnostics=diagnostics))
+            else:
+                vm.register_tool(name, governed)
         return vm
 
-    def _build_apply_vm(self, session: AsyncSession) -> _VMProtocol:
+    def _build_apply_vm(
+        self, session: AsyncSession, diagnostics: dict[str, str] | None = None
+    ) -> _VMProtocol:
         """Session-bound VM for the apply phase.
 
         Write tools take a `session` first parameter closure-injected via
         functools.partial (never serialised in Trace). Every tool is wrapped by
         GovernedToolExecutor so delivery:write is enforced on the write step.
+        `diagnostics` is the same non-serialized side-channel, additionally
+        injected into validate_apply_zone_command only (the tool that decides
+        the rejection reason).
         """
         from nano_vm.adapters import MockLLMAdapter
         from nano_vm.vm import ExecutionVM
@@ -130,7 +143,11 @@ class ZoneAgent:
         executor = GovernedToolExecutor(policy=ZONE_AGENT_APPLY_POLICY_SNAPSHOT)
         for name, fn in _APPLY_TOOLS.items():
             governed = _governed_tool(fn, name, executor)
-            if name in _APPLY_SESSION_TOOLS:
+            if name == "validate_apply_zone_command" and diagnostics is not None:
+                vm.register_tool(
+                    name, functools.partial(governed, session=session, diagnostics=diagnostics)
+                )
+            elif name in _APPLY_SESSION_TOOLS:
                 vm.register_tool(name, functools.partial(governed, session=session))
             else:
                 vm.register_tool(name, governed)
@@ -146,7 +163,8 @@ class ZoneAgent:
         Returns:
             ZoneAgentResult with success flag and structured command dict.
         """
-        vm = self._vm if self._vm is not None else self._build_vm()
+        diagnostics: dict[str, str] = {}
+        vm = self._vm if self._vm is not None else self._build_vm(diagnostics)
         context: dict[str, Any] = {
             "input_text": input_data.get("input_text", ""),
         }
@@ -179,13 +197,22 @@ class ZoneAgent:
             fail_step = next(
                 (s for s in trace.steps if s.step_id == "validation_failed"), None
             )
+            # diagnostics["reason"] (set by validate_zone_command itself) is the
+            # real message. fail_step.output is only ever "FAILED:0"/"FAILED:1"
+            # — report_collect_failure's `reason` arg is bound via
+            # "$validate_command.output" in the DSL, which is the plain
+            # CONDITION-branching sentinel, never a description (2026-07-31
+            # finding — see validate_zone_command's docstring).
+            error_msg = (
+                diagnostics.get("reason")
+                or (str(fail_step.output) if fail_step and fail_step.output else None)
+                or "Command validation failed"
+            )
             if fail_step:
-                raw = str(fail_step.output) if fail_step.output else ""
-                error_msg = raw or "Command validation failed"
                 return ZoneAgentResult(success=False, error=error_msg)
 
             return ZoneAgentResult(
-                success=False, error="No command output in trace",
+                success=False, error=diagnostics.get("reason") or "No command output in trace",
             )
 
         error_msg = trace.error or "Agent execution failed"
@@ -204,8 +231,12 @@ class ZoneAgent:
                 f"{_report.summary()}"
             )
 
+        diagnostics: dict[str, str] = {}
+
         if self._apply_vm is not None:
-            return await self._run_apply(self._apply_vm, command, session=None)
+            return await self._run_apply(
+                self._apply_vm, command, session=None, diagnostics=diagnostics
+            )
 
         if self._session_factory is None:
             from app.db import async_session_factory
@@ -213,15 +244,18 @@ class ZoneAgent:
             self._session_factory = async_session_factory
 
         async with self._session_factory() as session:
-            vm = self._build_apply_vm(session)
-            return await self._run_apply(vm, command, session=session)
+            vm = self._build_apply_vm(session, diagnostics)
+            return await self._run_apply(vm, command, session=session, diagnostics=diagnostics)
 
     async def _run_apply(
         self,
         vm: _VMProtocol,
         command: dict[str, Any],
         session: AsyncSession | None,
+        diagnostics: dict[str, str] | None = None,
     ) -> ZoneApplyResult:
+        if diagnostics is None:
+            diagnostics = {}
         trace = await vm.run(PROGRAM_APPLY_ZONE, context={"command": command})
         trace_id = trace.trace_id
 
@@ -257,13 +291,17 @@ class ZoneAgent:
             invalid_step = next(
                 (s for s in trace.steps if s.step_id == "report_invalid"), None
             )
+            # diagnostics["reason"] (set by validate_apply_zone_command itself)
+            # is the real message — invalid_step.output is only ever
+            # "INVALID:0"/"INVALID:1" (same DSL numeric-sentinel-as-reason
+            # dead end as the collect phase; see 2026-07-31 finding).
             reason = (
-                str(invalid_step.output)
-                if invalid_step and invalid_step.output
-                else "command rejected"
+                diagnostics.get("reason")
+                or (str(invalid_step.output) if invalid_step and invalid_step.output else None)
+                or "command rejected"
             )
             logger.info("apply_zone: command rejected (%s)", reason)
-            return ZoneApplyResult(applied=False, error=None, trace_id=trace_id)
+            return ZoneApplyResult(applied=False, error=reason, trace_id=trace_id)
 
         if session is not None:
             await session.rollback()

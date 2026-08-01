@@ -44,33 +44,44 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-async def validate_menu_command(llm_output: str, **kwargs: object) -> int:
+async def validate_menu_command(
+    llm_output: str,
+    diagnostics: dict[str, str] | None = None,
+    **kwargs: object,
+) -> int:
     """Returns 1 if LLM output contains valid structured command, 0 otherwise.
 
     Validates that the JSON contains required fields:
     menu_id (str), items (list of dict), category (str).
+
+    `diagnostics` is a closure-injected side-channel (same convention as
+    `session` elsewhere) so the calling agent method can surface a real
+    reason — see app/tools/zone_agent_tools.py::validate_zone_command's
+    docstring for why the CONDITION-branching 0/1 return value can't double
+    as that message (2026-07-31 finding, same bug present across all agents).
     """
-    if not llm_output or not llm_output.strip():
-        logger.warning("validate_menu_command: empty LLM output")
+    def _reject(reason: str) -> int:
+        logger.warning("validate_menu_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
         return 0
+
+    if not llm_output or not llm_output.strip():
+        return _reject("empty instruction — nothing to parse")
     try:
         data = json.loads(llm_output)
         if not isinstance(data, dict):
-            return 0
+            return _reject("parsed command is not an object")
         if "menu_id" not in data:
-            logger.warning("validate_menu_command: missing menu_id")
-            return 0
+            return _reject("missing 'menu_id'")
         if "items" not in data or not isinstance(data["items"], list):
-            logger.warning("validate_menu_command: missing/invalid items")
-            return 0
+            return _reject("missing or invalid 'items' (expected a list)")
         if "category" not in data or not isinstance(data["category"], str):
-            logger.warning("validate_menu_command: missing/invalid category")
-            return 0
+            return _reject("missing or invalid 'category'")
         logger.info("validate_menu_command: valid command")
         return 1
     except (json.JSONDecodeError, ValueError):
-        logger.warning("validate_menu_command: invalid JSON")
-        return 0
+        return _reject("could not parse a command from the instruction")
 
 
 async def collect_menu_command(command: str, **kwargs: object) -> str:
@@ -123,6 +134,7 @@ def _required_apply_fields(command: Any) -> tuple[str, str, int] | None:
 async def validate_apply_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience for the apply phase. Numeric sentinel.
@@ -131,11 +143,19 @@ async def validate_apply_command(
     category resolves to exactly one row and the product name is not already in
     use. Returns 0 otherwise. This is NOT the enforcement point — apply_menu_command
     re-verifies everything at write time (see its docstring re: TOCTOU).
+
+    `diagnostics` is a closure-injected side-channel for a human-readable
+    reason — see validate_menu_command's docstring.
     """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_apply_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
+        return 0
+
     parsed = _required_apply_fields(command)
     if parsed is None:
-        logger.warning("validate_apply_command: malformed command")
-        return 0
+        return _reject("malformed command")
     name, category, _price = parsed
 
     cat = await session.execute(
@@ -144,19 +164,19 @@ async def validate_apply_command(
     )
     cat_matches = cat.fetchall()
     if len(cat_matches) != 1:
-        logger.warning(
-            "validate_apply_command: category '%s' resolves to %d rows",
-            category, len(cat_matches),
+        return _reject(
+            f"category {category!r} not found"
+            if len(cat_matches) == 0
+            else f"category name {category!r} matches {len(cat_matches)} rows "
+            f"(expected exactly 1)"
         )
-        return 0
 
     prod = await session.execute(
         text("SELECT id FROM products WHERE lower(name) = lower(:name)"),
         {"name": name},
     )
     if prod.fetchall():
-        logger.warning("validate_apply_command: product name '%s' already in use", name)
-        return 0
+        return _reject(f"a product named {name!r} already exists")
 
     logger.info("validate_apply_command: '%s' valid at validate time", name)
     return 1
@@ -288,17 +308,26 @@ def _required_apply_category_fields(
 async def validate_apply_category_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience for category apply. Numeric sentinel.
 
     NOT the enforcement point — apply_category_command re-verifies at write
     time (TOCTOU, same shape as validate_apply_command).
+
+    `diagnostics` is a closure-injected side-channel for a human-readable
+    reason — see validate_menu_command's docstring.
     """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_apply_category_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
+        return 0
+
     parsed = _required_apply_category_fields(command)
     if parsed is None:
-        logger.warning("validate_apply_category_command: malformed command")
-        return 0
+        return _reject("malformed command")
     name, parent_category, _menu_period, _sort = parsed
 
     existing = await session.execute(
@@ -306,10 +335,7 @@ async def validate_apply_category_command(
         {"name": name},
     )
     if existing.fetchall():
-        logger.warning(
-            "validate_apply_category_command: name '%s' already in use", name
-        )
-        return 0
+        return _reject(f"a category named {name!r} already exists")
 
     if parent_category is not None:
         parent = await session.execute(
@@ -318,11 +344,12 @@ async def validate_apply_category_command(
         )
         parent_matches = parent.fetchall()
         if len(parent_matches) != 1:
-            logger.warning(
-                "validate_apply_category_command: parent '%s' resolves to %d rows",
-                parent_category, len(parent_matches),
+            return _reject(
+                f"parent category {parent_category!r} not found"
+                if len(parent_matches) == 0
+                else f"parent category name {parent_category!r} matches "
+                f"{len(parent_matches)} rows (expected exactly 1)"
             )
-            return 0
 
     logger.info("validate_apply_category_command: '%s' valid at validate time", name)
     return 1
@@ -480,17 +507,26 @@ def _required_update_product_fields(
 async def validate_update_product_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience for product update. Numeric sentinel.
 
     NOT the enforcement point — apply_update_product_command re-verifies at
     write time (TOCTOU, same shape as validate_apply_command).
+
+    `diagnostics` is a closure-injected side-channel for a human-readable
+    reason — see validate_menu_command's docstring.
     """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_update_product_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
+        return 0
+
     parsed = _required_update_product_fields(command)
     if parsed is None:
-        logger.warning("validate_update_product_command: malformed command")
-        return 0
+        return _reject("malformed command")
     product_id, _name, category, _price, _desc, _img, _active = parsed
 
     existing = await session.execute(
@@ -498,22 +534,21 @@ async def validate_update_product_command(
         {"id": product_id},
     )
     if not existing.fetchall():
-        logger.warning(
-            "validate_update_product_command: product_id '%s' not found", product_id
-        )
-        return 0
+        return _reject(f"product_id {product_id!r} not found")
 
     if category is not None:
         cat = await session.execute(
             text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
             {"name": category},
         )
-        if len(cat.fetchall()) != 1:
-            logger.warning(
-                "validate_update_product_command: category '%s' not uniquely resolvable",
-                category,
+        cat_matches = cat.fetchall()
+        if len(cat_matches) != 1:
+            return _reject(
+                f"category {category!r} not found"
+                if len(cat_matches) == 0
+                else f"category name {category!r} matches {len(cat_matches)} rows "
+                f"(expected exactly 1)"
             )
-            return 0
 
     logger.info("validate_update_product_command: product_id '%s' valid", product_id)
     return 1
@@ -659,17 +694,26 @@ def _required_update_category_fields(
 async def validate_update_category_command(
     session: AsyncSession,
     command: Any,
+    diagnostics: dict[str, str] | None = None,
     **kwargs: object,
 ) -> int:
     """Early-rejection convenience for category update. Numeric sentinel.
 
     NOT the enforcement point — apply_update_category_command re-verifies at
     write time (TOCTOU, same shape as validate_update_product_command).
+
+    `diagnostics` is a closure-injected side-channel for a human-readable
+    reason — see validate_menu_command's docstring.
     """
+    def _reject(reason: str) -> int:
+        logger.warning("validate_update_category_command: %s", reason)
+        if diagnostics is not None:
+            diagnostics["reason"] = reason
+        return 0
+
     parsed = _required_update_category_fields(command)
     if parsed is None:
-        logger.warning("validate_update_category_command: malformed command")
-        return 0
+        return _reject("malformed command")
     category_id, name, parent_category, _menu_period, _sort, _is_active = parsed
 
     existing = await session.execute(
@@ -677,10 +721,7 @@ async def validate_update_category_command(
         {"id": category_id},
     )
     if not existing.fetchall():
-        logger.warning(
-            "validate_update_category_command: category_id '%s' not found", category_id
-        )
-        return 0
+        return _reject(f"category_id {category_id!r} not found")
 
     if name is not None:
         dup = await session.execute(
@@ -690,10 +731,7 @@ async def validate_update_category_command(
             {"name": name, "id": category_id},
         )
         if dup.fetchall():
-            logger.warning(
-                "validate_update_category_command: name '%s' already in use", name
-            )
-            return 0
+            return _reject(f"a category named {name!r} already exists")
 
     if parent_category is not None:
         parent = await session.execute(
@@ -702,16 +740,14 @@ async def validate_update_category_command(
         )
         parent_matches = parent.fetchall()
         if len(parent_matches) != 1:
-            logger.warning(
-                "validate_update_category_command: parent '%s' resolves to %d rows",
-                parent_category, len(parent_matches),
+            return _reject(
+                f"parent category {parent_category!r} not found"
+                if len(parent_matches) == 0
+                else f"parent category name {parent_category!r} matches "
+                f"{len(parent_matches)} rows (expected exactly 1)"
             )
-            return 0
         if parent_matches[0]._mapping["id"] == category_id:
-            logger.warning(
-                "validate_update_category_command: category cannot be its own parent"
-            )
-            return 0
+            return _reject("a category cannot be its own parent")
 
     logger.info("validate_update_category_command: category_id '%s' valid", category_id)
     return 1
