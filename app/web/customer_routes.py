@@ -167,9 +167,13 @@ async def shop_thanks(
     order = await order_service.get_order(str(parsed_id)) if parsed_id is not None else None
     delivery_fee = None
     if order is not None:
-        # A non-empty delivery address means delivery (not pickup) — the flat
-        # fee applies. Pickup orders have an empty delivery_address.
-        delivery_fee = settings.DELIVERY_FEE if order.delivery_address else 0
+        if order.total_rub is not None:
+            goods_total = sum(item.price_rub * item.qty for item in order.items)
+            delivery_fee = order.total_rub - goods_total
+        else:
+            # Pre-migration orders (no total_rub recorded) — fall back to the
+            # old flat-fee heuristic rather than showing nothing.
+            delivery_fee = settings.DELIVERY_FEE if order.delivery_address else 0
 
     templates = request.app.state.templates
     return templates.TemplateResponse(  # type: ignore[no-any-return]

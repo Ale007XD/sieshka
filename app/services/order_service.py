@@ -334,7 +334,8 @@ class OrderService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, customer_id, state, items, delivery_address, trace_id "
+                    "SELECT id, customer_id, state, items, delivery_address, "
+                    "trace_id, total_rub "
                     "FROM orders WHERE id = :id"
                 ),
                 {"id": order_id},
@@ -352,6 +353,7 @@ class OrderService:
                 ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
+                total_rub=row._mapping.get("total_rub"),
             )
 
     async def list_orders(

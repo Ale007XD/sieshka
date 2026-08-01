@@ -97,6 +97,11 @@ class OrderRead(BaseModel):
     customer_name: str | None = None
     customer_phone: str | None = None
     trace_id: str | None = None  # M3: wired to nano-vm trace
+    total_rub: int | None = None  # actual charged total (goods + per-zone fee
+    # - promo discount) — the authoritative figure for anything that needs
+    # "what did this order actually cost", vs re-deriving from current
+    # settings/zone data which can drift after the order was placed
+    # (2026-08-01, thanks.html delivery-fee display fix).
 
 
 class OrderItem(BaseModel):

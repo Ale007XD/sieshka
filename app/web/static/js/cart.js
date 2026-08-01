@@ -16,8 +16,9 @@ const CartManager = (function () {
   const HISTORY_KEY = 'cart_history';
   let recentlyDeleted = loadHistory();
   const upsellSuggestions = [];
-  let deliveryFee = 0;
-  let deliveryFeeLoaded = false;
+  let globalDeliveryFee = 0;
+  let globalDeliveryFeeLoaded = false;
+  const zoneDeliveryFeeCache = {};
   const toastQueue = [];
   let activeToasts = [];
   const MAX_TOASTS = 3;
@@ -45,30 +46,38 @@ const CartManager = (function () {
   }
 
   async function loadDeliveryFee(zoneId = null) {
+    let fee = 0;
     try {
       const url = zoneId ? `/api/config/delivery-fee?zone_id=${zoneId}` : '/api/config/delivery-fee';
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        deliveryFee = data.delivery_fee || 0;
-        deliveryFeeLoaded = true;
+        fee = data.delivery_fee || 0;
       }
     } catch (e) {
       console.error('Error loading delivery fee:', e);
-      deliveryFee = 0;
+      fee = 0;
     }
-
-    return deliveryFee;
+    if (zoneId) {
+      zoneDeliveryFeeCache[zoneId] = fee;
+    } else {
+      globalDeliveryFee = fee;
+      globalDeliveryFeeLoaded = true;
+    }
+    return fee;
   }
 
   async function getDeliveryFee(zoneId = null) {
     if (zoneId) {
+      if (Object.prototype.hasOwnProperty.call(zoneDeliveryFeeCache, zoneId)) {
+        return zoneDeliveryFeeCache[zoneId];
+      }
       return await loadDeliveryFee(zoneId);
     }
-    if (!deliveryFeeLoaded) {
+    if (!globalDeliveryFeeLoaded) {
       await loadDeliveryFee();
     }
-    return deliveryFee;
+    return globalDeliveryFee;
   }
 
   function escapeHtml(text) {
@@ -318,7 +327,7 @@ const CartManager = (function () {
     const items = loadCart();
     const totalItems = getTotalItems(items);
     const subtotal = getTotalPrice(items);
-    const currentDeliveryFee = totalItems > 0 && deliveryFeeLoaded ? deliveryFee : 0;
+    const currentDeliveryFee = totalItems > 0 && globalDeliveryFeeLoaded ? globalDeliveryFee : 0;
     const totalPrice = subtotal + currentDeliveryFee;
 
     const summaryEl = document.getElementById('navbarCartSummary');
