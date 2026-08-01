@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
@@ -25,9 +26,10 @@ async def get_menu(
 
 @router.get("/config/delivery-fee")
 async def get_delivery_fee(
+    zone_id: UUID | None = Query(None),
     service: MenuService = Depends(get_menu_service),
 ) -> DeliveryFeeResponse:
-    return await service.get_delivery_fee()
+    return await service.get_delivery_fee(zone_id=zone_id)
 
 
 @router.get("/delivery-zones")

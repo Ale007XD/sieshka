@@ -44,11 +44,10 @@ const CartManager = (function () {
     }
   }
 
-  async function loadDeliveryFee() {
-    if (deliveryFeeLoaded) return deliveryFee;
-
+  async function loadDeliveryFee(zoneId = null) {
     try {
-      const response = await fetch('/api/config/delivery-fee');
+      const url = zoneId ? `/api/config/delivery-fee?zone_id=${zoneId}` : '/api/config/delivery-fee';
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         deliveryFee = data.delivery_fee || 0;
@@ -62,7 +61,10 @@ const CartManager = (function () {
     return deliveryFee;
   }
 
-  async function getDeliveryFee() {
+  async function getDeliveryFee(zoneId = null) {
+    if (zoneId) {
+      return await loadDeliveryFee(zoneId);
+    }
     if (!deliveryFeeLoaded) {
       await loadDeliveryFee();
     }

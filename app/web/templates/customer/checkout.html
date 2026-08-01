@@ -270,7 +270,8 @@ document.addEventListener('DOMContentLoaded', function() {
       addressField.classList.remove('d-none');
       pickupInfo.classList.add('d-none');
     }
-    CartManager.getDeliveryFee().then(function(fee) {
+    var zoneId = document.getElementById('f-zone').value;
+    CartManager.getDeliveryFee(zoneId).then(function(fee) {
       var effectiveFee = isPickup ? 0 : fee;
       document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
       document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
@@ -289,6 +290,16 @@ document.addEventListener('DOMContentLoaded', function() {
       opt.value = z.id;
       opt.textContent = z.name + (z.delivery_time_minutes ? ' (' + z.delivery_time_minutes + ' мин)' : '');
       select.appendChild(opt);
+    });
+    
+    select.addEventListener('change', function() {
+      var isPickup = document.getElementById('delivery_pickup').checked;
+      if (!isPickup) {
+        CartManager.getDeliveryFee(this.value).then(function(fee) {
+          document.getElementById('checkoutDeliveryFee').textContent = fee + ' ₽';
+          document.getElementById('checkoutGrandTotal').textContent = (subtotal + fee) + ' ₽';
+        });
+      }
     });
   }).catch(function() {});
 

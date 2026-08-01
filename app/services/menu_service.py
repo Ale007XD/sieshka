@@ -142,7 +142,16 @@ class MenuService:
 
         return items
 
-    async def get_delivery_fee(self) -> DeliveryFeeResponse:
+    async def get_delivery_fee(self, zone_id: UUID | None = None) -> DeliveryFeeResponse:
+        if zone_id:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text("SELECT delivery_fee_rub FROM delivery_zones WHERE id = :id"),
+                    {"id": zone_id},
+                )
+                row = result.fetchone()
+                if row:
+                    return DeliveryFeeResponse(delivery_fee=row._mapping["delivery_fee_rub"])
         return DeliveryFeeResponse(delivery_fee=settings.DELIVERY_FEE)
 
     async def get_product_snapshot(self, product_id: UUID) -> MenuProductItem | None:
@@ -176,7 +185,8 @@ class MenuService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, external_id, name, delivery_time_minutes, is_active "
+                    "SELECT id, external_id, name, delivery_time_minutes, "
+                    "is_active, delivery_fee_rub "
                     "FROM delivery_zones "
                     "WHERE is_active = TRUE "
                     "ORDER BY delivery_time_minutes"
@@ -191,6 +201,7 @@ class MenuService:
                 name=row._mapping["name"],
                 delivery_time_minutes=row._mapping["delivery_time_minutes"],
                 is_active=row._mapping["is_active"],
+                delivery_fee_rub=row._mapping["delivery_fee_rub"],
             )
             for row in rows
         ]
