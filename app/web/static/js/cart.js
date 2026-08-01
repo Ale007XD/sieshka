@@ -968,6 +968,17 @@ const CartManager = (function () {
     init: function () {
       setupEventListeners();
       updateAllUI();
+      // setupCheckoutForm (defined later in this file, hoisted — global
+      // function declarations resolve at call time regardless of source
+      // order) attaches the #checkout-form submit listener that does
+      // preventDefault + POST /api/orders + YooKassa widget/redirect.
+      // It safely no-ops on any page without #checkout-form (cart.html,
+      // menu.html). 2026-08-01 fix: this was previously only reachable via
+      // initCheckoutPage(), itself never called from anywhere (dead code) —
+      // the checkout submit button silently fell through to the browser's
+      // native form submission (no method/action on #checkout-form → GET
+      // reload of the current page) instead of ever calling /api/orders.
+      setupCheckoutForm();
     },
     addItem: addItem,
     updateQty: updateQty,
