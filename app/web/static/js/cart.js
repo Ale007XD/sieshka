@@ -1283,15 +1283,24 @@ function showError(message) {
 function showYooKassaWidget(confirmationToken, orderId) {
   function _renderWidget() {
     let container = document.getElementById('yookassa-widget');
+    const overlayStyle = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
     if (!container) {
       container = document.createElement('div');
       container.id = 'yookassa-widget';
-      container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
-      const inner = document.createElement('div');
+      document.body.appendChild(container);
+    }
+    // checkout.html provides this container pre-hidden (static markup) —
+    // un-hide it and (re)apply the overlay styling regardless of whether it
+    // was just created above or already existed.
+    container.hidden = false;
+    container.style.cssText = overlayStyle;
+
+    let inner = document.getElementById('payment-form');
+    if (!inner) {
+      inner = document.createElement('div');
       inner.id = 'payment-form';
       inner.style.cssText = 'background:#fff;border-radius:12px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow:auto;';
       container.appendChild(inner);
-      document.body.appendChild(container);
     }
 
     const checkout = new window.YooMoneyCheckoutWidget({

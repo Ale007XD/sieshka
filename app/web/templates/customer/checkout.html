@@ -254,6 +254,18 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
     document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
     totalsEl.classList.remove('d-none');
+  }).catch(function(err) {
+    // 2026-08-01: without this, a rejected promise here (or any exception
+    // thrown inside the .then() above) left #orderTotals hidden forever with
+    // its static "0 ₽" placeholders — no console error a non-technical
+    // reporter would notice, no visible failure at all. Falling back to
+    // showing at least the goods subtotal (already computed client-side,
+    // independent of the delivery-fee fetch) instead of nothing.
+    console.error('checkout totals: getDeliveryFee failed', err);
+    document.getElementById('checkoutSubtotal').textContent = subtotal + ' ₽';
+    document.getElementById('checkoutDeliveryFee').textContent = '— ₽';
+    document.getElementById('checkoutGrandTotal').textContent = '— ₽';
+    totalsEl.classList.remove('d-none');
   });
 
   // Toggle address/zone on delivery mode change
