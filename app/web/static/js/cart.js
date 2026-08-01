@@ -606,15 +606,15 @@ const CartManager = (function () {
       <div class="cart-totals mt-3 pt-3 border-top">
         <div class="d-flex justify-content-between mb-2">
           <span class="text-muted">Итого (товары):</span>
-          <span class="fw-semibold" id="checkoutSubtotal">${formatPrice(subtotal)}</span>
+          <span class="fw-semibold" id="cartPageSubtotal">${formatPrice(subtotal)}</span>
         </div>
         <div class="d-flex justify-content-between mb-2">
           <span class="text-muted">Доставка:</span>
-          <span class="fw-semibold" id="checkoutDeliveryFee">${formatPrice(currentDeliveryFee)} (фиксированная)</span>
+          <span class="fw-semibold" id="cartPageDeliveryFee">${formatPrice(currentDeliveryFee)} (фиксированная)</span>
         </div>
         <div class="d-flex justify-content-between fw-bold h5 mb-0 mt-2 pt-2 border-top">
           <span>Итого к оплате:</span>
-          <span class="text-brand" id="checkoutGrandTotal">${formatPrice(grandTotal)}</span>
+          <span class="text-brand" id="cartPageGrandTotal">${formatPrice(grandTotal)}</span>
         </div>
       </div>
     `;
@@ -623,6 +623,14 @@ const CartManager = (function () {
   }
 
   async function updateCheckoutTotal(isPickup) {
+    // Reads the checkout PAGE's own totals (#checkoutSubtotal etc, in
+    // checkout.html's own static markup) — separate namespace from
+    // renderCartPage()'s #cartPageSubtotal etc above (2026-08-01 fix: these
+    // used to share ids, and since renderCartPage() runs first via
+    // CartManager.init() and writes into checkout.html's hidden leftover
+    // <div id="cart" class="d-none"> stub — which sits earlier in the DOM —
+    // every getElementById('checkoutSubtotal') resolved to that invisible
+    // duplicate instead of the page's actual visible totals block).
     const subtotalEl = document.getElementById('checkoutSubtotal');
     const deliveryEl = document.getElementById('checkoutDeliveryFee');
     const grandTotalEl = document.getElementById('checkoutGrandTotal');
