@@ -54,6 +54,7 @@ function waitForCartManager(callback) {
 
 document.addEventListener('DOMContentLoaded', () => {
     initStickyBar();
+    initStickyCategoryBar();
     loadMenu();
     initOtherDateModal();
     
@@ -63,6 +64,42 @@ document.addEventListener('DOMContentLoaded', () => {
         syncAllProductControls();
     });
 });
+
+// ============================================================================
+// Sticky Category Carousel
+// ============================================================================
+
+function initStickyCategoryBar() {
+    const bar = document.getElementById('categoryButtons');
+    const navbar = document.querySelector('nav.navbar');
+    if (!bar) return;
+
+    // Navbar height varies by breakpoint/logo size — measure it instead of
+    // hardcoding, otherwise the category bar either gaps or hides under it.
+    function updateNavbarHeightVar() {
+        if (navbar) {
+            document.documentElement.style.setProperty('--navbar-h', `${navbar.offsetHeight}px`);
+        }
+    }
+    updateNavbarHeightVar();
+    window.addEventListener('resize', updateNavbarHeightVar);
+
+    // Toggle a shadow/border once the bar is actually pinned to the top,
+    // so it reads as "floating over content" rather than a static divider.
+    if ('IntersectionObserver' in window) {
+        const sentinel = document.createElement('div');
+        sentinel.style.cssText = 'position:relative;height:1px;';
+        bar.parentNode.insertBefore(sentinel, bar);
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                bar.classList.toggle('is-stuck', !entry.isIntersecting);
+            },
+            { threshold: 0, rootMargin: `-${navbar ? navbar.offsetHeight : 76}px 0px 0px 0px` }
+        );
+        observer.observe(sentinel);
+    }
+}
 
 // ============================================================================
 // Event Delegation for Cart Actions

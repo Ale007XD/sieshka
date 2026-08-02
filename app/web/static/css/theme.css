@@ -206,6 +206,35 @@ body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
+/* ============================================================================
+   Sticky Category Carousel
+   --navbar-h is set from JS (menu.js) to the navbar's real rendered height,
+   since Bootstrap navbar height varies by breakpoint/content and a hardcoded
+   px value would drift and either leave a gap or hide under the navbar.
+   ============================================================================ */
+:root {
+  --navbar-h: 76px;
+}
+
+#categoryButtons.category-bar-sticky {
+  position: sticky;
+  top: var(--navbar-h);
+  z-index: 1015; /* below navbar's sticky-top (Bootstrap default 1020), above page content */
+  background-color: var(--color-bg-secondary);
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  margin-left: -0.25rem;
+  margin-right: -0.25rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  transition: box-shadow 0.2s ease;
+}
+
+#categoryButtons.category-bar-sticky.is-stuck {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.07);
+  border-bottom: 1px solid var(--color-accent-border);
+}
+
 .navbar-brand {
   color: var(--color-element-primary) !important;
   font-weight: 700;
