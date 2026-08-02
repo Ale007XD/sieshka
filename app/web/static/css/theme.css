@@ -214,7 +214,7 @@ body {
    ============================================================================ */
 :root {
   --navbar-h: 76px;
-  --category-bar-top: 120px; /* fallback: navbar + method-toggle bar, corrected by JS on load */
+  --category-bar-top: 76px; /* fallback: navbar height only, corrected by JS on load */
 }
 
 #categoryButtons.category-bar-sticky {
@@ -237,7 +237,9 @@ body {
 }
 
 /* index.html structure: sticky wrapper is .category-filter-bar (carries Bootstrap's
-   .sticky-top too), stacked below navbar AND the delivery/pickup toggle bar (#sticky-bar).
+   .sticky-top too). The delivery/pickup method selector now lives inside this same
+   row (compact dropdown, .method-selector) rather than its own separate sticky bar —
+   merged to save vertical space (previously two full-width stacked bars).
    !important here is deliberate and load-bearing: .category-filter-bar and .sticky-top
    have identical specificity (single class each), so without !important whichever rule
    happens to load last wins by accident — this was the actual root cause of the category
@@ -250,6 +252,31 @@ body {
 
 .category-filter-bar.sticky-top.is-stuck {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.07);
+}
+
+/* Method selector (Доставка/Самовывоз) merged into the category-filter-bar row.
+   #categoryCarousel needs min-width:0 to actually shrink+scroll in this flex
+   row instead of forcing the dropdown off-screen (default flex-basis is auto,
+   which refuses to shrink below content width without this). */
+#categoryCarousel {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.method-selector .dropdown-toggle {
+  font-size: 0.9rem;
+  padding: 0.4rem 0.9rem;
+}
+
+.method-selector .dropdown-toggle::after {
+  margin-left: 0.5rem;
+}
+
+.method-selector .dropdown-item.active,
+.method-selector .dropdown-item:active {
+  background-color: var(--color-accent-bg);
+  color: var(--brand-primary);
+  font-weight: 600;
 }
 
 .navbar-brand {
@@ -948,12 +975,6 @@ button:focus-visible,
   .product-card .qty-display {
     min-width: 28px;
     font-size: 1rem;
-  }
-}
-
-@media (max-width: 768px) {
-  .sticky-bar {
-    top: 56px !important;
   }
 }
 

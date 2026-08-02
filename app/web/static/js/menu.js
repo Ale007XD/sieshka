@@ -71,22 +71,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initStickyCategoryBar() {
     const navbar = document.querySelector('nav.navbar');
-    const methodToggleBar = document.getElementById('sticky-bar'); // Доставка/Самовывоз, index.html only
     // Two different template structures carry the sticky category strip under
     // different elements: menu.html puts it directly on #categoryButtons,
-    // index.html wraps the scrollable strip in .category-filter-bar.
+    // index.html wraps the scrollable strip (+ method selector) in .category-filter-bar.
     const stickyTarget = document.querySelector('#categoryButtons.category-bar-sticky, .category-filter-bar');
     if (!stickyTarget) return;
 
-    // Navbar height and (if present) the method-toggle bar height both vary by
-    // breakpoint/content — measuring them beats hardcoding a top offset, which
-    // is exactly what caused the category bar to render hidden underneath the
-    // method-toggle bar (both previously pinned to the same fixed 62px).
+    // Navbar height varies by breakpoint/logo size — measuring it beats
+    // hardcoding a top offset, which is exactly what caused the category bar
+    // to render hidden underneath a previously-separate method-toggle bar.
     function updateStickyOffsets() {
         const navbarH = navbar ? navbar.offsetHeight : 76;
-        const toggleH = methodToggleBar ? methodToggleBar.offsetHeight : 0;
         document.documentElement.style.setProperty('--navbar-h', `${navbarH}px`);
-        document.documentElement.style.setProperty('--category-bar-top', `${navbarH + toggleH}px`);
+        document.documentElement.style.setProperty('--category-bar-top', `${navbarH}px`);
     }
     updateStickyOffsets();
     window.addEventListener('resize', updateStickyOffsets);
@@ -102,7 +99,7 @@ function initStickyCategoryBar() {
             ([entry]) => {
                 stickyTarget.classList.toggle('is-stuck', !entry.isIntersecting);
             },
-            { threshold: 0, rootMargin: `-${(navbar ? navbar.offsetHeight : 76) + (methodToggleBar ? methodToggleBar.offsetHeight : 0)}px 0px 0px 0px` }
+            { threshold: 0, rootMargin: `-${navbar ? navbar.offsetHeight : 76}px 0px 0px 0px` }
         );
         observer.observe(sentinel);
     }
@@ -166,54 +163,21 @@ function setupProductEventDelegation() {
 // ============================================================================
 
 function initStickyBar() {
-    const stickyBar = document.getElementById('sticky-bar');
-    if (!stickyBar) return;
+    const methodItems = document.querySelectorAll('.method-selector .dropdown-item[data-method]');
+    if (methodItems.length === 0) return;
 
-    // Detect initial method from active button in UI
-    const activeBtn = stickyBar.querySelector('[data-method].active');
-    if (activeBtn) {
-        MenuState.method = activeBtn.dataset.method;
+    // Detect initial method from the item marked active in the template
+    const activeItem = document.querySelector('.method-selector .dropdown-item[data-method].active');
+    if (activeItem) {
+        MenuState.method = activeItem.dataset.method;
     }
 
-    // Day toggle - TEMPORARILY DISABLED
-    // const dayButtons = stickyBar.querySelectorAll('[data-day]');
-    // dayButtons.forEach(btn => {
-    //     btn.addEventListener('click', (e) => {
-    //         e.preventDefault();
-    //         const day = btn.dataset.day;
-    //         setDay(day);
-    //
-    //         // Update active state
-    //         dayButtons.forEach(b => b.classList.remove('active'));
-    //         btn.classList.add('active');
-    //     });
-    // });
-
-    // Method toggle
-    const methodButtons = stickyBar.querySelectorAll('[data-method]');
-    methodButtons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    methodItems.forEach(item => {
+        item.addEventListener('click', (e) => {
             e.preventDefault();
-            const method = btn.dataset.method;
-            setMethod(method);
-
-            // Update active state with proper Bootstrap classes
-            methodButtons.forEach(b => {
-                b.classList.remove('btn-brand', 'active');
-                b.classList.add('btn-outline-brand');
-            });
-            btn.classList.remove('btn-outline-brand');
-            btn.classList.add('btn-brand', 'active');
+            setMethod(item.dataset.method);
         });
     });
-
-    // Slot selector - TEMPORARILY DISABLED
-    // const slotSelect = document.getElementById('slot-select');
-    // if (slotSelect) {
-    //     slotSelect.addEventListener('change', (e) => {
-    //         setSlot(e.target.value || null);
-    //     });
-    // }
 }
 
 function setMethod(method) {
@@ -223,9 +187,23 @@ function setMethod(method) {
 }
 
 function updateStickyBarUI() {
-    document.querySelectorAll('[data-method]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.method === MenuState.method);
+    // Dropdown items: toggle active/checkmark state
+    document.querySelectorAll('.method-selector .dropdown-item[data-method]').forEach(item => {
+        item.classList.toggle('active', item.dataset.method === MenuState.method);
     });
+
+    // Toggle button: label text + icon reflect the current selection
+    const label = document.getElementById('methodSelectorLabel');
+    if (label) label.textContent = METHOD_LABELS[MenuState.method] || label.textContent;
+
+    const btn = document.getElementById('methodSelectorBtn');
+    if (btn) {
+        const icon = btn.querySelector('i.bi');
+        if (icon) {
+            icon.classList.remove('bi-truck', 'bi-shop');
+            icon.classList.add(MenuState.method === 'pickup' ? 'bi-shop' : 'bi-truck');
+        }
+    }
 }
 
 // ============================================================================
