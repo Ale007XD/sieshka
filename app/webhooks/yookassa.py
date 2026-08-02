@@ -62,8 +62,8 @@ async def yookassa_webhook(
     if event_type != "payment.succeeded":
         return JSONResponse({"ok": True})
 
-    if not trace_id or not payment_id or not event_id:
-        logger.warning("YooKassa webhook: missing fields (trace_id, payment_id, or event_id)")
+    if not trace_id or not payment_id:
+        logger.warning("YooKassa webhook: missing fields (trace_id or payment_id)")
         return JSONResponse({"ok": True})
 
     event = trace.get_by_trace_id(str(trace_id))

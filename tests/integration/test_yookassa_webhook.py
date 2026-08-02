@@ -215,6 +215,58 @@ class TestYooKassaWebhook:
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
+    async def test_real_yookassa_payload_shape_without_top_level_id(
+        self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Regression test (2026-08-01): YooKassa's real webhook payload has
+        no top-level "id" for the notification itself — only "type", "event",
+        and "object" (the object's own "id" is the payment_id). Every other
+        test in this file synthetically adds a top-level "id", which masked a
+        production bug where event_id (read from that nonexistent field) was
+        required to be non-empty, so genuine webhooks were always silently
+        rejected as "missing fields" regardless of a valid trace_id/payment_id.
+        """
+        payment_id = str(uuid.uuid4())
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(
+                text(
+                    "INSERT INTO payments "
+                "(order_id, provider, provider_id, amount, currency, state) "
+                    "VALUES (:order_id, 'yookassa', :provider_id, 1500.00, 'RUB', 'PENDING')"
+                ),
+                {"order_id": uuid.UUID(order_id), "provider_id": payment_id},
+            )
+            await session.commit()
+
+        payload = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {
+                "id": payment_id,
+                "metadata": {
+                    "trace_id": trace_event.trace_id,
+                    "order_id": order_id,
+                },
+            },
+        }
+
+        resp = await client.post("/webhooks/yookassa", json=payload)
+        assert resp.status_code == 200
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            result = await session.execute(
+                text("SELECT state FROM orders WHERE id = :id"),
+                {"id": uuid.UUID(order_id)},
+            )
+            state = result.scalar_one()
+            assert state in (OrderState.PAID.value, OrderState.COOKING.value)
+
     async def test_successful_webhook_updates_order_state(
         self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
         session_factory: async_sessionmaker[AsyncSession],
