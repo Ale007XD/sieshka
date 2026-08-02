@@ -643,6 +643,9 @@ function addToCartWithQty(productId, priceRub, name, leadTimeMinutes = 0) {
         
         // Trigger cart animation in navbar
         triggerCartAnimation();
+
+        // "Часто берут вместе" — one relevant suggestion, not spammed on every add
+        setTimeout(() => CartManager.showUpsellToast(productId), 600);
     }
 }
 

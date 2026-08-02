@@ -214,11 +214,12 @@ body {
    ============================================================================ */
 :root {
   --navbar-h: 76px;
+  --category-bar-top: 120px; /* fallback: navbar + method-toggle bar, corrected by JS on load */
 }
 
 #categoryButtons.category-bar-sticky {
   position: sticky;
-  top: var(--navbar-h);
+  top: var(--category-bar-top);
   z-index: 1015; /* below navbar's sticky-top (Bootstrap default 1020), above page content */
   background-color: var(--color-bg-secondary);
   padding-top: 0.5rem;
@@ -233,6 +234,22 @@ body {
 #categoryButtons.category-bar-sticky.is-stuck {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.07);
   border-bottom: 1px solid var(--color-accent-border);
+}
+
+/* index.html structure: sticky wrapper is .category-filter-bar (carries Bootstrap's
+   .sticky-top too), stacked below navbar AND the delivery/pickup toggle bar (#sticky-bar).
+   !important here is deliberate and load-bearing: .category-filter-bar and .sticky-top
+   have identical specificity (single class each), so without !important whichever rule
+   happens to load last wins by accident — this was the actual root cause of the category
+   bar being hidden under the toggle bar (both resolved to the same top offset). */
+.category-filter-bar.sticky-top {
+  position: sticky !important;
+  top: var(--category-bar-top) !important;
+  z-index: 1015 !important;
+}
+
+.category-filter-bar.sticky-top.is-stuck {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.07);
 }
 
 .navbar-brand {
@@ -325,11 +342,66 @@ body {
   color: #2E7D32;
 }
 
-/* Sticky Cart Bar - Brand Accent */
+/* Sticky Cart Bar - Brand Accent
+   Was markup-only dead code before (index.html shipped it with a hardcoded
+   display:none !important and zero JS wiring). Now driven live by
+   CartManager.updateAllUI() (cart.js) — shown only while the cart has items. */
 .sticky-cartbar {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1040; /* above content and the sticky category bar (1015), below the offcanvas cart */
   background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(10px);
   border-top: 2px solid var(--color-element-primary);
+  padding: 0.75rem 0;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.sticky-cartbar.visible {
+  display: block;
+  animation: sticky-cartbar-in 0.25s ease;
+}
+
+@keyframes sticky-cartbar-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sticky-cartbar-summary {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+}
+
+.sticky-cartbar-count {
+  color: var(--color-element-primary);
+  font-weight: 700;
+}
+
+.sticky-cartbar-total {
+  color: var(--color-element-primary);
+  font-weight: 700;
+}
+
+.sticky-cartbar-sep {
+  color: var(--color-text-muted);
+  margin: 0 0.15rem;
+}
+
+/* Reserves scroll space at the bottom of the page so the fixed bar never
+   covers the last product card/CTA — toggled by JS alongside .visible. */
+body.has-sticky-cartbar {
+  padding-bottom: 76px;
+}
+
+@media (max-width: 576px) {
+  body.has-sticky-cartbar {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* Price Display - Brand Color */

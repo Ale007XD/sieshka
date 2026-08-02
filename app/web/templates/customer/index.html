@@ -92,11 +92,17 @@
 <button id="whatsappOrderBtn" class="d-none" type="button"></button>
 <select id="slot-select" class="d-none"></select>
 
-<!-- Sticky cart bar (HTML only, visibility controlled by JS) -->
-<div class="sticky-cartbar py-3 mt-4" id="stickyCartBar" style="display:none !important;">
-  <div class="container d-flex justify-content-end">
-    <a href="/cart" class="btn btn-brand btn-lg px-4 shadow-lg rounded-pill">
-      <i class="bi bi-cart3 me-2"></i>Перейти к заказу
+<!-- Sticky cart bar — visibility & content driven by CartManager.updateAllUI() (cart.js) -->
+<div class="sticky-cartbar" id="stickyCartBar">
+  <div class="container d-flex justify-content-between align-items-center gap-3">
+    <div class="sticky-cartbar-summary">
+      <span class="sticky-cartbar-count" id="stickyCartBarCount">0</span>
+      <span class="sticky-cartbar-label" id="stickyCartBarLabel">товара</span>
+      <span class="sticky-cartbar-sep">·</span>
+      <span class="sticky-cartbar-total" id="stickyCartBarTotal">0 ₽</span>
+    </div>
+    <a href="/cart" class="btn btn-brand px-4 shadow-sm rounded-pill flex-shrink-0">
+      <i class="bi bi-cart3 me-2"></i>Оформить
     </a>
   </div>
 </div>

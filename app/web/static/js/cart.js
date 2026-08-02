@@ -323,6 +323,38 @@ const CartManager = (function () {
     }));
   }
 
+  function pluralizeTovar(n) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 14) return 'товаров';
+    if (mod10 === 1) return 'товар';
+    if (mod10 >= 2 && mod10 <= 4) return 'товара';
+    return 'товаров';
+  }
+
+  async function updateStickyCartBar() {
+    const bar = document.getElementById('stickyCartBar');
+    if (!bar) return;
+
+    const items = loadCart();
+    const totalItems = getTotalItems(items);
+    const subtotal = getTotalPrice(items);
+    const currentDeliveryFee = totalItems > 0 && globalDeliveryFeeLoaded ? globalDeliveryFee : 0;
+    const totalPrice = subtotal + currentDeliveryFee;
+
+    bar.classList.toggle('visible', totalItems > 0);
+    document.body.classList.toggle('has-sticky-cartbar', totalItems > 0);
+
+    if (totalItems === 0) return;
+
+    const countEl = document.getElementById('stickyCartBarCount');
+    const labelEl = document.getElementById('stickyCartBarLabel');
+    const totalEl = document.getElementById('stickyCartBarTotal');
+    if (countEl) countEl.textContent = totalItems;
+    if (labelEl) labelEl.textContent = pluralizeTovar(totalItems);
+    if (totalEl) totalEl.textContent = formatPrice(totalPrice);
+  }
+
   async function updateNavbarCart() {
     const items = loadCart();
     const totalItems = getTotalItems(items);
@@ -722,6 +754,7 @@ const CartManager = (function () {
   async function updateAllUI() {
     await updateNavbarCart();
     await updateOffcanvasCart();
+    await updateStickyCartBar();
     updateProductControls();
     await renderCartPage();
     const _pickupEl = document.getElementById('delivery_pickup');
@@ -739,6 +772,59 @@ const CartManager = (function () {
 
     toastQueue.push({ message, type, timestamp: Date.now() });
     processToastQueue();
+  }
+
+  const shownUpsellIds = new Set();
+
+  function getUpsellCandidate(excludeProductId) {
+    const items = loadCart();
+    return upsellSuggestions.find(u =>
+      u.product_id !== excludeProductId &&
+      !shownUpsellIds.has(u.product_id) &&
+      !items.some(i => i.product_id === u.product_id)
+    ) || null;
+  }
+
+  function showUpsellToast(excludeProductId) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const candidate = getUpsellCandidate(excludeProductId);
+    if (!candidate) return;
+
+    shownUpsellIds.add(candidate.product_id);
+
+    const toastEl = document.createElement('div');
+    toastEl.className = 'toast show';
+    toastEl.setAttribute('role', 'status');
+    toastEl.setAttribute('aria-live', 'polite');
+    toastEl.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; min-width: 280px; max-width: 90vw; background: var(--color-bg-primary); border: 1px solid var(--color-accent-border); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);';
+
+    toastEl.innerHTML = `
+      <div class="toast-body d-flex justify-content-between align-items-center p-3 gap-3">
+        <div style="flex: 1; min-width: 0;">
+          <div class="small text-muted mb-1">Часто берут вместе:</div>
+          <div class="fw-semibold text-truncate">${escapeHtml(candidate.name)} · ${formatPrice(candidate.price_rub)}</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-brand rounded-pill px-3 flex-shrink-0">Добавить</button>
+      </div>
+    `;
+
+    container.appendChild(toastEl);
+
+    const addBtn = toastEl.querySelector('button');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        addItem(candidate.product_id, candidate.price_rub, candidate.name, candidate.lead_time_minutes || 0);
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 300);
+      });
+    }
+
+    setTimeout(() => {
+      toastEl.classList.remove('show');
+      setTimeout(() => toastEl.remove(), 300);
+    }, 5000);
   }
 
   function showUndoToast(message, undoCallback) {
@@ -1015,6 +1101,7 @@ const CartManager = (function () {
     renderRecentlyDeletedOnCheckout: renderRecentlyDeletedOnCheckout,
     renderRecentlyDeletedOnCart: renderRecentlyDeletedOnCart,
     showToast: showToast,
+    showUpsellToast: showUpsellToast,
     setUpsellSuggestions: function (items) {
       upsellSuggestions.length = 0;
       upsellSuggestions.push(...items);
