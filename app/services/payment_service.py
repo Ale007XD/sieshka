@@ -65,6 +65,7 @@ class YooKassaClient:
         payload = {
             "amount": {"value": f"{amount:.2f}", "currency": currency},
             "confirmation": {"type": "embedded"},
+            "capture": True,
             "description": description,
             "metadata": metadata,
         }
