@@ -48,21 +48,29 @@
 
 {% block content %}
 
-<!-- Sticky method toggle -->
-<div id="sticky-bar" class="sticky-top" style="top: var(--navbar-h, 62px); z-index: 1030; background: var(--color-bg-primary); border-bottom: 1px solid var(--color-accent-border);">
-  <div class="container py-2">
-    <div class="col-12 col-md-4 mx-auto">
-      <div class="btn-group w-100" role="group" style="min-height: 44px;">
-        <button type="button" class="btn btn-brand active" data-method="delivery" style="font-weight:600;">Доставка</button>
-        <button type="button" class="btn btn-outline-brand" data-method="pickup" style="font-weight:600;">Самовывоз</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Category filter bar -->
+<!-- Sticky method+category bar: compact method dropdown on the left,
+     scrolling category carousel on the right — one row instead of two. -->
 <div class="category-filter-bar sticky-top">
-  <div class="container py-2">
+  <div class="container py-2 d-flex align-items-center gap-2">
+    <div class="dropdown method-selector flex-shrink-0">
+      <button class="btn btn-brand dropdown-toggle rounded-pill" type="button"
+              id="methodSelectorBtn" data-bs-toggle="dropdown" aria-expanded="false"
+              style="font-weight:600; white-space: nowrap;">
+        <i class="bi bi-truck me-1"></i><span id="methodSelectorLabel">Доставка</span>
+      </button>
+      <ul class="dropdown-menu" aria-labelledby="methodSelectorBtn">
+        <li>
+          <button type="button" class="dropdown-item active" data-method="delivery">
+            <i class="bi bi-truck me-2"></i>Доставка
+          </button>
+        </li>
+        <li>
+          <button type="button" class="dropdown-item" data-method="pickup">
+            <i class="bi bi-shop me-2"></i>Самовывоз
+          </button>
+        </li>
+      </ul>
+    </div>
     <div class="d-flex align-items-center gap-2 overflow-x-auto" id="categoryCarousel" style="scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none;">
       <button class="btn btn-sm rounded-pill category-btn active" data-category-id="all" style="white-space: nowrap; min-width: 100px;">
         <i class="bi bi-grid-fill me-1"></i>Все меню
