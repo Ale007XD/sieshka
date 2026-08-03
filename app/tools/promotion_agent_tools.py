@@ -134,9 +134,14 @@ async def report_collect_failure(reason: str, **kwargs: object) -> str:
 
 def _required_apply_fields(
     command: Any,
-) -> tuple[str, str | None, float | None, str | None, str, str | None] | None:
+) -> tuple[str, str | None, float | None, str | None, str | None, str | None] | None:
     """Extract (action, name?, discount?, target_promotion_name?,
-    effect_type, trigger_code?) if well-formed.
+    effect_type?, trigger_code?) if well-formed.
+
+    effect_type is only meaningful for action=create — it defaults to
+    PERCENT_DISCOUNT there and is otherwise None (activate/expire/archive
+    only need target_promotion_name; the LLM prompt emits effect_type:null
+    for those actions, not the string "PERCENT_DISCOUNT").
 
     Shared by validator and write step so both agree on one definition of
     "well-formed apply command" — same pattern as menu/zone/category tools.
@@ -163,8 +168,12 @@ def _required_apply_fields(
     ):
         return None
 
-    effect_type = command.get("effect_type", "PERCENT_DISCOUNT")
-    if effect_type not in ("PERCENT_DISCOUNT", "FIXED_AMOUNT", "FREE_DELIVERY"):
+    effect_type = command.get("effect_type")
+    if effect_type is None and action == "create":
+        effect_type = "PERCENT_DISCOUNT"
+    if effect_type is not None and effect_type not in (
+        "PERCENT_DISCOUNT", "FIXED_AMOUNT", "FREE_DELIVERY"
+    ):
         return None
 
     trigger_code = command.get("trigger_code")
@@ -219,6 +228,7 @@ async def validate_apply_promotion_command(
 
     if action == "create":
         assert name is not None
+        assert effect_type is not None  # _required_apply_fields defaults this for create
         if effect_type == "PERCENT_DISCOUNT":
             assert discount is not None
             if discount < 0 or discount > 100:
@@ -288,6 +298,7 @@ async def apply_promotion_command(
 
     if action == "create":
         assert name is not None
+        assert effect_type is not None  # _required_apply_fields defaults this for create
         if effect_type == "PERCENT_DISCOUNT":
             if discount is None or discount < 0 or discount > 100:
                 raise ValueError(f"discount out of range at write time: {discount!r}")
