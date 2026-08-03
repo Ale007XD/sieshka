@@ -9,6 +9,7 @@ from nano_vm.models import Program, Step, StepResult, StepStatus, StepType, Trac
 
 from app.agents.promotion_agent import PromotionAgent
 from app.tools.promotion_agent_tools import (
+    _required_apply_fields,
     collect_promotion_command,
     report_collect_failure,
     validate_promotion_command,
@@ -163,6 +164,32 @@ class TestValidatePromotionCommand:
             '"target_promotion_name": null}'
         )
         assert result == 0
+
+    async def test_archive_with_explicit_null_effect_type_is_valid(self) -> None:
+        """Regression test (2026-08-03 incident, СКИДОС99 archive): the LLM
+        prompt now emits effect_type:null explicitly for activate/expire/
+        archive (not an absent key) — .get("effect_type", "PERCENT_DISCOUNT")
+        does NOT apply the default for an explicit null, only for a missing
+        key. This is _required_apply_fields (apply-phase), not
+        validate_promotion_command (collect-phase) — the collect-phase
+        validator's else-branch never touches effect_type at all, so it
+        could not have caught this; the rejection happened one phase later,
+        in validate_apply_promotion_command/apply_promotion_command."""
+        parsed = _required_apply_fields(
+            {
+                "action": "archive",
+                "name": None,
+                "effect_type": None,
+                "discount": None,
+                "trigger_code": None,
+                "target_promotion_name": "СКИДОС99",
+            }
+        )
+        assert parsed is not None
+        action, name, discount, target_promotion_name, effect_type, trigger_code = parsed
+        assert action == "archive"
+        assert target_promotion_name == "СКИДОС99"
+        assert effect_type is None  # irrelevant for non-create actions
 
     async def test_free_delivery_with_null_discount_is_valid(self) -> None:
         """FREE_DELIVERY has no discount amount — discount=null must NOT be
