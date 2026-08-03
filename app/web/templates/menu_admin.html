@@ -405,6 +405,80 @@ function menuAdmin() {
       }
     },
 
+    startEditCategory(c) {
+      this.editingCategoryId = c.id;
+      this.editCategoryForm = {
+        name: c.name,
+        parent_category: c.parent_name || '',
+        menu_period: c.menu_period,
+        is_active: c.is_active,
+      };
+    },
+
+    async submitEditCategory(categoryId) {
+      try {
+        const payload = { ...this.editCategoryForm };
+        if (!payload.parent_category) delete payload.parent_category;
+        const resp = await fetch(`{{ category_update_form_action_base }}/${categoryId}/apply`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          this.categoryResult = { ok: false, error: `Server error ${resp.status}: ${text.slice(0, 200)}` };
+          return;
+        }
+        const data = await resp.json();
+        if (data.ok) {
+          if (data.categories) this.categories = data.categories;
+          if (data.categories_full) this.categoriesFull = data.categories_full;
+          this.editingCategoryId = null;
+        } else {
+          this.categoryResult = { ok: false, error: 'Rejected: ' + (data.error || 'validation failed') };
+        }
+      } catch (e) {
+        this.categoryResult = { ok: false, error: String(e) };
+      }
+    },
+
+    startEditCategory(c) {
+      this.editingCategoryId = c.id;
+      this.editCategoryForm = {
+        name: c.name,
+        parent_category: c.parent_name || '',
+        menu_period: c.menu_period,
+        is_active: c.is_active,
+      };
+    },
+
+    async submitEditCategory(categoryId) {
+      try {
+        const payload = { ...this.editCategoryForm };
+        if (!payload.parent_category) delete payload.parent_category;
+        const resp = await fetch(`{{ category_update_form_action_base }}/${categoryId}/apply`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          this.categoryResult = { ok: false, error: `Server error ${resp.status}: ${text.slice(0, 200)}` };
+          return;
+        }
+        const data = await resp.json();
+        if (data.ok) {
+          if (data.categories) this.categories = data.categories;
+          if (data.categories_full) this.categoriesFull = data.categories_full;
+          this.editingCategoryId = null;
+        } else {
+          this.categoryResult = { ok: false, error: 'Rejected: ' + (data.error || 'validation failed') };
+        }
+      } catch (e) {
+        this.categoryResult = { ok: false, error: String(e) };
+      }
+    },
+
     async submitCategory() {
       if (!this.categoryForm.name.trim()) return;
       this.categoryBusy = true;
