@@ -52,11 +52,11 @@ class TestMenuServiceAvailability:
     async def test_all_products_available(self) -> None:
         cat_id = uuid4()
         prod_id = uuid4()
-        cat_rows = [_make_row(id=cat_id, name="Бургеры", menu_period="both")]
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
         prod_rows = [
             _make_row(
                 id=prod_id, name="Чизбургер", price_rub=199,
-                menu_period_override=None, description=None, image_url=None, is_active=True,
+                time_period_override=None, description=None, image_url=None, is_active=True,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -74,11 +74,11 @@ class TestMenuServiceAvailability:
     async def test_category_both_period_always_returns_products(self) -> None:
         cat_id = uuid4()
         prod_id = uuid4()
-        cat_rows = [_make_row(id=cat_id, name="Напитки", menu_period="both")]
+        cat_rows = [_make_row(id=cat_id, name="Напитки", time_period="both")]
         prod_rows = [
             _make_row(
                 id=prod_id, name="Вода", price_rub=50,
-                menu_period_override=None, description=None, image_url=None, is_active=True,
+                time_period_override=None, description=None, image_url=None, is_active=True,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -97,11 +97,11 @@ class TestMenuServiceAvailability:
     async def test_product_override_morning(self) -> None:
         cat_id = uuid4()
         prod_id = uuid4()
-        cat_rows = [_make_row(id=cat_id, name="Напитки", menu_period="both")]
+        cat_rows = [_make_row(id=cat_id, name="Напитки", time_period="both")]
         prod_rows = [
             _make_row(
                 id=prod_id, name="Кофе", price_rub=100,
-                menu_period_override="morning", description=None, image_url=None, is_active=True,
+                time_period_override="morning", description=None, image_url=None, is_active=True,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -120,11 +120,11 @@ class TestMenuServiceAvailability:
     async def test_inactive_product_shows_unavailable(self) -> None:
         cat_id = uuid4()
         prod_id = uuid4()
-        cat_rows = [_make_row(id=cat_id, name="Бургеры", menu_period="both")]
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
         prod_rows = [
             _make_row(
                 id=prod_id, name="Старый бургер", price_rub=199,
-                menu_period_override=None, description=None, image_url=None,
+                time_period_override=None, description=None, image_url=None,
                 is_active=False,
             ),
         ]
@@ -143,11 +143,11 @@ class TestMenuServiceAvailability:
     async def test_product_inherits_category_period(self) -> None:
         cat_id = uuid4()
         prod_id = uuid4()
-        cat_rows = [_make_row(id=cat_id, name="Напитки", menu_period="morning")]
+        cat_rows = [_make_row(id=cat_id, name="Напитки", time_period="morning")]
         prod_rows = [
             _make_row(
                 id=prod_id, name="Кофе", price_rub=100,
-                menu_period_override=None, description=None, image_url=None,
+                time_period_override=None, description=None, image_url=None,
                 is_active=True,
             ),
         ]

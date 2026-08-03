@@ -20,12 +20,14 @@ class TestCategory:
         cat = Category(
             id=uuid4(),
             name="Бургеры",
-            menu_period="both",
+            time_period="both",
+            fulfillment_scope="both",
             sort=10,
             is_active=True,
         )
         assert cat.name == "Бургеры"
-        assert cat.menu_period == "both"
+        assert cat.time_period == "both"
+        assert cat.fulfillment_scope == "both"
         assert cat.parent_name is None
 
     def test_with_parent(self) -> None:
@@ -34,22 +36,50 @@ class TestCategory:
             external_id="19",
             name="Морс",
             parent_name="Напитки",
-            menu_period="both",
+            time_period="both",
+            fulfillment_scope="both",
             sort=310,
             is_active=True,
         )
         assert cat.parent_name == "Напитки"
         assert cat.external_id == "19"
 
-    def test_invalid_menu_period(self) -> None:
+    def test_invalid_time_period(self) -> None:
         with pytest.raises(ValueError):
             Category(  # type: ignore[call-arg]
                 id=uuid4(),
                 name="X",
-                menu_period="invalid",  # type: ignore[arg-type]
+                time_period="invalid",  # type: ignore[arg-type]
+                fulfillment_scope="both",
                 sort=0,
                 is_active=True,
             )
+
+    def test_invalid_fulfillment_scope(self) -> None:
+        with pytest.raises(ValueError):
+            Category(  # type: ignore[call-arg]
+                id=uuid4(),
+                name="X",
+                time_period="both",
+                fulfillment_scope="invalid",  # type: ignore[arg-type]
+                sort=0,
+                is_active=True,
+            )
+
+    def test_time_period_and_fulfillment_scope_are_independent(self) -> None:
+        """Regression: menu_period-collision (DECISIONS.md 2026-08-03) — a
+        category restricted by fulfillment method must not lose its time
+        window, and vice versa."""
+        cat = Category(
+            id=uuid4(),
+            name="Шаурма",
+            time_period="both",
+            fulfillment_scope="delivery",
+            sort=0,
+            is_active=True,
+        )
+        assert cat.time_period == "both"
+        assert cat.fulfillment_scope == "delivery"
 
 
 class TestProduct:
@@ -64,7 +94,7 @@ class TestProduct:
             id=uuid4(),
             name="Бургер",
             category_id=cat_id,
-            menu_period_override="morning",
+            time_period_override="morning",
             price_rub=299,
             description="Вкусный бургер",
             image_url="https://example.com/burger.jpg",
@@ -72,7 +102,7 @@ class TestProduct:
         )
         assert p.category_id == cat_id
         assert p.price_rub == 299
-        assert p.menu_period_override == "morning"
+        assert p.time_period_override == "morning"
 
     def test_inactive(self) -> None:
         p = Product(id=uuid4(), name="Скрытый товар", is_active=False)

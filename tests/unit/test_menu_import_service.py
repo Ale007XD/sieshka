@@ -22,7 +22,8 @@ def _cat(external_id: str | None, name: str) -> Category:
         external_id=external_id,
         name=name,
         parent_name=None,
-        menu_period="both",
+        time_period="both",
+        fulfillment_scope="both",
         sort=10,
         is_active=True,
     )
@@ -33,7 +34,7 @@ def _prod(name: str) -> Product:
         id=uuid4(),
         name=name,
         category_id=None,
-        menu_period_override=None,
+        time_period_override=None,
         price_rub=100,
         description=None,
         image_url=None,
