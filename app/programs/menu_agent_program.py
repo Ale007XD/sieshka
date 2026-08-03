@@ -231,8 +231,8 @@ PROGRAM_UPDATE_PRODUCT = Program(
 # ---------------------------------------------------------------------------
 # UPDATE phase — category update. Same 4-step CONVENTION shape as
 # PROGRAM_UPDATE_PRODUCT. Command dict: {category_id: str, name?: str,
-#                parent_category?: str, menu_period?: str, sort?: int,
-#                is_active?: bool}
+#                parent_category?: str, time_period?: str,
+#                fulfillment_scope?: str, sort?: int, is_active?: bool}
 # ---------------------------------------------------------------------------
 
 PROGRAM_UPDATE_CATEGORY = Program(

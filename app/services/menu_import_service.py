@@ -430,7 +430,7 @@ class MenuImportService:
         result = await session.execute(
             text(
                 "SELECT c.id, c.external_id, c.name, p.name AS parent_name, "
-                "c.menu_period, c.sort, c.is_active "
+                "c.time_period, c.fulfillment_scope, c.sort, c.is_active "
                 "FROM categories c "
                 "LEFT JOIN categories p ON p.id = c.parent_category_id"
             )
@@ -442,7 +442,8 @@ class MenuImportService:
                 external_id=row._mapping["external_id"],
                 name=row._mapping["name"],
                 parent_name=row._mapping["parent_name"],
-                menu_period=row._mapping["menu_period"],
+                time_period=row._mapping["time_period"],
+                fulfillment_scope=row._mapping["fulfillment_scope"],
                 sort=row._mapping["sort"],
                 is_active=row._mapping["is_active"],
             )
@@ -451,7 +452,7 @@ class MenuImportService:
 
     async def _load_product_names(self, session: AsyncSession) -> list[Product]:
         result = await session.execute(
-            text("SELECT id, name, category_id, menu_period_override, "
+            text("SELECT id, name, category_id, time_period_override, "
                  "price_rub, description, image_url, is_active FROM products")
         )
         rows = result.fetchall()
@@ -460,7 +461,7 @@ class MenuImportService:
                 id=row._mapping["id"],
                 name=row._mapping["name"],
                 category_id=row._mapping["category_id"],
-                menu_period_override=row._mapping["menu_period_override"],
+                time_period_override=row._mapping["time_period_override"],
                 price_rub=row._mapping["price_rub"],
                 description=row._mapping["description"],
                 image_url=row._mapping["image_url"],

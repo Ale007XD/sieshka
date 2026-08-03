@@ -47,12 +47,12 @@ class MenuService:
         current_period = _current_menu_period()
 
         async with self._session_factory() as session:
-            cat_rows = await self._fetch_categories(session, current_period)
+            cat_rows = await self._fetch_categories(session, current_period, method)
             categories: list[MenuCategory] = []
 
             for cat in cat_rows:
                 cat_id: UUID = cat._mapping["id"]
-                cat_period: str = cat._mapping["menu_period"]
+                cat_period: str = cat._mapping["time_period"]
                 products = await self._fetch_products(
                     session, cat_id, current_period, cat_period
                 )
@@ -70,16 +70,18 @@ class MenuService:
         self,
         session: AsyncSession,
         current_period: Literal["morning", "evening"],
+        method: Literal["delivery", "pickup"],
     ) -> list[Any]:
         result = await session.execute(
             text(
-                "SELECT id, name, menu_period "
+                "SELECT id, name, time_period "
                 "FROM categories "
                 "WHERE is_active = TRUE "
-                "AND (menu_period = 'both' OR menu_period = :period) "
+                "AND (time_period = 'both' OR time_period = :period) "
+                "AND (fulfillment_scope = 'both' OR fulfillment_scope = :method) "
                 "ORDER BY sort"
             ),
-            {"period": current_period},
+            {"period": current_period, "method": method},
         )
         return list(result.fetchall())
 
@@ -92,7 +94,7 @@ class MenuService:
     ) -> list[MenuProductItem]:
         result = await session.execute(
             text(
-                "SELECT id, name, price_rub, menu_period_override, "
+                "SELECT id, name, price_rub, time_period_override, "
                 "  description, image_url, is_active "
                 "FROM products "
                 "WHERE category_id = :category_id "
@@ -106,7 +108,7 @@ class MenuService:
 
         for row in rows:
             effective_period = (
-                row._mapping["menu_period_override"] or category_period
+                row._mapping["time_period_override"] or category_period
             )
             in_window = effective_period in ("both", current_period)
             is_active = row._mapping["is_active"]

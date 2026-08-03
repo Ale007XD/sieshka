@@ -7,7 +7,7 @@
 <!-- Add category -->
 <div class="bg-white rounded-lg shadow p-6 mb-6">
   <h2 class="text-lg font-medium text-gray-900 mb-3">Add category</h2>
-  <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+  <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
     <input x-model="categoryForm.name" type="text" placeholder="Name *"
            class="border border-gray-300 rounded-md shadow-sm sm:text-sm p-2">
     <select x-model="categoryForm.parent_category"
@@ -17,11 +17,17 @@
       <option value="{{ c.name }}">{{ c.name }}</option>
       {% endfor %}
     </select>
-    <select x-model="categoryForm.menu_period"
+    <select x-model="categoryForm.time_period" title="Time of day"
             class="border border-gray-300 rounded-md shadow-sm sm:text-sm p-2">
-      <option value="both">both</option>
-      <option value="delivery">delivery</option>
-      <option value="pickup">pickup</option>
+      <option value="both">any time</option>
+      <option value="morning">morning</option>
+      <option value="evening">evening</option>
+    </select>
+    <select x-model="categoryForm.fulfillment_scope" title="Delivery / pickup"
+            class="border border-gray-300 rounded-md shadow-sm sm:text-sm p-2">
+      <option value="both">delivery + pickup</option>
+      <option value="delivery">delivery only</option>
+      <option value="pickup">pickup only</option>
     </select>
     <button @click="submitCategory()" :disabled="categoryBusy"
             class="inline-flex items-center justify-center px-4 py-2 border border-transparent
@@ -54,7 +60,8 @@
         <tr>
           <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
           <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parent</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Fulfillment</th>
           <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Active</th>
           <th class="px-4 py-2"></th>
         </tr>
@@ -68,7 +75,8 @@
           <tr x-show="editingCategoryId !== c.id">
             <td class="px-4 py-3 text-sm text-gray-900" x-text="c.name"></td>
             <td class="px-4 py-3 text-sm text-gray-600" x-text="c.parent_name || '—'"></td>
-            <td class="px-4 py-3 text-sm text-gray-600" x-text="c.menu_period"></td>
+            <td class="px-4 py-3 text-sm text-gray-600" x-text="c.time_period"></td>
+            <td class="px-4 py-3 text-sm text-gray-600" x-text="c.fulfillment_scope"></td>
             <td class="px-4 py-3 text-sm">
               <span x-show="c.is_active" class="text-green-600">yes</span>
               <span x-show="!c.is_active" class="text-gray-400">no</span>
@@ -88,10 +96,17 @@
               </select>
             </td>
             <td class="px-4 py-3">
-              <select x-model="editCategoryForm.menu_period" class="w-full border border-gray-300 rounded-md text-sm p-1">
-                <option value="both">both</option>
-                <option value="delivery">delivery</option>
-                <option value="pickup">pickup</option>
+              <select x-model="editCategoryForm.time_period" title="Time of day" class="w-full border border-gray-300 rounded-md text-sm p-1">
+                <option value="both">any time</option>
+                <option value="morning">morning</option>
+                <option value="evening">evening</option>
+              </select>
+            </td>
+            <td class="px-4 py-3">
+              <select x-model="editCategoryForm.fulfillment_scope" title="Delivery / pickup" class="w-full border border-gray-300 rounded-md text-sm p-1">
+                <option value="both">delivery + pickup</option>
+                <option value="delivery">delivery only</option>
+                <option value="pickup">pickup only</option>
               </select>
             </td>
             <td class="px-4 py-3">
@@ -335,9 +350,9 @@ function menuAdmin() {
     categoriesFull: {{ categories_full | tojson }},
     categoriesOpen: false,
     editingCategoryId: null,
-    editCategoryForm: { name: '', parent_category: '', menu_period: 'both', is_active: true },
+    editCategoryForm: { name: '', parent_category: '', time_period: 'both', fulfillment_scope: 'both', is_active: true },
 
-    categoryForm: { name: '', parent_category: '', menu_period: 'both' },
+    categoryForm: { name: '', parent_category: '', time_period: 'both', fulfillment_scope: 'both' },
     categoryBusy: false,
     categoryResult: null,
 
@@ -410,44 +425,8 @@ function menuAdmin() {
       this.editCategoryForm = {
         name: c.name,
         parent_category: c.parent_name || '',
-        menu_period: c.menu_period,
-        is_active: c.is_active,
-      };
-    },
-
-    async submitEditCategory(categoryId) {
-      try {
-        const payload = { ...this.editCategoryForm };
-        if (!payload.parent_category) delete payload.parent_category;
-        const resp = await fetch(`{{ category_update_form_action_base }}/${categoryId}/apply`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const text = await resp.text();
-          this.categoryResult = { ok: false, error: `Server error ${resp.status}: ${text.slice(0, 200)}` };
-          return;
-        }
-        const data = await resp.json();
-        if (data.ok) {
-          if (data.categories) this.categories = data.categories;
-          if (data.categories_full) this.categoriesFull = data.categories_full;
-          this.editingCategoryId = null;
-        } else {
-          this.categoryResult = { ok: false, error: 'Rejected: ' + (data.error || 'validation failed') };
-        }
-      } catch (e) {
-        this.categoryResult = { ok: false, error: String(e) };
-      }
-    },
-
-    startEditCategory(c) {
-      this.editingCategoryId = c.id;
-      this.editCategoryForm = {
-        name: c.name,
-        parent_category: c.parent_name || '',
-        menu_period: c.menu_period,
+        time_period: c.time_period,
+        fulfillment_scope: c.fulfillment_scope,
         is_active: c.is_active,
       };
     },

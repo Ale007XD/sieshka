@@ -315,8 +315,11 @@ class MenuAgent:
 
         The apply command schema written to the categories table is:
           {name: str, parent_category?: str,
-           menu_period?: "both"|"delivery"|"pickup", sort?: int}
-        (`parent_category` is resolved to a category row by name at write time.)
+           time_period?: "both"|"morning"|"evening",
+           fulfillment_scope?: "both"|"delivery"|"pickup", sort?: int}
+        (`parent_category` is resolved to a category row by name at write time.
+        time_period and fulfillment_scope are independent axes — see
+        DECISIONS.md 2026-08-03 menu_period-collision.)
 
         Commit/rollback follows the same convention as apply_menu: SUCCESS
         commits; a FAILED trace rolls back (CONSTRAINTS.md "Tool-authoring:
@@ -393,8 +396,10 @@ class MenuAgent:
         """Update an existing category via the governed update Program.
 
         Command schema: {category_id: str (UUID), name?: str,
-                         parent_category?: str, menu_period?: str, sort?: int,
-                         is_active?: bool}
+                         parent_category?: str,
+                         time_period?: "both"|"morning"|"evening",
+                         fulfillment_scope?: "both"|"delivery"|"pickup",
+                         sort?: int, is_active?: bool}
         Only non-None fields are written; absent fields are left unchanged.
         Commit/rollback at-caller convention, same as apply_menu/apply_category.
         """

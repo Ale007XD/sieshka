@@ -279,8 +279,14 @@ async def report_invalid_command(reason: str, **kwargs: object) -> str:
 
 def _required_apply_category_fields(
     command: Any,
-) -> tuple[str, str | None, str, int] | None:
-    """Extract (name, parent_category|None, menu_period, sort) if well-formed."""
+) -> tuple[str, str | None, str, str, int] | None:
+    """Extract (name, parent_category|None, time_period, fulfillment_scope, sort)
+    if well-formed.
+
+    time_period and fulfillment_scope are two independent axes (see
+    DECISIONS.md 2026-08-03 menu_period-collision) — do not merge them back
+    into a single field or vocabulary.
+    """
     if not isinstance(command, dict):
         return None
     name = command.get("name")
@@ -291,8 +297,11 @@ def _required_apply_category_fields(
         not isinstance(parent_category, str) or not parent_category.strip()
     ):
         return None
-    menu_period = command.get("menu_period", "both")
-    if menu_period not in ("both", "delivery", "pickup"):
+    time_period = command.get("time_period", "both")
+    if time_period not in ("both", "morning", "evening"):
+        return None
+    fulfillment_scope = command.get("fulfillment_scope", "both")
+    if fulfillment_scope not in ("both", "delivery", "pickup"):
         return None
     sort = command.get("sort", 0)
     if isinstance(sort, bool) or not isinstance(sort, int):
@@ -300,7 +309,8 @@ def _required_apply_category_fields(
     return (
         name.strip(),
         parent_category.strip() if parent_category else None,
-        menu_period,
+        time_period,
+        fulfillment_scope,
         sort,
     )
 
@@ -328,7 +338,7 @@ async def validate_apply_category_command(
     parsed = _required_apply_category_fields(command)
     if parsed is None:
         return _reject("malformed command")
-    name, parent_category, _menu_period, _sort = parsed
+    name, parent_category, _time_period, _fulfillment_scope, _sort = parsed
 
     existing = await session.execute(
         text("SELECT id FROM categories WHERE lower(name) = lower(:name)"),
@@ -375,7 +385,7 @@ async def apply_category_command(
     parsed = _required_apply_category_fields(command)
     if parsed is None:
         raise ValueError("apply_category_command: malformed command")
-    name, parent_category, menu_period, sort = parsed
+    name, parent_category, time_period, fulfillment_scope, sort = parsed
 
     parent_id: UUID | None = None
     if parent_category is not None:
@@ -409,11 +419,18 @@ async def apply_category_command(
 
     result = await session.execute(
         text(
-            "INSERT INTO categories (name, parent_category_id, menu_period, sort, is_active) "
-            "VALUES (:name, :parent_id, :menu_period, :sort, TRUE) "
+            "INSERT INTO categories "
+            "(name, parent_category_id, time_period, fulfillment_scope, sort, is_active) "
+            "VALUES (:name, :parent_id, :time_period, :fulfillment_scope, :sort, TRUE) "
             "RETURNING id"
         ),
-        {"name": name, "parent_id": parent_id, "menu_period": menu_period, "sort": sort},
+        {
+            "name": name,
+            "parent_id": parent_id,
+            "time_period": time_period,
+            "fulfillment_scope": fulfillment_scope,
+            "sort": sort,
+        },
     )
     row = result.fetchone()
     assert row is not None
@@ -643,11 +660,17 @@ async def report_invalid_update_product_command(reason: str, **kwargs: object) -
 
 def _required_update_category_fields(
     command: Any,
-) -> tuple[UUID, str | None, str | None, str | None, int | None, bool | None] | None:
-    """Extract (category_id, name?, parent_category?, menu_period?, sort?, is_active?).
+) -> tuple[
+    UUID, str | None, str | None, str | None, str | None, int | None, bool | None
+] | None:
+    """Extract (category_id, name?, parent_category?, time_period?,
+    fulfillment_scope?, sort?, is_active?).
 
     Only category_id is mandatory. Absent (None) fields are left unchanged at
     write time via COALESCE — same convention as _required_update_product_fields.
+    time_period and fulfillment_scope are two independent axes (see
+    DECISIONS.md 2026-08-03 menu_period-collision), each validated against its
+    own vocabulary — do not merge them back into one field.
     """
     if not isinstance(command, dict):
         return None
@@ -669,8 +692,12 @@ def _required_update_category_fields(
     ):
         return None
 
-    menu_period = command.get("menu_period")
-    if menu_period is not None and menu_period not in ("both", "delivery", "pickup"):
+    time_period = command.get("time_period")
+    if time_period is not None and time_period not in ("both", "morning", "evening"):
+        return None
+
+    fulfillment_scope = command.get("fulfillment_scope")
+    if fulfillment_scope is not None and fulfillment_scope not in ("both", "delivery", "pickup"):
         return None
 
     sort = command.get("sort")
@@ -685,7 +712,8 @@ def _required_update_category_fields(
         category_id,
         name.strip() if name else None,
         parent_category.strip() if parent_category else None,
-        menu_period,
+        time_period,
+        fulfillment_scope,
         sort,
         is_active,
     )
@@ -714,7 +742,7 @@ async def validate_update_category_command(
     parsed = _required_update_category_fields(command)
     if parsed is None:
         return _reject("malformed command")
-    category_id, name, parent_category, _menu_period, _sort, _is_active = parsed
+    category_id, name, parent_category, _time_period, _fulfillment_scope, _sort, _is_active = parsed
 
     existing = await session.execute(
         text("SELECT id FROM categories WHERE id = :id"),
@@ -777,7 +805,7 @@ async def apply_update_category_command(
     parsed = _required_update_category_fields(command)
     if parsed is None:
         raise ValueError("apply_update_category_command: malformed command")
-    category_id, name, parent_category, menu_period, sort, is_active = parsed
+    category_id, name, parent_category, time_period, fulfillment_scope, sort, is_active = parsed
 
     existing = await session.execute(
         text("SELECT id FROM categories WHERE id = :id FOR UPDATE"),
@@ -827,7 +855,8 @@ async def apply_update_category_command(
             "UPDATE categories SET "
             "name = COALESCE(:name, name), "
             "parent_category_id = COALESCE(:parent_id, parent_category_id), "
-            "menu_period = COALESCE(:menu_period, menu_period), "
+            "time_period = COALESCE(:time_period, time_period), "
+            "fulfillment_scope = COALESCE(:fulfillment_scope, fulfillment_scope), "
             "sort = COALESCE(:sort, sort), "
             "is_active = COALESCE(:is_active, is_active) "
             "WHERE id = :id"
@@ -836,7 +865,8 @@ async def apply_update_category_command(
             "id": category_id,
             "name": name,
             "parent_id": parent_id,
-            "menu_period": menu_period,
+            "time_period": time_period,
+            "fulfillment_scope": fulfillment_scope,
             "sort": sort,
             "is_active": is_active,
         },

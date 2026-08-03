@@ -11,7 +11,8 @@ class Category(BaseModel):
     external_id: str | None = None
     name: str
     parent_name: str | None = None
-    menu_period: Literal["morning", "evening", "both"]
+    time_period: Literal["morning", "evening", "both"]
+    fulfillment_scope: Literal["delivery", "pickup", "both"]
     sort: int
     is_active: bool
 
@@ -20,7 +21,7 @@ class Product(BaseModel):
     id: UUID
     name: str
     category_id: UUID | None = None
-    menu_period_override: Literal["morning", "evening", "both"] | None = None
+    time_period_override: Literal["morning", "evening", "both"] | None = None
     price_rub: int | None = None
     description: str | None = None
     image_url: str | None = None

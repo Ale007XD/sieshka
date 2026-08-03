@@ -145,7 +145,7 @@ async def _fetch_categories_full(
     async with session_factory() as session:
         rows = await session.execute(
             sql_text(
-                "SELECT c.id, c.name, c.menu_period, c.sort, c.is_active, "
+                "SELECT c.id, c.name, c.time_period, c.fulfillment_scope, c.sort, c.is_active, "
                 "p.name AS parent_name "
                 "FROM categories c LEFT JOIN categories p ON c.parent_category_id = p.id "
                 "ORDER BY c.sort, c.name"
@@ -156,7 +156,8 @@ async def _fetch_categories_full(
                 "id": str(r._mapping["id"]),
                 "name": r._mapping["name"],
                 "parent_name": r._mapping["parent_name"],
-                "menu_period": r._mapping["menu_period"],
+                "time_period": r._mapping["time_period"],
+                "fulfillment_scope": r._mapping["fulfillment_scope"],
                 "sort": r._mapping["sort"],
                 "is_active": r._mapping["is_active"],
             }
