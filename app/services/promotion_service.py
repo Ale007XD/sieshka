@@ -16,6 +16,8 @@ class PromotionRead(BaseModel):
     name: str
     discount: float
     state: PromotionState
+    effect_type: str
+    trigger_code: str | None
 
 
 class PromotionService:
@@ -29,7 +31,7 @@ class PromotionService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, name, discount, state "
+                    "SELECT id, name, discount, state, effect_type, trigger_code "
                     "FROM promotions ORDER BY created_at DESC"
                 ),
             )
@@ -40,6 +42,8 @@ class PromotionService:
                     name=row._mapping["name"],
                     discount=float(row._mapping["discount"]),
                     state=PromotionState(row._mapping["state"]),
+                    effect_type=row._mapping["effect_type"],
+                    trigger_code=row._mapping["trigger_code"],
                 )
                 for row in rows
             ]

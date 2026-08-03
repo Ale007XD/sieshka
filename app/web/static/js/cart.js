@@ -18,6 +18,12 @@ const CartManager = (function () {
   const upsellSuggestions = [];
   let globalDeliveryFee = 0;
   let globalDeliveryFeeLoaded = false;
+  // Server-validated promo effect from POST /api/promo/check. null = none
+  // applied (или invalid, или input изменён после последней проверки —
+  // см. wirePromoWidget()). Единственный источник правды для скидки на
+  // checkout: считается заново из subtotal/isPickup при updateCheckoutTotal(),
+  // ничего не пересчитывается локально из discount%/rub без сервера.
+  let appliedPromo = null; // {code, discount_rub, free_delivery}
   const zoneDeliveryFeeCache = {};
   const toastQueue = [];
   let activeToasts = [];
@@ -675,19 +681,35 @@ const CartManager = (function () {
     const subtotalEl = document.getElementById('checkoutSubtotal');
     const deliveryEl = document.getElementById('checkoutDeliveryFee');
     const grandTotalEl = document.getElementById('checkoutGrandTotal');
+    const discountRowEl = document.getElementById('discountRow');
+    const discountEl = document.getElementById('checkoutDiscount');
+    const promoCodeEl = document.getElementById('checkoutPromoCode');
 
     if (subtotalEl || deliveryEl || grandTotalEl) {
       const items = loadCart();
       const subtotal = getTotalPrice(items);
       const baseDeliveryFee = await getDeliveryFee();
-      const effectiveFee = isPickup ? 0 : baseDeliveryFee;
-      const grandTotal = subtotal + effectiveFee;
+      let effectiveFee = isPickup ? 0 : baseDeliveryFee;
+
+      const discountRub = appliedPromo ? Math.min(appliedPromo.discount_rub, subtotal) : 0;
+      if (appliedPromo && appliedPromo.free_delivery) effectiveFee = 0;
+      const grandTotal = Math.max(0, subtotal - discountRub) + effectiveFee;
 
       if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
       if (deliveryEl) deliveryEl.textContent = isPickup
         ? '0 ₽ (самовывоз)'
         : formatPrice(effectiveFee) + ' (фиксированная)';
       if (grandTotalEl) grandTotalEl.textContent = formatPrice(grandTotal);
+
+      if (discountRowEl && discountEl) {
+        if (appliedPromo && (discountRub > 0 || appliedPromo.free_delivery)) {
+          discountRowEl.classList.remove('d-none');
+          discountEl.textContent = discountRub > 0 ? `−${formatPrice(discountRub)}` : 'бесплатная доставка';
+          if (promoCodeEl) promoCodeEl.textContent = appliedPromo.code;
+        } else {
+          discountRowEl.classList.add('d-none');
+        }
+      }
     }
   }
 
@@ -1082,6 +1104,10 @@ const CartManager = (function () {
       // native form submission (no method/action on #checkout-form → GET
       // reload of the current page) instead of ever calling /api/orders.
       setupCheckoutForm();
+      // Same dead-code trap as setupCheckoutForm() above (2026-08-01 fix) —
+      // wirePromoWidget() lived inside initCheckoutPage(), never called from
+      // anywhere. No-ops on pages without #promo-apply-btn.
+      wirePromoWidget();
     },
     addItem: addItem,
     updateQty: updateQty,
@@ -1093,6 +1119,8 @@ const CartManager = (function () {
     getItems: getItems,
     getMaxLeadTime: getMaxLeadTime,
     loadCart: loadCart,
+    getTotalPrice: getTotalPrice,
+    setAppliedPromo: function (promo) { appliedPromo = promo; },
     updateAllUI: updateAllUI,
     updateNavbarCart: updateNavbarCart,
     updateProductControls: updateProductControls,
@@ -1195,6 +1223,80 @@ function initCheckoutPage() {
   CartManager.updateCheckoutTotal(_pu && _pu.checked);
   CartManager.renderRecentlyDeletedOnCheckout();
   setupCheckoutForm();
+}
+
+function wirePromoWidget() {
+  const input = document.getElementById('promo-code-input');
+  const applyBtn = document.getElementById('promo-apply-btn');
+  const resultEl = document.getElementById('promo-result');
+  const hiddenCodeEl = document.getElementById('f-promo-code');
+  if (!input || !applyBtn || !resultEl || !hiddenCodeEl) return;
+
+  const isPickupNow = () => {
+    const el = document.querySelector('input[name="delivery_mode"]:checked');
+    return el ? el.value === 'pickup' : false;
+  };
+
+  const showResult = (text, ok) => {
+    resultEl.textContent = text;
+    resultEl.classList.remove('d-none', 'text-success', 'text-danger');
+    resultEl.classList.add(ok ? 'text-success' : 'text-danger');
+  };
+
+  const clearAppliedPromo = () => {
+    CartManager.setAppliedPromo(null);
+    hiddenCodeEl.value = '';
+    CartManager.updateCheckoutTotal(isPickupNow());
+  };
+
+  // Код в поле изменён после последней проверки — старая скидка больше не
+  // валидна для нового текста, снимаем до повторного нажатия "Применить".
+  input.addEventListener('input', clearAppliedPromo);
+
+  applyBtn.addEventListener('click', async () => {
+    const code = input.value.trim();
+    if (!code) {
+      showResult('Введите код', false);
+      return;
+    }
+
+    const items = CartManager.loadCart();
+    const subtotal = CartManager.getTotalPrice(items);
+
+    applyBtn.disabled = true;
+    const originalText = applyBtn.innerHTML;
+    applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+      const response = await fetch('/api/promo/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code, subtotal: subtotal }),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.valid) {
+        CartManager.setAppliedPromo({
+          code: code,
+          discount_rub: data.discount_rub || 0,
+          free_delivery: !!data.free_delivery,
+        });
+        hiddenCodeEl.value = code;
+        showResult('Промокод применён', true);
+      } else {
+        clearAppliedPromo();
+        showResult('Промокод не найден или недействителен', false);
+      }
+    } catch (error) {
+      console.error('Promo check error:', error);
+      clearAppliedPromo();
+      showResult('Ошибка проверки промокода. Попробуйте позже.', false);
+    } finally {
+      applyBtn.disabled = false;
+      applyBtn.innerHTML = originalText;
+      await CartManager.updateCheckoutTotal(isPickupNow());
+    }
+  });
 }
 
 function generateIdempotencyKey() {
@@ -1326,6 +1428,7 @@ const errorDiv = document.getElementById('checkout-error');
         qty: item.qty
       })),
       idempotency_key: generateIdempotencyKey(),
+      promo_code: document.getElementById('f-promo-code')?.value || null,
       client_max_uid: (() => {
         const uid = new URLSearchParams(window.location.search).get('max_uid');
         return uid ? (parseInt(uid, 10) || null) : null;
