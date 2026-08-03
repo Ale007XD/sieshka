@@ -285,6 +285,18 @@ function renderMenu(data) {
         return;
     }
 
+    const menuIds = new Set(data.categories.map(c => String(c.category_id)));
+
+    // Category sections that existed from a previous fetch (different method)
+    // but are absent from this one — the whole category is out of scope for
+    // the current fulfillment method, hide it entirely (not just its products).
+    menuContainer.querySelectorAll('[id^="category-"]').forEach(section => {
+        const sid = section.id.replace('category-', '');
+        if (!menuIds.has(sid)) {
+            section.style.display = 'none';
+        }
+    });
+
     data.categories.forEach(category => {
         let hasVisibleProducts = false;
 
@@ -295,8 +307,19 @@ function renderMenu(data) {
             }
         });
 
+        // Category appearing for the first time on this method (e.g. a
+        // pickup-only category not present in the initial delivery load) —
+        // build its section now instead of silently dropping it.
+        let categorySection = document.getElementById(`category-${category.category_id}`);
+        if (!categorySection) {
+            categorySection = createCategoryElement(category);
+            menuContainer.appendChild(categorySection);
+            hasVisibleProducts = category.products.some(
+                p => p.available || p.cta_type === 'preorder'
+            );
+        }
+
         // Hide/show category based on visible products AND current category filter
-        const categorySection = document.getElementById(`category-${category.category_id}`);
         if (categorySection) {
             const activeCategoryBtn = document.querySelector('.category-btn.active');
             const activeCategoryId = activeCategoryBtn ? activeCategoryBtn.dataset.categoryId : 'all';
@@ -316,10 +339,8 @@ function renderMenu(data) {
 function populateCategoryButtons(categories) {
     const container = document.getElementById('categoryButtons');
     if (!container) return;
-    // Если уже есть кнопки — не дублируем
-    if (container.querySelector('.category-btn')) return;
-    
-    // Привязываем обработчик к существующей кнопке "Все меню"
+
+    // Привязываем обработчик к существующей кнопке "Все меню" (один раз)
     const allBtn = document.querySelector('.category-btn[data-category-id="all"]');
     if (allBtn && !allBtn._bound) {
         allBtn._bound = true;
@@ -332,7 +353,14 @@ function populateCategoryButtons(categories) {
     const activeCategoryBtn = document.querySelector('.category-btn.active');
     const initialActiveId = activeCategoryBtn ? activeCategoryBtn.dataset.categoryId : 'all';
 
+    const menuIds = new Set(categories.map(c => String(c.category_id)));
+
+    // Категория, которой не было в предыдущей загрузке (например, категория
+    // доступна только на самовывозе) — кнопки для неё ещё нет, создаём.
     categories.forEach(cat => {
+        if (container.querySelector(`.category-btn[data-category-id="${cat.category_id}"]`)) {
+            return;
+        }
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm rounded-pill category-btn';
         btn.dataset.categoryId = cat.category_id;
@@ -346,6 +374,14 @@ function populateCategoryButtons(categories) {
             filterByCategory(cat.category_id);
         });
         container.appendChild(btn);
+    });
+
+    // Категория, которая была в предыдущей загрузке, но выпала из этой
+    // (метод получения сменился) — прячем её кнопку, не удаляя из DOM.
+    container.querySelectorAll('.category-btn').forEach(btn => {
+        const catId = btn.dataset.categoryId;
+        if (catId === 'all') return;
+        btn.style.display = menuIds.has(String(catId)) ? '' : 'none';
     });
 }
 
