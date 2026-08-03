@@ -93,9 +93,20 @@ async def validate_promotion_command(
     if action == "create":
         if not isinstance(data.get("name"), str) or not data["name"].strip():
             return _reject("action=create requires a non-empty 'name'")
+        effect_type = data.get("effect_type", "PERCENT_DISCOUNT")
+        if effect_type not in ("PERCENT_DISCOUNT", "FIXED_AMOUNT", "FREE_DELIVERY"):
+            return _reject(f"unknown 'effect_type' {effect_type!r}")
         discount = data.get("discount")
-        if isinstance(discount, bool) or not isinstance(discount, (int, float)):
-            return _reject("action=create requires a numeric 'discount'")
+        if effect_type in ("PERCENT_DISCOUNT", "FIXED_AMOUNT"):
+            if isinstance(discount, bool) or not isinstance(discount, (int, float)):
+                return _reject(
+                    f"action=create with effect_type={effect_type!r} requires a numeric 'discount'"
+                )
+        trigger_code = data.get("trigger_code")
+        if trigger_code is not None and (
+            not isinstance(trigger_code, str) or not trigger_code.strip()
+        ):
+            return _reject("'trigger_code' must be a non-empty string or null")
     else:
         target = data.get("target_promotion_name")
         if not isinstance(target, str) or not target.strip():
@@ -276,22 +287,47 @@ async def apply_promotion_command(
     action, name, discount, target_promotion_name, effect_type, trigger_code = parsed
 
     if action == "create":
-        assert name is not None and discount is not None
-        if discount < 0 or discount > 100:
-            raise ValueError(f"discount out of range at write time: {discount!r}")
+        assert name is not None
+        if effect_type == "PERCENT_DISCOUNT":
+            if discount is None or discount < 0 or discount > 100:
+                raise ValueError(f"discount out of range at write time: {discount!r}")
+        elif effect_type == "FIXED_AMOUNT":
+            if discount is None or discount <= 0:
+                raise ValueError(f"fixed-amount discount invalid at write time: {discount!r}")
+        # FREE_DELIVERY: discount is None per _required_apply_fields — stored as 0,
+        # the `discount` column is NOT NULL (migrations/003_promotions.sql) and is
+        # simply unused (not read) for this effect_type by resolve_promo_effect.
+        discount_to_store = discount if discount is not None else 0.0
+
         existing = await session.execute(
             text("SELECT id FROM promotions WHERE lower(name) = lower(:name) FOR UPDATE"),
             {"name": name},
         )
         if existing.fetchall():
             raise ValueError(f"promotion name already in use at write time: {name!r}")
+        if trigger_code is not None:
+            dupe_code = await session.execute(
+                text(
+                    "SELECT id FROM promotions WHERE lower(trigger_code) = lower(:code) "
+                    "FOR UPDATE"
+                ),
+                {"code": trigger_code},
+            )
+            if dupe_code.fetchall():
+                raise ValueError(f"trigger_code already in use at write time: {trigger_code!r}")
 
         result = await session.execute(
             text(
-                "INSERT INTO promotions (name, discount, state) "
-                "VALUES (:name, :discount, 'CREATED') RETURNING id"
+                "INSERT INTO promotions (name, discount, state, effect_type, trigger_code) "
+                "VALUES (:name, :discount, 'CREATED', :effect_type, :trigger_code) "
+                "RETURNING id"
             ),
-            {"name": name, "discount": discount},
+            {
+                "name": name,
+                "discount": discount_to_store,
+                "effect_type": effect_type,
+                "trigger_code": trigger_code,
+            },
         )
         row = result.fetchone()
         assert row is not None

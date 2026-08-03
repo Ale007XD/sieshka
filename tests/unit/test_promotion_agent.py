@@ -164,6 +164,47 @@ class TestValidatePromotionCommand:
         )
         assert result == 0
 
+    async def test_free_delivery_with_null_discount_is_valid(self) -> None:
+        """FREE_DELIVERY has no discount amount — discount=null must NOT be
+        rejected for this effect_type (2026-08-03 regression: the check used
+        to require a numeric discount unconditionally, before effect_type
+        was taught to the collect-phase LLM prompt/validator at all)."""
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "Бесплатная доставка", '
+            '"effect_type": "FREE_DELIVERY", "discount": null, '
+            '"trigger_code": "ДОСТАВКА0", "target_promotion_name": null}'
+        )
+        assert result == 1
+
+    async def test_fixed_amount_requires_numeric_discount(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "Скидос99", '
+            '"effect_type": "FIXED_AMOUNT", "discount": null, '
+            '"trigger_code": "СКИДОС99", "target_promotion_name": null}'
+        )
+        assert result == 0
+
+    async def test_unknown_effect_type_rejected(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "X", "effect_type": "BOGUS", '
+            '"discount": 10, "target_promotion_name": null}'
+        )
+        assert result == 0
+
+    async def test_effect_type_defaults_to_percent_discount(self) -> None:
+        """Omitting effect_type entirely (legacy-shaped command) must still
+        validate — default is PERCENT_DISCOUNT, same default as
+        _required_apply_fields in the apply phase."""
+        result = await validate_promotion_command(_VALID_PROMOTION_COMMAND_JSON)
+        assert result == 1
+
+    async def test_trigger_code_must_be_non_empty_string_or_null(self) -> None:
+        result = await validate_promotion_command(
+            '{"action": "create", "name": "X", "discount": 10, '
+            '"trigger_code": "   ", "target_promotion_name": null}'
+        )
+        assert result == 0
+
 
 class TestCollectPromotionCommand:
     async def test_passthrough(self) -> None:

@@ -301,11 +301,103 @@ class TestPromotionAgentApplyPhase:
         await session.commit()
 
         res = await session.execute(
-            text("SELECT name, discount, state FROM promotions WHERE lower(name) = 'весенняя'")
+            text(
+                "SELECT name, discount, state, effect_type, trigger_code "
+                "FROM promotions WHERE lower(name) = 'весенняя'"
+            )
         )
         row = res.one()
         assert float(row._mapping["discount"]) == 15.0
         assert row._mapping["state"] == "CREATED"
+        # effect_type defaults to PERCENT_DISCOUNT when the command omits it
+        # (matches _required_apply_fields' default); trigger_code stays NULL
+        # when not supplied — promo is name-only, not customer-redeemable.
+        assert row._mapping["effect_type"] == "PERCENT_DISCOUNT"
+        assert row._mapping["trigger_code"] is None
+
+    async def test_apply_creates_fixed_amount_promotion_with_trigger_code(
+        self, session: AsyncSession, nano_store_path: str,
+    ) -> None:
+        """Regression test: apply_promotion_command's create-branch INSERT used
+        to omit effect_type/trigger_code entirely — every promotion silently
+        landed as PERCENT_DISCOUNT with trigger_code=NULL regardless of what
+        was validated, and checkout's resolve_promo_effect (matches on
+        trigger_code) could never find it (2026-08-03 incident)."""
+        command = {
+            "action": "create", "name": "Скидос99", "effect_type": "FIXED_AMOUNT",
+            "discount": 99, "trigger_code": "СКИДОС99", "target_promotion_name": None,
+        }
+
+        executor = GovernedToolExecutor(policy=PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT)
+        vm = _build_apply_vm(session, executor, nano_store_path)
+        trace: Trace = await vm.run(PROGRAM_APPLY_PROMOTION, context={"command": command})
+        assert trace.status == TraceStatus.SUCCESS
+
+        await session.commit()
+        res = await session.execute(
+            text(
+                "SELECT discount, effect_type, trigger_code "
+                "FROM promotions WHERE lower(name) = 'скидос99'"
+            )
+        )
+        row = res.one()
+        assert float(row._mapping["discount"]) == 99.0
+        assert row._mapping["effect_type"] == "FIXED_AMOUNT"
+        assert row._mapping["trigger_code"] == "СКИДОС99"
+
+        # And it must actually be findable by the checkout-time lookup this
+        # promo exists to serve — the exact query resolve_promo_effect runs.
+        lookup = await session.execute(
+            text(
+                "SELECT id FROM promotions "
+                "WHERE lower(trigger_code) = lower(:code) AND state = 'ACTIVE'"
+            ),
+            {"code": "скидос99"},
+        )
+        # state is CREATED, not ACTIVE, right after create — 0 rows expected
+        # here; this asserts the column is queryable/matchable at all, not
+        # that it's redeemable pre-activation.
+        assert lookup.fetchall() == []
+        await session.execute(
+            text("UPDATE promotions SET state = 'ACTIVE' WHERE lower(name) = 'скидос99'")
+        )
+        await session.commit()
+        lookup_active = await session.execute(
+            text(
+                "SELECT id FROM promotions "
+                "WHERE lower(trigger_code) = lower(:code) AND state = 'ACTIVE'"
+            ),
+            {"code": "скидос99"},
+        )
+        assert len(lookup_active.fetchall()) == 1
+
+    async def test_apply_creates_free_delivery_promotion(
+        self, session: AsyncSession, nano_store_path: str,
+    ) -> None:
+        """effect_type=FREE_DELIVERY has discount=None per _required_apply_fields
+        (ignored by resolve_promo_effect for this branch) — must not violate
+        the NOT NULL discount column (migrations/003_promotions.sql)."""
+        command = {
+            "action": "create", "name": "Бесплатная доставка",
+            "effect_type": "FREE_DELIVERY", "discount": None,
+            "trigger_code": "ДОСТАВКА0", "target_promotion_name": None,
+        }
+
+        executor = GovernedToolExecutor(policy=PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT)
+        vm = _build_apply_vm(session, executor, nano_store_path)
+        trace: Trace = await vm.run(PROGRAM_APPLY_PROMOTION, context={"command": command})
+        assert trace.status == TraceStatus.SUCCESS
+
+        await session.commit()
+        res = await session.execute(
+            text(
+                "SELECT discount, effect_type, trigger_code "
+                "FROM promotions WHERE lower(name) = 'бесплатная доставка'"
+            )
+        )
+        row = res.one()
+        assert row._mapping["effect_type"] == "FREE_DELIVERY"
+        assert row._mapping["trigger_code"] == "ДОСТАВКА0"
 
     async def test_apply_transitions_promotion_state_in_postgres(
         self, session: AsyncSession, nano_store_path: str,
