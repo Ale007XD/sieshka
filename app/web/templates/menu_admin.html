@@ -59,51 +59,51 @@
           <th class="px-4 py-2"></th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-200">
-        <template x-for="c in categoriesFull" :key="c.id">
-          <template x-if="editingCategoryId !== c.id">
-            <tr>
-              <td class="px-4 py-3 text-sm text-gray-900" x-text="c.name"></td>
-              <td class="px-4 py-3 text-sm text-gray-600" x-text="c.parent_name || '—'"></td>
-              <td class="px-4 py-3 text-sm text-gray-600" x-text="c.menu_period"></td>
-              <td class="px-4 py-3 text-sm">
-                <span x-show="c.is_active" class="text-green-600">yes</span>
-                <span x-show="!c.is_active" class="text-gray-400">no</span>
-              </td>
-              <td class="px-4 py-3 text-right">
-                <button @click="startEditCategory(c)" class="text-sm text-indigo-600 hover:text-indigo-800">Edit</button>
-              </td>
-            </tr>
-          </template>
-          <template x-if="editingCategoryId === c.id">
-            <tr class="bg-indigo-50">
-              <td class="px-4 py-3"><input x-model="editCategoryForm.name" type="text" class="w-full border border-gray-300 rounded-md text-sm p-1"></td>
-              <td class="px-4 py-3">
-                <select x-model="editCategoryForm.parent_category" class="w-full border border-gray-300 rounded-md text-sm p-1">
-                  <option value="">— no parent —</option>
-                  <template x-for="opt in categories.filter(o => o.id !== c.id)" :key="opt.id">
-                    <option :value="opt.name" x-text="opt.name"></option>
-                  </template>
-                </select>
-              </td>
-              <td class="px-4 py-3">
-                <select x-model="editCategoryForm.menu_period" class="w-full border border-gray-300 rounded-md text-sm p-1">
-                  <option value="both">both</option>
-                  <option value="delivery">delivery</option>
-                  <option value="pickup">pickup</option>
-                </select>
-              </td>
-              <td class="px-4 py-3">
-                <input type="checkbox" x-model="editCategoryForm.is_active">
-              </td>
-              <td class="px-4 py-3 text-right space-x-2">
-                <button @click="submitEditCategory(c.id)" class="text-sm text-green-600 hover:text-green-800">Save</button>
-                <button @click="editingCategoryId = null" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
-              </td>
-            </tr>
-          </template>
-        </template>
-      </tbody>
+      <!-- One <tbody> per category — multiple tbody is valid HTML and the only
+           way to have multiple <tr> per x-for iteration in Alpine 3 (same fix
+           as the product table below; two sibling x-if templates directly
+           under x-for is invalid — x-for allows exactly one root element). -->
+      <template x-for="c in categoriesFull" :key="c.id">
+        <tbody class="divide-y divide-gray-200">
+          <tr x-show="editingCategoryId !== c.id">
+            <td class="px-4 py-3 text-sm text-gray-900" x-text="c.name"></td>
+            <td class="px-4 py-3 text-sm text-gray-600" x-text="c.parent_name || '—'"></td>
+            <td class="px-4 py-3 text-sm text-gray-600" x-text="c.menu_period"></td>
+            <td class="px-4 py-3 text-sm">
+              <span x-show="c.is_active" class="text-green-600">yes</span>
+              <span x-show="!c.is_active" class="text-gray-400">no</span>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <button @click="startEditCategory(c)" class="text-sm text-indigo-600 hover:text-indigo-800">Edit</button>
+            </td>
+          </tr>
+          <tr x-show="editingCategoryId === c.id" class="bg-indigo-50">
+            <td class="px-4 py-3"><input x-model="editCategoryForm.name" type="text" class="w-full border border-gray-300 rounded-md text-sm p-1"></td>
+            <td class="px-4 py-3">
+              <select x-model="editCategoryForm.parent_category" class="w-full border border-gray-300 rounded-md text-sm p-1">
+                <option value="">— no parent —</option>
+                <template x-for="opt in categories.filter(o => o.id !== c.id)" :key="opt.id">
+                  <option :value="opt.name" x-text="opt.name"></option>
+                </template>
+              </select>
+            </td>
+            <td class="px-4 py-3">
+              <select x-model="editCategoryForm.menu_period" class="w-full border border-gray-300 rounded-md text-sm p-1">
+                <option value="both">both</option>
+                <option value="delivery">delivery</option>
+                <option value="pickup">pickup</option>
+              </select>
+            </td>
+            <td class="px-4 py-3">
+              <input type="checkbox" x-model="editCategoryForm.is_active">
+            </td>
+            <td class="px-4 py-3 text-right space-x-2">
+              <button @click="submitEditCategory(c.id)" class="text-sm text-green-600 hover:text-green-800">Save</button>
+              <button @click="editingCategoryId = null" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+            </td>
+          </tr>
+        </tbody>
+      </template>
     </table>
   </div>
 </div>
