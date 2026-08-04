@@ -251,21 +251,24 @@ document.addEventListener('DOMContentLoaded', function() {
   listEl.innerHTML = html;
 
   // Totals
-  CartManager.getDeliveryFee().then(function(fee) {
-    var isPickup = document.getElementById('delivery_pickup').checked;
-    var effectiveFee = isPickup ? 0 : fee;
-    document.getElementById('checkoutSubtotal').textContent = subtotal + ' ₽';
-    document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
-    document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
+  // 2026-08-04 fix: this used to fetch+render its own zone-blind delivery
+  // fee here (and again on every mode/zone change below), writing into the
+  // same #checkoutDeliveryFee/#checkoutGrandTotal that CartManager.init()
+  // ALSO writes into via updateCheckoutTotal() (zone-blind, promo-aware) —
+  // two independent async calculations racing over one DOM target,
+  // non-deterministic which one a given page load ends up showing, neither
+  // one both zone- and promo-aware at once. CartManager.updateCheckoutTotal()
+  // is now the single source of truth (reads #f-zone itself); this block
+  // only unhides the totals block and reports fetch failure, it no longer
+  // computes anything.
+  var isPickupNow = document.getElementById('delivery_pickup').checked;
+  CartManager.updateCheckoutTotal(isPickupNow).then(function() {
     totalsEl.classList.remove('d-none');
   }).catch(function(err) {
-    // 2026-08-01: without this, a rejected promise here (or any exception
-    // thrown inside the .then() above) left #orderTotals hidden forever with
-    // its static "0 ₽" placeholders — no console error a non-technical
-    // reporter would notice, no visible failure at all. Falling back to
-    // showing at least the goods subtotal (already computed client-side,
-    // independent of the delivery-fee fetch) instead of nothing.
-    console.error('checkout totals: getDeliveryFee failed', err);
+    // 2026-08-01: without this, a rejected promise here left #orderTotals
+    // hidden forever with its static "0 ₽" placeholders — no console error a
+    // non-technical reporter would notice, no visible failure at all.
+    console.error('checkout totals: updateCheckoutTotal failed', err);
     document.getElementById('checkoutSubtotal').textContent = subtotal + ' ₽';
     document.getElementById('checkoutDeliveryFee').textContent = '— ₽';
     document.getElementById('checkoutGrandTotal').textContent = '— ₽';
@@ -286,12 +289,7 @@ document.addEventListener('DOMContentLoaded', function() {
       addressField.classList.remove('d-none');
       pickupInfo.classList.add('d-none');
     }
-    var zoneId = document.getElementById('f-zone').value;
-    CartManager.getDeliveryFee(zoneId).then(function(fee) {
-      var effectiveFee = isPickup ? 0 : fee;
-      document.getElementById('checkoutDeliveryFee').textContent = isPickup ? 'Бесплатно' : (effectiveFee + ' ₽');
-      document.getElementById('checkoutGrandTotal').textContent = (subtotal + effectiveFee) + ' ₽';
-    });
+    CartManager.updateCheckoutTotal(isPickup);
   }
 
   document.querySelectorAll('input[name="delivery_mode"]').forEach(function(el) {
@@ -307,15 +305,10 @@ document.addEventListener('DOMContentLoaded', function() {
       opt.textContent = z.name + (z.delivery_time_minutes ? ' (' + z.delivery_time_minutes + ' мин)' : '');
       select.appendChild(opt);
     });
-    
+
     select.addEventListener('change', function() {
       var isPickup = document.getElementById('delivery_pickup').checked;
-      if (!isPickup) {
-        CartManager.getDeliveryFee(this.value).then(function(fee) {
-          document.getElementById('checkoutDeliveryFee').textContent = fee + ' ₽';
-          document.getElementById('checkoutGrandTotal').textContent = (subtotal + fee) + ' ₽';
-        });
-      }
+      CartManager.updateCheckoutTotal(isPickup);
     });
   }).catch(function() {});
 

@@ -561,7 +561,7 @@ const CartManager = (function () {
     const grandTotal = subtotal + currentDeliveryFee;
 
     if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
-    if (deliveryEl) deliveryEl.textContent = formatPrice(currentDeliveryFee) + (subtotal > 0 ? ' (фиксированная)' : '');
+    if (deliveryEl) deliveryEl.textContent = formatPrice(currentDeliveryFee) + (subtotal > 0 ? ' (ориентировочно, зависит от зоны)' : '');
     if (totalEl) totalEl.textContent = formatPrice(grandTotal);
   }
 
@@ -657,7 +657,7 @@ const CartManager = (function () {
         </div>
         <div class="d-flex justify-content-between mb-2">
           <span class="text-muted">Доставка:</span>
-          <span class="fw-semibold" id="cartPageDeliveryFee">${formatPrice(currentDeliveryFee)} (фиксированная)</span>
+          <span class="fw-semibold" id="cartPageDeliveryFee">${formatPrice(currentDeliveryFee)} (ориентировочно, зависит от зоны)</span>
         </div>
         <div class="d-flex justify-content-between fw-bold h5 mb-0 mt-2 pt-2 border-top">
           <span>Итого к оплате:</span>
@@ -688,7 +688,18 @@ const CartManager = (function () {
     if (subtotalEl || deliveryEl || grandTotalEl) {
       const items = loadCart();
       const subtotal = getTotalPrice(items);
-      const baseDeliveryFee = await getDeliveryFee();
+      // 2026-08-04 fix: zoneId was never read here — this function always
+      // fetched the flat settings.DELIVERY_FEE fallback (zone_id=null),
+      // regardless of the zone actually selected in #f-zone. Meanwhile a
+      // separate inline <script> in checkout.html duplicated this same
+      // calculation zone-aware-but-promo-blind, writing into the SAME
+      // #checkoutDeliveryFee/#checkoutGrandTotal elements — whichever ran
+      // last won, non-deterministically. That duplicate calc has been
+      // removed from checkout.html; this function is now the single source
+      // of truth for checkout totals (zone AND promo aware).
+      const zoneSelect = document.getElementById('f-zone');
+      const zoneId = zoneSelect ? (zoneSelect.value || null) : null;
+      const baseDeliveryFee = await getDeliveryFee(zoneId);
       let effectiveFee = isPickup ? 0 : baseDeliveryFee;
 
       const discountRub = appliedPromo ? Math.min(appliedPromo.discount_rub, subtotal) : 0;
@@ -698,7 +709,7 @@ const CartManager = (function () {
       if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
       if (deliveryEl) deliveryEl.textContent = isPickup
         ? '0 ₽ (самовывоз)'
-        : formatPrice(effectiveFee) + ' (фиксированная)';
+        : formatPrice(effectiveFee);
       if (grandTotalEl) grandTotalEl.textContent = formatPrice(grandTotal);
 
       if (discountRowEl && discountEl) {
