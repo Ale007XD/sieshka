@@ -8,7 +8,8 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; color: #1f2937; background: #f9fafb; }
     header { background: #fff; border-bottom: 1px solid #e5e7eb; }
     .bar { max-width: 64rem; margin: 0 auto; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 1.25rem; }
-    .logo { font-weight: 700; color: #4f46e5; font-size: 1.125rem; }
+    .logo { display: inline-flex; align-items: center; }
+    .logo img { height: 32px; width: auto; vertical-align: middle; }
     .bar a { color: #4b5563; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
     .bar a:hover { color: #4f46e5; }
     .phone { margin-left: auto; color: #374151; text-decoration: none; font-weight: 600; font-size: 0.875rem; }
@@ -23,7 +24,12 @@
 <body>
   <header>
     <div class="bar">
-      <a href="/" class="logo">Sieshka</a>
+      <!-- 2026-08-04 fix: was plain text "Sieshka" — this base.html layout
+           (requisites/offer/agreement/privacy) is a separate, minimal template
+           independent from shop_base.html's Bootstrap design system, and never
+           had the real logo image (/static/img/logo.png) that shop_base.html
+           uses. Swapped in the real asset; layout otherwise untouched. -->
+      <a href="/" class="logo"><img src="/static/img/logo.png" alt="Sieshka"></a>
       <a href="/requisites">Реквизиты</a>
       <a href="/offer">Публичная оферта</a>
       <a href="/agreement">Пользовательское соглашение</a>

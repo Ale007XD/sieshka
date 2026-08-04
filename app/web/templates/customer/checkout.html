@@ -225,30 +225,13 @@
 {% block scripts %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
-  // Render order items
-  var items = CartManager.loadCart();
-  var listEl = document.getElementById('orderItemsList');
+  // 2026-08-04 fix: order-item list rendering moved to
+  // cart.js::renderOrderItemsList() (runs inside updateAllUI(), which
+  // CartManager.init() already triggers before this handler fires — see
+  // rationale in cart.js). This block used to build #orderItemsList itself
+  // from a one-time loadCart() snapshot and never touch it again; only the
+  // totals (#orderTotals unhide + error fallback) still happen here.
   var totalsEl = document.getElementById('orderTotals');
-  var emptyEl = document.getElementById('checkout-empty');
-  var formEl = document.getElementById('checkout-form');
-
-  if (!items || items.length === 0) {
-    if (emptyEl) emptyEl.classList.remove('d-none');
-    if (formEl) formEl.classList.add('d-none');
-    return;
-  }
-
-  var subtotal = 0;
-  var html = '';
-  items.forEach(function(item) {
-    var lineTotal = item.price_rub * item.qty;
-    subtotal += lineTotal;
-    html += '<div class="order-item-row">' +
-      '<span class="small">' + escapeHtmlLocal(item.name) + ' × ' + item.qty + '</span>' +
-      '<span class="small fw-semibold price">' + lineTotal + ' ₽</span>' +
-      '</div>';
-  });
-  listEl.innerHTML = html;
 
   // Totals
   // 2026-08-04 fix: this used to fetch+render its own zone-blind delivery
@@ -269,7 +252,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // hidden forever with its static "0 ₽" placeholders — no console error a
     // non-technical reporter would notice, no visible failure at all.
     console.error('checkout totals: updateCheckoutTotal failed', err);
-    document.getElementById('checkoutSubtotal').textContent = subtotal + ' ₽';
+    var fallbackItems = CartManager.loadCart();
+    var fallbackSubtotal = fallbackItems.reduce(function(sum, it) { return sum + it.price_rub * it.qty; }, 0);
+    document.getElementById('checkoutSubtotal').textContent = fallbackSubtotal + ' ₽';
     document.getElementById('checkoutDeliveryFee').textContent = '— ₽';
     document.getElementById('checkoutGrandTotal').textContent = '— ₽';
     totalsEl.classList.remove('d-none');
@@ -317,12 +302,9 @@ document.addEventListener('DOMContentLoaded', function() {
       CartManager.updateAllUI();
     });
   }).catch(function() {});
-
-  function escapeHtmlLocal(text) {
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+  // 2026-08-04: escapeHtmlLocal() removed — its only caller (the
+  // #orderItemsList build loop) moved to cart.js::renderOrderItemsList(),
+  // which uses cart.js's own escapeHtml().
 });
 </script>
 {% endblock %}

@@ -826,12 +826,72 @@ const CartManager = (function () {
     container.innerHTML = html;
   }
 
+  // 2026-08-04 fix: the "Ваш заказ" item list on checkout (#orderItemsList)
+  // used to be built exactly once, inline in checkout.html's own
+  // DOMContentLoaded handler, straight from a one-time CartManager.loadCart()
+  // snapshot — never touched again afterwards. Every subsequent cart mutation
+  // on that page (restore-from-recently-deleted, qty change, promo apply)
+  // correctly updated the running total (updateCheckoutTotal reads the cart
+  // fresh every time) but left this list frozen at whatever it showed on
+  // page load — visually "clicking restore does nothing" while the total
+  // silently climbed. Moved here so it participates in the same
+  // updateAllUI() cycle as everything else; checkout.html no longer builds
+  // this list itself.
+  function renderOrderItemsList() {
+    const listEl = document.getElementById('orderItemsList');
+    if (!listEl) return; // not on checkout page
+
+    const totalsEl = document.getElementById('orderTotals');
+    const emptyEl = document.getElementById('checkout-empty');
+    const formEl = document.getElementById('checkout-form');
+    const items = loadCart();
+
+    if (!items || items.length === 0) {
+      listEl.innerHTML = '';
+      if (totalsEl) totalsEl.classList.add('d-none');
+      if (emptyEl) emptyEl.classList.remove('d-none');
+      if (formEl) formEl.classList.add('d-none');
+      return;
+    }
+
+    if (emptyEl) emptyEl.classList.add('d-none');
+    if (formEl) formEl.classList.remove('d-none');
+
+    let html = '';
+    items.forEach(function (item) {
+      const lineTotal = item.price_rub * item.qty;
+      html += '<div class="order-item-row">' +
+        '<span class="small">' + escapeHtml(item.name) + ' × ' + item.qty + '</span>' +
+        '<span class="small fw-semibold price">' + formatPrice(lineTotal) + '</span>' +
+        '</div>';
+    });
+    listEl.innerHTML = html;
+  }
+
+  // 2026-08-04 fix: recentlyDeleted could retain an entry for a product_id
+  // that's already back in the cart (observed: a "Вернуть" prompt sitting
+  // next to a cart line for the same item, already at the qty cap) — addItem()
+  // only cleans this array on its idx<0 (fresh re-add) branch; any other path
+  // that puts the product back in the cart (or a stale entry from before a
+  // menu/product_id change) left it dangling, confusingly offering "restore
+  // +1" for an item the person already has. Self-heals on every UI update
+  // rather than only in the one path that happened to clean it before.
+  function _pruneRecentlyDeleted() {
+    if (recentlyDeleted.length === 0) return;
+    const cartProductIds = new Set(loadCart().map(i => i.product_id));
+    const before = recentlyDeleted.length;
+    recentlyDeleted = recentlyDeleted.filter(rd => !cartProductIds.has(rd.product_id));
+    if (recentlyDeleted.length !== before) saveHistory();
+  }
+
   async function updateAllUI() {
+    _pruneRecentlyDeleted();
     await updateNavbarCart();
     await updateOffcanvasCart();
     await updateStickyCartBar();
     updateProductControls();
     await renderCartPage();
+    renderOrderItemsList();
     const _pickupEl = document.getElementById('delivery_pickup');
     await updateCheckoutTotal(_pickupEl && _pickupEl.checked);
     renderRecentlyDeletedOnCheckout();
