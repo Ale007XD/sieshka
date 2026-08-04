@@ -289,7 +289,12 @@ document.addEventListener('DOMContentLoaded', function() {
       addressField.classList.remove('d-none');
       pickupInfo.classList.add('d-none');
     }
-    CartManager.updateCheckoutTotal(isPickup);
+    // 2026-08-04 fix: was CartManager.updateCheckoutTotal(isPickup) only —
+    // updated the order-summary block but left the sticky bottom cart bar
+    // and navbar cart summary showing a stale total, since neither is
+    // wired to #f-zone/#delivery_pickup on its own. updateAllUI() re-renders
+    // both alongside the checkout totals from one call.
+    CartManager.updateAllUI();
   }
 
   document.querySelectorAll('input[name="delivery_mode"]').forEach(function(el) {
@@ -307,8 +312,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     select.addEventListener('change', function() {
-      var isPickup = document.getElementById('delivery_pickup').checked;
-      CartManager.updateCheckoutTotal(isPickup);
+      // same fix as toggleDeliveryMode above — sticky bar/navbar need
+      // updateAllUI(), not just updateCheckoutTotal()
+      CartManager.updateAllUI();
     });
   }).catch(function() {});
 

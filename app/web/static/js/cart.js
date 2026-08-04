@@ -16,8 +16,6 @@ const CartManager = (function () {
   const HISTORY_KEY = 'cart_history';
   let recentlyDeleted = loadHistory();
   const upsellSuggestions = [];
-  let globalDeliveryFee = 0;
-  let globalDeliveryFeeLoaded = false;
   // Server-validated promo effect from POST /api/promo/check. null = none
   // applied (или invalid, или input изменён после последней проверки —
   // см. wirePromoWidget()). Единственный источник правды для скидки на
@@ -51,11 +49,10 @@ const CartManager = (function () {
     }
   }
 
-  async function loadDeliveryFee(zoneId = null) {
+  async function loadDeliveryFee(zoneId) {
     let fee = 0;
     try {
-      const url = zoneId ? `/api/config/delivery-fee?zone_id=${zoneId}` : '/api/config/delivery-fee';
-      const response = await fetch(url);
+      const response = await fetch(`/api/config/delivery-fee?zone_id=${zoneId}`);
       if (response.ok) {
         const data = await response.json();
         fee = data.delivery_fee || 0;
@@ -64,26 +61,23 @@ const CartManager = (function () {
       console.error('Error loading delivery fee:', e);
       fee = 0;
     }
-    if (zoneId) {
-      zoneDeliveryFeeCache[zoneId] = fee;
-    } else {
-      globalDeliveryFee = fee;
-      globalDeliveryFeeLoaded = true;
-    }
+    zoneDeliveryFeeCache[zoneId] = fee;
     return fee;
   }
 
-  async function getDeliveryFee(zoneId = null) {
-    if (zoneId) {
-      if (Object.prototype.hasOwnProperty.call(zoneDeliveryFeeCache, zoneId)) {
-        return zoneDeliveryFeeCache[zoneId];
-      }
-      return await loadDeliveryFee(zoneId);
+  // 2026-08-04: zoneId=null branch removed — the last caller relying on the
+  // flat settings.DELIVERY_FEE fallback (globalDeliveryFee/
+  // globalDeliveryFeeLoaded) was replaced this same session with explicit
+  // "depends on zone" messaging (updateOffcanvasCart/renderCartPage/
+  // updateCheckoutTotal). Every remaining call site always has a real
+  // zoneId; a null/undefined zoneId here now means "fee not known yet",
+  // which is the caller's job to handle (don't guess), not this function's.
+  async function getDeliveryFee(zoneId) {
+    if (!zoneId) return 0;
+    if (Object.prototype.hasOwnProperty.call(zoneDeliveryFeeCache, zoneId)) {
+      return zoneDeliveryFeeCache[zoneId];
     }
-    if (!globalDeliveryFeeLoaded) {
-      await loadDeliveryFee();
-    }
-    return globalDeliveryFee;
+    return await loadDeliveryFee(zoneId);
   }
 
   function escapeHtml(text) {
@@ -338,6 +332,23 @@ const CartManager = (function () {
     return 'товаров';
   }
 
+  // 2026-08-04 fix: stickyCartBar/navbarCart total was stuck on the flat
+  // globalDeliveryFee cache, which nothing populates anymore (that fallback
+  // path was removed this session) — the footer sum silently stopped
+  // including delivery at all and never reacted to #f-zone on checkout.
+  // Shared here so both widgets follow the same "don't guess" rule as
+  // updateCheckoutTotal: 0 on pickup, 0 (goods-only) until a zone is
+  // actually selected, real per-zone fee once it is.
+  async function _widgetDeliveryFee(totalItems) {
+    if (totalItems === 0) return 0;
+    const pickupEl = document.getElementById('delivery_pickup');
+    if (pickupEl && pickupEl.checked) return 0;
+    const zoneSelect = document.getElementById('f-zone');
+    const zoneId = zoneSelect ? (zoneSelect.value || null) : null;
+    if (!zoneId) return 0;
+    return await getDeliveryFee(zoneId);
+  }
+
   async function updateStickyCartBar() {
     const bar = document.getElementById('stickyCartBar');
     if (!bar) return;
@@ -345,7 +356,7 @@ const CartManager = (function () {
     const items = loadCart();
     const totalItems = getTotalItems(items);
     const subtotal = getTotalPrice(items);
-    const currentDeliveryFee = totalItems > 0 && globalDeliveryFeeLoaded ? globalDeliveryFee : 0;
+    const currentDeliveryFee = await _widgetDeliveryFee(totalItems);
     const totalPrice = subtotal + currentDeliveryFee;
 
     bar.classList.toggle('visible', totalItems > 0);
@@ -365,7 +376,7 @@ const CartManager = (function () {
     const items = loadCart();
     const totalItems = getTotalItems(items);
     const subtotal = getTotalPrice(items);
-    const currentDeliveryFee = totalItems > 0 && globalDeliveryFeeLoaded ? globalDeliveryFee : 0;
+    const currentDeliveryFee = await _widgetDeliveryFee(totalItems);
     const totalPrice = subtotal + currentDeliveryFee;
 
     const summaryEl = document.getElementById('navbarCartSummary');
