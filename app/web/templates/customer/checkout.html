@@ -7,6 +7,21 @@
     max-width: 540px;
     margin: 0 auto;
   }
+  /* 2026-08-04: 2-column layout on large screens — left column (order
+     summary, sticky so it stays visible while scrolling the form) + right
+     column (contact/delivery/promo/comment/payment/submit). Below lg,
+     unchanged single-column stack (left column's content renders first in
+     DOM order, so mobile order is identical to before). */
+  @media (min-width: 992px) {
+    .checkout-section {
+      max-width: 960px;
+    }
+    .checkout-order-col {
+      position: sticky;
+      top: 1rem;
+      align-self: flex-start;
+    }
+  }
   .payment-option, .delivery-option {
     border: 2px solid var(--color-accent-border);
     border-radius: var(--radius-lg);
@@ -59,6 +74,12 @@
     <button id="offcanvasClearBtn" class="d-none" type="button"></button>
     <div id="yookassa-widget-container" class="d-none"></div>
 
+    <div class="row g-4">
+    <!-- Левая колонка (lg+): состав заказа + недавно удалённые. Sticky при
+         прокрутке формы справа. На мобильном (< lg) col-lg-* не действует —
+         обе колонки складываются в одну, левая идёт первой, как и раньше. -->
+    <div class="col-lg-5 checkout-order-col">
+
     <!-- Состав заказа -->
     <div class="card mb-4">
       <div class="card-header">
@@ -95,6 +116,10 @@
      <div id="recentlyDeletedSection" class="d-none mb-3">
        <div id="recentlyDeletedList"></div>
      </div>
+
+    </div><!-- /.checkout-order-col -->
+
+    <div class="col-lg-7">
 
     <!-- Контакты -->
     <div class="card mb-4">
@@ -217,6 +242,9 @@
         <i class="bi bi-check-circle me-2"></i>Оплатить и заказать
       </button>
     </div>
+
+    </div><!-- /.col-lg-7 -->
+    </div><!-- /.row -->
 
   </form>
 </div>

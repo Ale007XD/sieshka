@@ -857,13 +857,29 @@ const CartManager = (function () {
     if (emptyEl) emptyEl.classList.add('d-none');
     if (formEl) formEl.classList.remove('d-none');
 
+    // 2026-08-04: rows now carry +/- steppers (data-action="dec"/"inc"),
+    // wired via the delegated #orderItemsList listener in
+    // setupEventListeners() below — same data-product-id/data-price/
+    // data-name/data-lead-time-minutes contract + updateQty()/QTY_MAX cap
+    // as renderCartPage()'s item rows, for one consistent stepper behavior
+    // across cart page / offcanvas / checkout.
     let html = '';
     items.forEach(function (item) {
       const lineTotal = item.price_rub * item.qty;
-      html += '<div class="order-item-row">' +
-        '<span class="small">' + escapeHtml(item.name) + ' × ' + item.qty + '</span>' +
-        '<span class="small fw-semibold price">' + formatPrice(lineTotal) + '</span>' +
-        '</div>';
+      html += `
+        <div class="order-item-row" data-product-id="${item.product_id}" data-name="${escapeHtml(item.name)}" data-price="${item.price_rub}" data-lead-time-minutes="${normalizeLeadTime(item.lead_time_minutes)}">
+          <div style="flex: 1; min-width: 0;">
+            <div class="fw-semibold text-truncate small">${escapeHtml(item.name)}</div>
+            <div class="text-muted small">${formatPrice(item.price_rub)}/шт</div>
+          </div>
+          <div class="d-flex align-items-center gap-2 mx-2" style="flex-shrink: 0;">
+            <button type="button" class="btn btn-sm btn-outline-secondary rounded-circle" style="width: 28px; height: 28px; padding: 0;" data-action="dec">−</button>
+            <span class="fw-semibold small" style="min-width: 20px; text-align: center;">${item.qty}</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary rounded-circle" style="width: 28px; height: 28px; padding: 0;" data-action="inc" ${item.qty >= QTY_MAX ? 'disabled' : ''}>+</button>
+          </div>
+          <div class="fw-semibold small" style="min-width: 70px; text-align: right;">${formatPrice(lineTotal)}</div>
+        </div>
+      `;
     });
     listEl.innerHTML = html;
   }
@@ -1148,6 +1164,32 @@ const CartManager = (function () {
     const cartContainer = document.getElementById('cart');
     if (cartContainer) {
       cartContainer.addEventListener('click', (e) => {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+
+        const action = target.dataset.action;
+        const itemEl = target.closest('[data-product-id]');
+        if (!itemEl) return;
+
+        const productId = itemEl.dataset.productId;
+
+        switch (action) {
+          case 'inc':
+            updateQty(productId, 1);
+            break;
+          case 'dec':
+            updateQty(productId, -1);
+            break;
+        }
+      });
+    }
+
+    // 2026-08-04: same inc/dec contract as #cart above, for the checkout
+    // page's own order-item list (#orderItemsList) — see
+    // renderOrderItemsList().
+    const orderItemsList = document.getElementById('orderItemsList');
+    if (orderItemsList) {
+      orderItemsList.addEventListener('click', (e) => {
         const target = e.target.closest('[data-action]');
         if (!target) return;
 
