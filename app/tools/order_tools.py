@@ -290,8 +290,24 @@ async def write_order_state_cooking(
 
 
 async def reserve_inventory_items(session: AsyncSession, order_id: str, **kwargs: object) -> int:
-    """Returns 1 if reserved, 0 if insufficient. Numeric sentinel."""
+    """
+    Decrements inventory for every item in the order. Never blocks the order
+    on insufficient stock — going negative is allowed, per sprint_inventory_
+    sale_decrement (2026-08 decision: "в минус с явным алертом"). Each
+    decrement is logged to inventory_movements with below_zero=True when the
+    resulting quantity is negative.
+
+    Returns 1 if ANY item went below zero (signal: downstream CONDITION
+    should fire the alert notify step), 0 if every item stayed >= 0.
+    This is an alert signal now, not a success/failure sentinel — the order
+    always proceeds to create_kitchen_ticket either way.
+
+    order not found is a data-integrity failure, not a stock outcome — raises,
+    consistent with write_order_state_cooking and friends elsewhere in this file.
+    """
     from sqlalchemy import text as sql_text
+
+    from app.services.inventory_ledger import record_movement
 
     row = await session.execute(
         sql_text("SELECT items FROM orders WHERE id = :id"),
@@ -299,9 +315,11 @@ async def reserve_inventory_items(session: AsyncSession, order_id: str, **kwargs
     )
     row_data = row.scalar_one_or_none()
     if row_data is None:
-        logger.warning("reserve_inventory_items: order %s not found", order_id)
-        return 0
+        logger.error("reserve_inventory_items: order %s not found", order_id)
+        raise ValueError(f"order not found: {order_id}")
     items = row_data if isinstance(row_data, list) else json.loads(row_data)
+
+    any_below_zero = False
     for item in items:
         sku = item.get("sku") if isinstance(item, dict) else ""
         qty = int(item.get("qty", 1)) if isinstance(item, dict) else 1
@@ -312,19 +330,32 @@ async def reserve_inventory_items(session: AsyncSession, order_id: str, **kwargs
             {"sku": sku},
         )
         stock_row = stock.scalar_one_or_none()
-        if stock_row is None or int(stock_row) < qty:
+        if stock_row is None:
+            logger.warning("reserve_inventory_items: sku=%s not found, skipping", sku)
+            continue
+        resulting = int(stock_row) - qty
+        below_zero = resulting < 0
+        if below_zero:
+            any_below_zero = True
             logger.warning(
-                "reserve_inventory_items: insufficient stock for sku=%s", sku
+                "reserve_inventory_items: sku=%s going negative (%d -> %d), order_id=%s",
+                sku, int(stock_row), resulting, order_id,
             )
-            return 0
         await session.execute(
             sql_text(
                 "UPDATE inventory SET quantity = quantity - :qty WHERE sku = :sku"
             ),
             {"sku": sku, "qty": qty},
         )
-    logger.info("reserve_inventory_items: order_id=%s reserved", order_id)
-    return 1
+        await record_movement(
+            session, sku=sku, delta=-qty, reason="SALE",
+            source_type="order", source_id=order_id, below_zero=below_zero,
+        )
+    logger.info(
+        "reserve_inventory_items: order_id=%s reserved (any_below_zero=%s)",
+        order_id, any_below_zero,
+    )
+    return 1 if any_below_zero else 0
 
 
 async def create_kitchen_ticket(session: AsyncSession, order_id: str, **kwargs: object) -> str:

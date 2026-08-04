@@ -52,6 +52,8 @@ async def decrement_inventory(
     """
     from sqlalchemy import text as sql_text
 
+    from app.services.inventory_ledger import record_movement
+
     row = await session.execute(
         sql_text("SELECT quantity FROM inventory WHERE sku = :sku FOR UPDATE"),
         {"sku": sku},
@@ -72,6 +74,7 @@ async def decrement_inventory(
         ),
         {"sku": sku, "qty": quantity},
     )
+    await record_movement(session, sku=sku, delta=-quantity, reason="ADJUSTMENT")
     logger.info("decrement_inventory: sku=%s qty=%d", sku, quantity)
     return 1
 
@@ -81,6 +84,8 @@ async def increment_inventory(
 ) -> str:
     """Terminal tool: increments inventory by quantity (restock)."""  # terminal-tool
     from sqlalchemy import text as sql_text
+
+    from app.services.inventory_ledger import record_movement
 
     row = await session.execute(
         sql_text("SELECT id FROM inventory WHERE sku = :sku FOR UPDATE"),
@@ -94,6 +99,15 @@ async def increment_inventory(
             "UPDATE inventory SET quantity = quantity + :qty WHERE sku = :sku"
         ),
         {"sku": sku, "qty": quantity},
+    )
+    reason = kwargs.get("reason")
+    await record_movement(
+        session,
+        sku=sku,
+        delta=quantity,
+        reason=reason if reason in ("RESTOCK_MANUAL", "RESTOCK_AGENT") else "RESTOCK_MANUAL",
+        source_type=str(kwargs["source_type"]) if kwargs.get("source_type") else None,
+        source_id=str(kwargs["source_id"]) if kwargs.get("source_id") else None,
     )
     logger.info("increment_inventory: sku=%s qty=%d", sku, quantity)
     return "OK"

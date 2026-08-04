@@ -278,10 +278,11 @@ class TestOrderLifecycleViaExecutionVM:
         from app.programs.order_programs import PROGRAM_START_COOKING
 
         order_id = await _insert_order(repo, OrderState.PAID)
-        # inventory table is never seeded by migrations/other fixtures — without this,
-        # reserve_inventory_items correctly finds no "coffee" row (stock_row is None) and
-        # takes the insufficient-stock branch (notify_inventory_insufficient), which is
-        # then structurally SUCCESS (not a bug) but never reaches write_cooking_state.
+        # sprint_inventory_sale_decrement (2026-08): reserve_inventory_items never
+        # blocks the order on stock — seeding here is just a realistic scenario,
+        # not a precondition for reaching COOKING (an unseeded/missing sku is
+        # skipped, not blocking, see test_paid_to_cooking_below_zero_still_cooks
+        # below for the explicit below-zero-alert-but-proceeds case).
         await repo._session.execute(
             text(
                 "INSERT INTO inventory (sku, name, quantity) VALUES (:sku, :name, :qty) "
@@ -297,6 +298,44 @@ class TestOrderLifecycleViaExecutionVM:
         )
         assert trace.status == TraceStatus.SUCCESS
         assert await repo.get_state(order_id) == OrderState.COOKING
+
+    async def test_paid_to_cooking_below_zero_still_cooks(
+        self, repo: OrderRepository, nano_vm: ExecutionVM,
+    ) -> None:
+        """sprint_inventory_sale_decrement: order with insufficient stock still
+        reaches COOKING (allow-negative-with-alert) — quantity goes negative,
+        below_zero is recorded in inventory_movements, order is not blocked."""
+        from nano_vm.models import Trace, TraceStatus
+
+        from app.programs.order_programs import PROGRAM_START_COOKING
+
+        order_id = await _insert_order(repo, OrderState.PAID)
+        await repo._session.execute(
+            text(
+                "INSERT INTO inventory (sku, name, quantity) VALUES (:sku, :name, :qty) "
+                "ON CONFLICT (sku) DO UPDATE SET quantity = EXCLUDED.quantity"
+            ),
+            {"sku": "coffee", "name": "Coffee", "qty": 1},  # order needs more than this
+        )
+        await repo._session.commit()
+
+        trace: Trace = await nano_vm.run(
+            PROGRAM_START_COOKING,
+            context={"order_id": order_id},
+        )
+        assert trace.status == TraceStatus.SUCCESS
+        assert await repo.get_state(order_id) == OrderState.COOKING
+
+        movement = await repo._session.execute(
+            text(
+                "SELECT delta, below_zero FROM inventory_movements "
+                "WHERE sku = 'coffee' AND source_id = :order_id"
+            ),
+            {"order_id": order_id},
+        )
+        row = movement.fetchone()
+        assert row is not None
+        assert row._mapping["below_zero"] is True
 
     async def test_invalid_event_rejected(
         self, repo: OrderRepository, nano_vm: ExecutionVM,

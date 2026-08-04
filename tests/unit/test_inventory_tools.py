@@ -112,3 +112,112 @@ class TestSetInventoryState:
 
         with pytest.raises(ValueError, match="sku not found"):
             await set_inventory_state(mock_session, sku="coffee")
+
+
+class TestDecrementInventoryLedger:
+    """sprint_inventory_ledger — decrement_inventory writes inventory_movements
+    on success, does not write on failure (no quantity actually changed)."""
+
+    async def test_success_records_negative_delta_adjustment(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
+
+        await decrement_inventory(mock_session, sku="coffee", quantity=2)
+
+        record.assert_awaited_once_with(
+            mock_session, sku="coffee", delta=-2, reason="ADJUSTMENT",
+        )
+
+    async def test_insufficient_stock_does_not_record(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "1"
+
+        await decrement_inventory(mock_session, sku="coffee", quantity=2)
+
+        record.assert_not_awaited()
+
+    async def test_sku_not_found_does_not_record(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+
+        await decrement_inventory(mock_session, sku="coffee", quantity=2)
+
+        record.assert_not_awaited()
+
+
+class TestIncrementInventoryLedger:
+    """sprint_inventory_ledger — increment_inventory writes inventory_movements
+    with a positive delta; reason defaults to RESTOCK_MANUAL, overridable via
+    kwargs (RESTOCK_AGENT — used by sprint_inventory_restock_agent)."""
+
+    async def test_success_records_positive_delta_default_reason(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "some-id"
+
+        await increment_inventory(mock_session, sku="coffee", quantity=5)
+
+        record.assert_awaited_once_with(
+            mock_session,
+            sku="coffee",
+            delta=5,
+            reason="RESTOCK_MANUAL",
+            source_type=None,
+            source_id=None,
+        )
+
+    async def test_reason_override_restock_agent(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "some-id"
+
+        await increment_inventory(
+            mock_session, sku="coffee", quantity=5,
+            reason="RESTOCK_AGENT", source_type="chat", source_id="msg-42",
+        )
+
+        record.assert_awaited_once_with(
+            mock_session,
+            sku="coffee",
+            delta=5,
+            reason="RESTOCK_AGENT",
+            source_type="chat",
+            source_id="msg-42",
+        )
+
+    async def test_invalid_reason_falls_back_to_restock_manual(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "some-id"
+
+        await increment_inventory(mock_session, sku="coffee", quantity=5, reason="BOGUS")
+
+        assert record.await_args is not None
+        assert record.await_args.kwargs["reason"] == "RESTOCK_MANUAL"
+
+    async def test_sku_not_found_does_not_record(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+
+        with pytest.raises(ValueError, match="sku not found"):
+            await increment_inventory(mock_session, sku="coffee", quantity=5)
+
+        record.assert_not_awaited()

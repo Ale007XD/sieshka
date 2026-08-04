@@ -49,9 +49,16 @@ class TestADR001ExactlyOneTerminal:
         )
 
     def test_start_cooking_one_terminal(self) -> None:
+        """PROGRAM_START_COOKING is an intentional ADR-001 exception, not a
+        violation. sprint_inventory_sale_decrement (2026-08) removed the
+        insufficient-stock failure branch by design — the order never blocks
+        on stock anymore (allow-negative-with-alert), it always reaches
+        write_cooking_state. There is no failure outcome left to terminate
+        on; a second terminal step would be dead code invented purely to
+        satisfy this assertion. See DECISIONS.md."""
         terminals = _terminal_step_ids(PROGRAM_START_COOKING)
-        assert len(terminals) == 2, (
-            f"expected 2 terminal steps (happy+failure),"
+        assert len(terminals) == 1, (
+            f"expected 1 terminal step (no failure branch by design),"
             f" got {len(terminals)}: {terminals}"
         )
 

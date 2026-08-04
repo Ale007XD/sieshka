@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-2xl font-semibold text-gray-900 mb-6">Stock Levels</h1>
-<div hx-get="/admin/ui/inventory/partial" hx-trigger="every 5s" hx-swap="innerHTML">
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-semibold text-gray-900">Stock Levels</h1>
+  <button
+    hx-post="/admin/ui/inventory/sync"
+    hx-target="#inventory-table"
+    hx-swap="innerHTML"
+    class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+  >
+    Sync from menu
+  </button>
+</div>
+<div id="inventory-table" hx-get="/admin/ui/inventory/partial" hx-trigger="every 5s" hx-swap="innerHTML">
   <p class="text-gray-500">Loading inventory...</p>
 </div>
 {% endblock %}

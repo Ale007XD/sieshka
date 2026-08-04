@@ -1,3 +1,8 @@
+{% if sync_result %}
+<div class="mb-4 px-4 py-2 bg-blue-50 text-blue-800 text-sm rounded-md">
+  Sync: {{ sync_result.created }} new item(s) created{% if sync_result.skipped_no_sku %}, {{ sync_result.skipped_no_sku }} active product(s) skipped (no sku assigned){% endif %}.
+</div>
+{% endif %}
 <div class="bg-white rounded-lg shadow overflow-hidden">
   <table class="min-w-full divide-y divide-gray-200">
     <thead class="bg-gray-50">

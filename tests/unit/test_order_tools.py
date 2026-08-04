@@ -169,7 +169,13 @@ class TestWriteOrderStateCooking:
 
 
 class TestReserveInventoryItems:
-    async def test_success(self, mock_session: AsyncMock) -> None:
+    """sprint_inventory_sale_decrement (2026-08): reserve_inventory_items never
+    blocks on stock — decrements into negative, returns 1 only as an alert
+    signal (at least one item went below zero), not a failure sentinel.
+    order_not_found raises now (data-integrity failure, consistent with
+    write_order_state_cooking and friends in this file), it no longer returns 0."""
+
+    async def test_all_reserved_cleanly_returns_zero(self, mock_session: AsyncMock) -> None:
         mock_session.execute.return_value.scalar_one_or_none.side_effect = [
             '[{"sku": "coffee", "qty": 2}]',  # items
             "10",  # stock
@@ -177,25 +183,74 @@ class TestReserveInventoryItems:
 
         result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
 
-        assert result == 1
+        assert result == 0
         mock_session.commit.assert_not_called()
 
-    async def test_insufficient_stock(self, mock_session: AsyncMock) -> None:
+    async def test_going_negative_returns_one_alert_signal(
+        self, mock_session: AsyncMock,
+    ) -> None:
         mock_session.execute.return_value.scalar_one_or_none.side_effect = [
             '[{"sku": "coffee", "qty": 2}]',  # items
-            "1",  # stock
+            "1",  # stock — 1 - 2 = -1
+        ]
+
+        result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+
+        assert result == 1
+
+    async def test_order_not_found_raises(self, mock_session: AsyncMock) -> None:
+        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+
+        with pytest.raises(ValueError, match="order not found"):
+            await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+
+    async def test_sku_not_in_inventory_skips_item_no_block(
+        self, mock_session: AsyncMock,
+    ) -> None:
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            '[{"sku": "ghost-sku", "qty": 1}]',  # items
+            None,  # stock row not found
         ]
 
         result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
 
         assert result == 0
 
-    async def test_order_not_found(self, mock_session: AsyncMock) -> None:
-        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+    async def test_going_negative_records_ledger_with_below_zero_true(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            '[{"sku": "coffee", "qty": 2}]',  # items
+            "1",  # stock — 1 - 2 = -1
+        ]
+        order_id = str(uuid4())
 
-        result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+        await reserve_inventory_items(mock_session, order_id=order_id)
 
-        assert result == 0
+        record.assert_awaited_once_with(
+            mock_session, sku="coffee", delta=-2, reason="SALE",
+            source_type="order", source_id=order_id, below_zero=True,
+        )
+
+    async def test_staying_nonnegative_records_ledger_with_below_zero_false(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            '[{"sku": "coffee", "qty": 2}]',  # items
+            "10",  # stock — 10 - 2 = 8
+        ]
+        order_id = str(uuid4())
+
+        await reserve_inventory_items(mock_session, order_id=order_id)
+
+        record.assert_awaited_once_with(
+            mock_session, sku="coffee", delta=-2, reason="SALE",
+            source_type="order", source_id=order_id, below_zero=False,
+        )
 
 
 class TestCreateKitchenTicket:

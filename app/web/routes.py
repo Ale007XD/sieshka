@@ -171,6 +171,27 @@ async def inventory_panel_partial(
     )
 
 
+@router.post("/inventory/sync", response_class=Response)
+async def inventory_sync(
+    request: Request,
+    service: InventoryService = Depends(get_inventory_service),
+) -> Response:
+    """Batch get_or_create of inventory rows for products with sku set.
+    Does not overwrite existing rows — see InventoryService.sync_from_menu."""
+    result = await service.sync_from_menu()
+    items = await service.list_inventory()
+    templates = request.app.state.templates
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "inventory_panel_partial.html",
+        {
+            "items": items,
+            "INVENTORY_STATE_COLOR": INVENTORY_STATE_COLOR,
+            "sync_result": result,
+        },
+    )
+
+
 @router.get("/promotions", response_class=Response)
 async def promotions_panel(request: Request) -> Response:
     templates = request.app.state.templates

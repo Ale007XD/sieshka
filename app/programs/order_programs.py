@@ -110,14 +110,25 @@ PROGRAM_START_COOKING = Program(
             tool="reserve_inventory_items",
             args={"order_id": "$order_id"},
             output_key="inventory_result",
-            next_step="check_inventory",
+            next_step="check_inventory_alert",
         ),
         Step(
-            id="check_inventory",
+            id="check_inventory_alert",
             type=StepType.CONDITION,
-            condition="$inventory_result.output < 1",  # 0=insufficient, 1=reserved
-            then="inventory_failed",
+            # sprint_inventory_sale_decrement (2026-08): allow-negative-with-alert.
+            # 1=at least one item went below zero (alert), 0=all reserved cleanly.
+            # Order proceeds to cooking either way — this never blocks.
+            condition="$inventory_result.output >= 1",
+            then="notify_inventory_below_zero",
             otherwise="create_kitchen_ticket",
+        ),
+        Step(
+            id="notify_inventory_below_zero",
+            type=StepType.TOOL,
+            tool="notify_inventory_insufficient",
+            args={"order_id": "$order_id"},
+            output_key="notify_result",
+            next_step="create_kitchen_ticket",
         ),
         Step(
             id="create_kitchen_ticket",
@@ -133,14 +144,6 @@ PROGRAM_START_COOKING = Program(
             tool="write_order_state_cooking",  # terminal-tool
             args={"order_id": "$order_id", "ticket_id": "$create_kitchen_ticket.output"},
             output_key="write_result",
-            is_terminal=True,
-        ),
-        Step(
-            id="inventory_failed",
-            type=StepType.TOOL,
-            tool="notify_inventory_insufficient",
-            args={"order_id": "$order_id"},
-            output_key="notify_result",
             is_terminal=True,
         ),
     ],
