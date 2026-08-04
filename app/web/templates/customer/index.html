@@ -91,6 +91,15 @@
 <div id="cart-root" class="d-none">
   <span id="cart-summary">0 ₽</span>
   <span id="cart-count">0</span>
+  <!-- 2026-08-04: cart-total added here — cart.js::updateNavbarCart()'s
+       legacy "menu.js contract compliance" block (menuCartTotal) references
+       #cart-total; it used to resolve only because the old cart.html
+       accidentally reused this exact id for its real, visible total. That
+       template has been rewritten against cart.js's actual #cart/#emptyCart/
+       #cartReal/#cartActions contract (see cart.html), so the decoy target
+       for this one legacy id needs to live here instead, alongside its
+       siblings. -->
+  <span id="cart-total" class="d-none">0 ₽</span>
 </div>
 <div id="toast-root" class="d-none"></div>
 
@@ -109,7 +118,11 @@
       <span class="sticky-cartbar-sep">·</span>
       <span class="sticky-cartbar-total" id="stickyCartBarTotal">0 ₽</span>
     </div>
-    <a href="/cart" class="btn btn-brand px-4 shadow-sm rounded-pill flex-shrink-0">
+    <!-- 2026-08-04 fix: was href="/cart" — that page's markup (#cart-root/#cart-summary)
+         is disconnected from cart.js::renderCartPage() contract (#cart/#emptyCart/#cartReal),
+         so it always showed a static empty-cart placeholder regardless of real cart content.
+         Offcanvas checkout button already points straight to /checkout — mirrored here. -->
+    <a href="/checkout" class="btn btn-brand px-4 shadow-sm rounded-pill flex-shrink-0">
       <i class="bi bi-cart3 me-2"></i>Оформить
     </a>
   </div>
