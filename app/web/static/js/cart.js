@@ -338,11 +338,14 @@ const CartManager = (function () {
   // including delivery at all and never reacted to #f-zone on checkout.
   // Shared here so both widgets follow the same "don't guess" rule as
   // updateCheckoutTotal: 0 on pickup, 0 (goods-only) until a zone is
-  // actually selected, real per-zone fee once it is.
+  // actually selected, real per-zone fee once it is. Also now respects
+  // appliedPromo.free_delivery (was ignored here — a free-delivery promo
+  // updated the checkout order summary but not these two widgets).
   async function _widgetDeliveryFee(totalItems) {
     if (totalItems === 0) return 0;
     const pickupEl = document.getElementById('delivery_pickup');
     if (pickupEl && pickupEl.checked) return 0;
+    if (appliedPromo && appliedPromo.free_delivery) return 0;
     const zoneSelect = document.getElementById('f-zone');
     const zoneId = zoneSelect ? (zoneSelect.value || null) : null;
     if (!zoneId) return 0;
@@ -356,8 +359,12 @@ const CartManager = (function () {
     const items = loadCart();
     const totalItems = getTotalItems(items);
     const subtotal = getTotalPrice(items);
+    // 2026-08-04 fix: discountRub was never applied here — a promo code
+    // updated the checkout order summary but not this bar. Mirrors the
+    // Math.max(0, subtotal - discountRub) done in updateCheckoutTotal.
+    const discountRub = appliedPromo ? Math.min(appliedPromo.discount_rub, subtotal) : 0;
     const currentDeliveryFee = await _widgetDeliveryFee(totalItems);
-    const totalPrice = subtotal + currentDeliveryFee;
+    const totalPrice = Math.max(0, subtotal - discountRub) + currentDeliveryFee;
 
     bar.classList.toggle('visible', totalItems > 0);
     document.body.classList.toggle('has-sticky-cartbar', totalItems > 0);
@@ -376,8 +383,10 @@ const CartManager = (function () {
     const items = loadCart();
     const totalItems = getTotalItems(items);
     const subtotal = getTotalPrice(items);
+    // 2026-08-04 fix: same discountRub gap as updateStickyCartBar above.
+    const discountRub = appliedPromo ? Math.min(appliedPromo.discount_rub, subtotal) : 0;
     const currentDeliveryFee = await _widgetDeliveryFee(totalItems);
-    const totalPrice = subtotal + currentDeliveryFee;
+    const totalPrice = Math.max(0, subtotal - discountRub) + currentDeliveryFee;
 
     const summaryEl = document.getElementById('navbarCartSummary');
     if (summaryEl) {
@@ -1276,11 +1285,6 @@ function wirePromoWidget() {
   const hiddenCodeEl = document.getElementById('f-promo-code');
   if (!input || !applyBtn || !resultEl || !hiddenCodeEl) return;
 
-  const isPickupNow = () => {
-    const el = document.querySelector('input[name="delivery_mode"]:checked');
-    return el ? el.value === 'pickup' : false;
-  };
-
   const showResult = (text, ok) => {
     resultEl.textContent = text;
     resultEl.classList.remove('d-none', 'text-success', 'text-danger');
@@ -1290,7 +1294,11 @@ function wirePromoWidget() {
   const clearAppliedPromo = () => {
     CartManager.setAppliedPromo(null);
     hiddenCodeEl.value = '';
-    CartManager.updateCheckoutTotal(isPickupNow());
+    // 2026-08-04 fix: was updateCheckoutTotal() only — left navbar/sticky
+    // bar totals stuck on their pre-promo value. updateAllUI() also updates
+    // updateNavbarCart()/updateStickyCartBar(), which now factor in
+    // appliedPromo (see _widgetDeliveryFee / discountRub in those functions).
+    CartManager.updateAllUI();
   };
 
   // Код в поле изменён после последней проверки — старая скидка больше не
@@ -1338,7 +1346,8 @@ function wirePromoWidget() {
     } finally {
       applyBtn.disabled = false;
       applyBtn.innerHTML = originalText;
-      await CartManager.updateCheckoutTotal(isPickupNow());
+      // same fix as clearAppliedPromo above — navbar/sticky bar need this too
+      await CartManager.updateAllUI();
     }
   });
 }

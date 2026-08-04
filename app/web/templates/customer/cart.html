@@ -24,5 +24,11 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
+<!-- 2026-08-04 fix: shop_base.html already includes /static/js/cart.js
+     unconditionally (outside any block) — this duplicate <script src> caused
+     "Identifier 'CartManager' has already been declared" on every /cart
+     page load, aborting the second parse before it could run anything
+     (harmless per se since the first copy already ran, but dead weight and
+     a confusing console error). Removed, not re-added — nothing on this
+     page needs a script beyond what shop_base.html already provides. -->
 {% endblock %}
