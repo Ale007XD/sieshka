@@ -557,11 +557,15 @@ const CartManager = (function () {
 
     container.innerHTML = html;
 
-    const currentDeliveryFee = subtotal > 0 ? await getDeliveryFee() : 0;
-    const grandTotal = subtotal + currentDeliveryFee;
+    // 2026-08-04 fix: this page has no zone selector — the zone is chosen
+    // only at checkout. Fetching+showing settings.DELIVERY_FEE here was a
+    // guess dressed up as a number (577); replaced with an explicit "depends
+    // on zone" message, no network call, no false precision. Grand total
+    // reflects goods only until the zone is known.
+    const grandTotal = subtotal;
 
     if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
-    if (deliveryEl) deliveryEl.textContent = formatPrice(currentDeliveryFee) + (subtotal > 0 ? ' (ориентировочно, зависит от зоны)' : '');
+    if (deliveryEl) deliveryEl.textContent = subtotal > 0 ? 'Будет зависеть от зоны' : '0 ₽';
     if (totalEl) totalEl.textContent = formatPrice(grandTotal);
   }
 
@@ -646,8 +650,10 @@ const CartManager = (function () {
 
     html += '</div>';
 
-    const currentDeliveryFee = await getDeliveryFee();
-    const grandTotal = subtotal + currentDeliveryFee;
+    // 2026-08-04 fix: same as updateOffcanvasCart above — no zone selector
+    // on this page, flat-fee fetch replaced with explicit "depends on zone"
+    // message. Grand total = goods only until zone is known at checkout.
+    const grandTotal = subtotal;
 
     html += `
       <div class="cart-totals mt-3 pt-3 border-top">
@@ -657,7 +663,7 @@ const CartManager = (function () {
         </div>
         <div class="d-flex justify-content-between mb-2">
           <span class="text-muted">Доставка:</span>
-          <span class="fw-semibold" id="cartPageDeliveryFee">${formatPrice(currentDeliveryFee)} (ориентировочно, зависит от зоны)</span>
+          <span class="fw-semibold" id="cartPageDeliveryFee">Будет зависеть от зоны</span>
         </div>
         <div class="d-flex justify-content-between fw-bold h5 mb-0 mt-2 pt-2 border-top">
           <span>Итого к оплате:</span>
@@ -699,17 +705,33 @@ const CartManager = (function () {
       // of truth for checkout totals (zone AND promo aware).
       const zoneSelect = document.getElementById('f-zone');
       const zoneId = zoneSelect ? (zoneSelect.value || null) : null;
-      const baseDeliveryFee = await getDeliveryFee(zoneId);
-      let effectiveFee = isPickup ? 0 : baseDeliveryFee;
+      const zoneKnown = !isPickup && !!zoneId;
 
       const discountRub = appliedPromo ? Math.min(appliedPromo.discount_rub, subtotal) : 0;
-      if (appliedPromo && appliedPromo.free_delivery) effectiveFee = 0;
+      const freeDelivery = !!(appliedPromo && appliedPromo.free_delivery);
+
+      // 2026-08-04: showing settings.DELIVERY_FEE (flat fallback) before a
+      // zone is picked was a guess dressed up as a real number — replaced
+      // with an explicit "depends on zone" message, and the guessed fee is
+      // no longer added into the grand total until the zone is actually
+      // known (or pickup/free-delivery-promo makes it moot regardless).
+      let effectiveFee = 0;
+      let deliveryText;
+      if (isPickup) {
+        deliveryText = '0 ₽ (самовывоз)';
+      } else if (freeDelivery) {
+        deliveryText = formatPrice(0);
+      } else if (!zoneKnown) {
+        deliveryText = 'Будет зависеть от зоны';
+      } else {
+        effectiveFee = await getDeliveryFee(zoneId);
+        deliveryText = formatPrice(effectiveFee);
+      }
+
       const grandTotal = Math.max(0, subtotal - discountRub) + effectiveFee;
 
       if (subtotalEl) subtotalEl.textContent = formatPrice(subtotal);
-      if (deliveryEl) deliveryEl.textContent = isPickup
-        ? '0 ₽ (самовывоз)'
-        : formatPrice(effectiveFee);
+      if (deliveryEl) deliveryEl.textContent = deliveryText;
       if (grandTotalEl) grandTotalEl.textContent = formatPrice(grandTotal);
 
       if (discountRowEl && discountEl) {
