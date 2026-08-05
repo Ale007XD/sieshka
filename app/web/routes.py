@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from nano_vm_mcp.store import ProgramStore
+from pydantic import BaseModel
 from starlette.responses import Response
 
 from app.api.routes.admin import get_transitions_store
@@ -190,6 +191,53 @@ async def inventory_sync(
             "sync_result": result,
         },
     )
+
+
+@router.get("/inventory/items")
+async def inventory_items(
+    service: InventoryService = Depends(get_inventory_service),
+) -> dict[str, Any]:
+    """JSON list for the Alpine-driven inventory page (sprint_inventory_
+    restock_inline, 2026-08) — separate from the htmx-polled HTML partial
+    above, which stays as-is for its existing tests/backward compat."""
+    items = await service.list_inventory()
+    return {"items": [i.model_dump(mode="json") for i in items]}
+
+
+@router.post("/inventory/sync-json")
+async def inventory_sync_json(
+    service: InventoryService = Depends(get_inventory_service),
+) -> dict[str, Any]:
+    """JSON variant of inventory_sync above, for the Alpine page's Sync
+    button — same InventoryService.sync_from_menu call, JSON response
+    instead of a re-rendered HTML partial."""
+    result = await service.sync_from_menu()
+    items = await service.list_inventory()
+    return {
+        "created": result.created,
+        "skipped_no_sku": result.skipped_no_sku,
+        "items": [i.model_dump(mode="json") for i in items],
+    }
+
+
+class InventoryQuantityUpdate(BaseModel):
+    quantity: int
+
+
+@router.patch("/inventory/{sku}")
+async def inventory_set_quantity(
+    sku: str,
+    payload: InventoryQuantityUpdate,
+    service: InventoryService = Depends(get_inventory_service),
+) -> dict[str, Any]:
+    """Admin inline-edit: sets an absolute quantity for one sku (sprint_
+    inventory_restock_inline, 2026-08). Recomputes state from the new
+    quantity in the same transaction — see InventoryService.set_quantity."""
+    try:
+        item = await service.set_quantity(sku, payload.quantity)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"item": item.model_dump(mode="json")}
 
 
 @router.get("/promotions", response_class=Response)

@@ -14,6 +14,7 @@ from app.tools.inventory_tools import (
     check_inventory_stock,
     decrement_inventory,
     increment_inventory,
+    set_inventory_quantity,
     set_inventory_state,
 )
 
@@ -221,3 +222,69 @@ class TestIncrementInventoryLedger:
             await increment_inventory(mock_session, sku="coffee", quantity=5)
 
         record.assert_not_awaited()
+
+
+class TestSetInventoryQuantity:
+    """sprint_inventory_restock_inline (2026-08) — admin inline-edit sets an
+    absolute quantity, unlike increment/decrement's delta semantics."""
+
+    async def test_success_writes_new_quantity(self, mock_session: AsyncMock) -> None:
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
+
+        result = await set_inventory_quantity(mock_session, sku="coffee", quantity=25)
+
+        assert result == "OK"
+        update_call = mock_session.execute.await_args_list[1]
+        assert update_call.args[1] == {"sku": "coffee", "qty": 25}
+
+    async def test_sku_not_found_raises(self, mock_session: AsyncMock) -> None:
+        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+
+        with pytest.raises(ValueError, match="sku not found"):
+            await set_inventory_quantity(mock_session, sku="coffee", quantity=25)
+
+    async def test_records_positive_delta_as_adjustment(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
+
+        await set_inventory_quantity(mock_session, sku="coffee", quantity=25)
+
+        record.assert_awaited_once_with(mock_session, sku="coffee", delta=15, reason="ADJUSTMENT")
+
+    async def test_records_negative_delta_as_adjustment(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
+
+        await set_inventory_quantity(mock_session, sku="coffee", quantity=3)
+
+        record.assert_awaited_once_with(mock_session, sku="coffee", delta=-7, reason="ADJUSTMENT")
+
+    async def test_same_value_does_not_record_movement(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "10"
+
+        await set_inventory_quantity(mock_session, sku="coffee", quantity=10)
+
+        record.assert_not_awaited()
+
+    async def test_allows_negative_quantity(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.return_value = "5"
+
+        result = await set_inventory_quantity(mock_session, sku="coffee", quantity=-3)
+
+        assert result == "OK"
+        update_call = mock_session.execute.await_args_list[-1]
+        assert update_call.args[1] == {"sku": "coffee", "qty": -3}

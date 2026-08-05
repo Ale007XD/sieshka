@@ -10,6 +10,7 @@ COPY pyproject.toml ./
 COPY app ./app
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY scripts ./scripts
 
 RUN pip install --no-cache-dir --break-system-packages -e ".[nano]"
 

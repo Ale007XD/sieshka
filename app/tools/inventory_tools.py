@@ -113,6 +113,45 @@ async def increment_inventory(
     return "OK"
 
 
+async def set_inventory_quantity(
+    session: AsyncSession, sku: str, quantity: int, **kwargs: object
+) -> str:
+    """
+    Terminal tool: sets inventory quantity to an absolute value — manual
+    stock-take / correction via admin inline edit (sprint_inventory_restock_
+    inline, 2026-08). Unlike increment_inventory/decrement_inventory (delta-
+    based, decrement_inventory blocks on insufficient stock), this writes
+    exactly the value the admin typed, including negative — they're
+    overriding a count, not transacting a sale or a delivery.
+
+    Writes one inventory_movements row for the resulting delta (skipped if
+    delta is 0 — re-saving the same value is a no-op, not a movement).
+    """
+    from sqlalchemy import text as sql_text
+
+    from app.services.inventory_ledger import record_movement
+
+    row = await session.execute(
+        sql_text("SELECT quantity FROM inventory WHERE sku = :sku FOR UPDATE"),
+        {"sku": sku},
+    )
+    current = row.scalar_one_or_none()
+    if current is None:
+        logger.warning("set_inventory_quantity: sku=%s not found", sku)
+        raise ValueError(f"sku not found: {sku}")
+    delta = quantity - int(current)
+    await session.execute(
+        sql_text("UPDATE inventory SET quantity = :qty WHERE sku = :sku"),
+        {"sku": sku, "qty": quantity},
+    )
+    if delta != 0:
+        await record_movement(session, sku=sku, delta=delta, reason="ADJUSTMENT")
+    logger.info(
+        "set_inventory_quantity: sku=%s quantity=%d (delta=%d)", sku, quantity, delta
+    )
+    return "OK"
+
+
 async def set_inventory_state(
     session: AsyncSession, sku: str, **kwargs: object
 ) -> str:

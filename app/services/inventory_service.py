@@ -74,6 +74,35 @@ class InventoryService:
             await session.commit()
             return InventorySyncResult(created=created, skipped_no_sku=skipped_no_sku)
 
+    async def set_quantity(self, sku: str, quantity: int) -> InventoryItemRead:
+        """
+        Admin inline-edit: sets an absolute quantity for one sku and
+        recomputes state from the new quantity in the same transaction, so
+        `state` never goes stale relative to `quantity` (sprint_inventory_
+        restock_inline, 2026-08). Raises ValueError if sku not found —
+        caller (the HTTP route) is responsible for turning that into a 404.
+        """
+        from app.tools.inventory_tools import set_inventory_quantity, set_inventory_state
+
+        async with self._session_factory() as session:
+            await set_inventory_quantity(session, sku=sku, quantity=quantity)
+            await set_inventory_state(session, sku=sku)
+            await session.commit()
+
+            result = await session.execute(
+                text("SELECT sku, name, quantity, state FROM inventory WHERE sku = :sku"),
+                {"sku": sku},
+            )
+            row = result.fetchone()
+            if row is None:
+                raise RuntimeError(f"sku {sku!r} vanished between write and read-back")
+            return InventoryItemRead(
+                sku=row._mapping["sku"],
+                name=row._mapping["name"],
+                quantity=row._mapping["quantity"],
+                state=InventoryState(row._mapping["state"]),
+            )
+
     async def list_inventory(self) -> list[InventoryItemRead]:
         async with self._session_factory() as session:
             result = await session.execute(
