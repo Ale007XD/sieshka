@@ -306,6 +306,7 @@ async def menu_products_generate_skus(
     products, counts = await service.get_admin_data()
     return {
         "generated": result.generated,
+        "adopted_legacy": result.adopted_legacy,
         "assigned": result.assigned,
         "products": _product_view(products),
         "counts": counts.model_dump(),

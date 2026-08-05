@@ -396,7 +396,9 @@ function menuAdmin() {
         const data = await resp.json();
         if (data.products) this.products = data.products;
         if (data.counts) this.counts = data.counts;
-        this.skuResult = `Assigned ${data.generated} sku(s).`;
+        this.skuResult = `Assigned ${data.generated} sku(s)`
+          + (data.adopted_legacy ? ` (${data.adopted_legacy} adopted from existing inventory)` : '')
+          + '.';
       } catch (e) {
         this.skuResult = String(e);
       } finally {

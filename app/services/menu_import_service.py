@@ -105,6 +105,7 @@ class SkuGenerationResult(BaseModel):
     """Result of a batch auto-generate-missing-skus run."""
 
     generated: int
+    adopted_legacy: int  # of `generated`, how many reused an existing inventory sku
     assigned: list[dict[str, str]]  # [{"product_id": ..., "name": ..., "sku": ...}]
 
 
@@ -439,12 +440,24 @@ class MenuImportService:
         """
         Batch-assigns a sku to every product where sku IS NULL, so
         sprint_inventory_menu_sync's sync_from_menu has something to key
-        off. Slug of name (see _slugify_sku), collisions get a -2/-3/...
-        suffix — checked against both already-committed skus and skus
-        assigned earlier in this same batch. Manually-set skus (non-NULL)
-        are never touched — this only fills gaps, same "fills gaps, doesn't
-        overwrite" contract as InventoryService.sync_from_menu.
+        off. Manually-set skus (non-NULL) are never touched — this only
+        fills gaps, same "fills gaps, doesn't overwrite" contract as
+        InventoryService.sync_from_menu.
 
+        LEGACY ADOPTION (2026-08 fix — see DECISIONS.md, duplicate-row
+        incident): before minting a fresh sku, checks for an existing
+        `inventory` row whose name matches the product's name
+        (case-insensitive) and whose sku isn't already claimed by another
+        product. If found, adopts that sku instead of generating a new one.
+        Without this, a product with a pre-existing hand-picked inventory
+        row (e.g. sku='burger-firm', predating products.sku entirely) got a
+        second, disconnected ITEM-<id> row instead of being linked to the
+        one that already carried real stock — sync_from_menu then created a
+        duplicate 0-quantity row alongside the real one.
+
+        Falls back to slug-of-name (see _slugify_sku) when no legacy match
+        exists; collisions get a -2/-3/... suffix, checked against both
+        already-committed skus and skus assigned earlier in this same batch.
         Empty-after-slugify names (non-Latin, e.g. Cyrillic/Vietnamese with
         no ASCII characters) fall back to ITEM-<first 8 chars of product id>.
         """
@@ -452,21 +465,34 @@ class MenuImportService:
             existing = await session.execute(text("SELECT sku FROM products WHERE sku IS NOT NULL"))
             taken = {row._mapping["sku"] for row in existing.fetchall()}
 
+            inv_rows = await session.execute(text("SELECT sku, name FROM inventory"))
+            legacy_by_name: dict[str, str] = {}
+            for inv_row in inv_rows.fetchall():
+                key = inv_row._mapping["name"].strip().lower()
+                legacy_by_name.setdefault(key, inv_row._mapping["sku"])
+
             rows = await session.execute(
                 text("SELECT id, name FROM products WHERE sku IS NULL ORDER BY name")
             )
             targets = rows.fetchall()
 
             assigned: list[dict[str, str]] = []
+            adopted_legacy = 0
             for row in targets:
                 product_id = row._mapping["id"]
                 name = row._mapping["name"]
-                base = _slugify_sku(name) or f"ITEM-{str(product_id)[:8].upper()}"
-                candidate = base
-                suffix = 2
-                while candidate in taken:
-                    candidate = f"{base}-{suffix}"
-                    suffix += 1
+
+                legacy_sku = legacy_by_name.get(name.strip().lower())
+                if legacy_sku is not None and legacy_sku not in taken:
+                    candidate = legacy_sku
+                    adopted_legacy += 1
+                else:
+                    base = _slugify_sku(name) or f"ITEM-{str(product_id)[:8].upper()}"
+                    candidate = base
+                    suffix = 2
+                    while candidate in taken:
+                        candidate = f"{base}-{suffix}"
+                        suffix += 1
                 taken.add(candidate)
 
                 await session.execute(
@@ -478,8 +504,13 @@ class MenuImportService:
                 )
 
             await session.commit()
-            logger.info("generate_missing_skus: assigned %d sku(s)", len(assigned))
-            return SkuGenerationResult(generated=len(assigned), assigned=assigned)
+            logger.info(
+                "generate_missing_skus: assigned %d sku(s), %d adopted from legacy inventory",
+                len(assigned), adopted_legacy,
+            )
+            return SkuGenerationResult(
+                generated=len(assigned), adopted_legacy=adopted_legacy, assigned=assigned,
+            )
 
     # ------------------------------------------------------------------
     # DB reads
