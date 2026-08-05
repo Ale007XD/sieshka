@@ -452,12 +452,20 @@ async def report_invalid_category_command(reason: str, **kwargs: object) -> str:
 
 def _required_update_product_fields(
     command: Any,
-) -> tuple[str, str | None, str | None, int | None, str | None, str | None, bool | None] | None:
-    """Extract (product_id, name, category, price_rub, description, image_url, is_active).
+) -> tuple[
+    str, str | None, str | None, int | None, str | None, str | None, bool | None, str | None
+] | None:
+    """Extract (product_id, name, category, price_rub, description, image_url,
+    is_active, sku).
 
     product_id is required (UUID string). All other fields are optional —
     None means "leave unchanged" (COALESCE pattern at write time).
     Returns None on any structural problem.
+
+    sku: manual editing support for sprint_inventory_menu_sync's auto-generated
+    skus (2026-08) — non-empty string if provided, uniqueness checked
+    separately (validate_update_product_command pre-check + apply-time
+    TOCTOU re-check), same two-layer discipline as category resolution.
     """
     if not isinstance(command, dict):
         return None
@@ -510,6 +518,10 @@ def _required_update_product_fields(
     else:
         return None
 
+    sku = command.get("sku")
+    if sku is not None and (not isinstance(sku, str) or not sku.strip()):
+        return None
+
     return (
         product_id.strip(),
         name.strip() if name else None,
@@ -518,6 +530,7 @@ def _required_update_product_fields(
         description,
         image_url,
         is_active,
+        sku.strip() if sku else None,
     )
 
 
@@ -544,7 +557,7 @@ async def validate_update_product_command(
     parsed = _required_update_product_fields(command)
     if parsed is None:
         return _reject("malformed command")
-    product_id, _name, category, _price, _desc, _img, _active = parsed
+    product_id, _name, category, _price, _desc, _img, _active, sku = parsed
 
     existing = await session.execute(
         text("SELECT id FROM products WHERE id = :id"),
@@ -581,7 +594,10 @@ async def apply_update_product_command(
     is_terminal, no downstream CONDITION → MUST raise on any write failure.
 
     TOCTOU RE-CHECK: product row locked with FOR UPDATE; category re-resolved
-    inside the same transaction (same discipline as apply_menu_command).
+    inside the same transaction (same discipline as apply_menu_command). sku
+    uniqueness re-checked the same way — the column is also DB-level UNIQUE
+    (migrations/015_products_sku.sql), so a race would surface as an
+    IntegrityError instead of this clean ValueError without the re-check.
 
     Only fields present and non-None in the command are updated; absent fields
     are left unchanged via COALESCE (same pattern as zone_agent update action).
@@ -589,7 +605,7 @@ async def apply_update_product_command(
     parsed = _required_update_product_fields(command)
     if parsed is None:
         raise ValueError("apply_update_product_command: malformed command")
-    product_id, name, category, price_rub, description, image_url, is_active = parsed
+    product_id, name, category, price_rub, description, image_url, is_active, sku = parsed
 
     existing = await session.execute(
         text("SELECT id FROM products WHERE id = :id FOR UPDATE"),
@@ -622,6 +638,18 @@ async def apply_update_product_command(
             )
         category_id = cat_matches[0]._mapping["id"]
 
+    if sku is not None:
+        sku_conflict = await session.execute(
+            text("SELECT id FROM products WHERE sku = :sku AND id != :id FOR UPDATE"),
+            {"sku": sku, "id": product_id},
+        )
+        if sku_conflict.fetchall():
+            logger.error(
+                "apply_update_product_command: sku '%s' claimed by another product at write time",
+                sku,
+            )
+            raise ValueError(f"sku not uniquely available at write time: {sku!r}")
+
     await session.execute(
         text(
             "UPDATE products SET "
@@ -630,7 +658,8 @@ async def apply_update_product_command(
             "price_rub   = COALESCE(:price_rub,   price_rub), "
             "description = COALESCE(:description, description), "
             "image_url   = COALESCE(:image_url,   image_url), "
-            "is_active   = COALESCE(:is_active,   is_active) "
+            "is_active   = COALESCE(:is_active,   is_active), "
+            "sku         = COALESCE(:sku,         sku) "
             "WHERE id = :product_id"
         ),
         {
@@ -641,6 +670,7 @@ async def apply_update_product_command(
             "description": description,
             "image_url": image_url,
             "is_active": is_active,
+            "sku": sku,
         },
     )
     logger.info("apply_update_product_command: updated product id=%s", product_id)

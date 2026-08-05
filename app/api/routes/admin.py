@@ -175,6 +175,7 @@ def _product_view(products: list[Any]) -> list[dict[str, Any]]:
             "description": p.description,
             "image_url": p.image_url,
             "is_active": p.is_active,
+            "sku": p.sku,
         }
         for p in products
     ]
@@ -289,6 +290,23 @@ async def menu_product_update(
         "error": apply.error,
         "result": apply.result,
         "receipt": receipt.model_dump() if receipt is not None else None,
+        "products": _product_view(products),
+        "counts": counts.model_dump(),
+    }
+
+
+@router.post("/menu/products/generate-skus")
+async def menu_products_generate_skus(
+    service: MenuImportService = Depends(get_menu_import_service),
+) -> dict[str, Any]:
+    """Batch auto-generate skus for every product missing one (2026-08,
+    sprint_inventory_menu_sync follow-up). Slug-of-name, collision-suffixed —
+    see MenuImportService.generate_missing_skus. Manually-set skus untouched."""
+    result = await service.generate_missing_skus()
+    products, counts = await service.get_admin_data()
+    return {
+        "generated": result.generated,
+        "assigned": result.assigned,
         "products": _product_view(products),
         "counts": counts.model_dump(),
     }

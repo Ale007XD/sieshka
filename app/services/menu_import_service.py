@@ -47,6 +47,16 @@ from app.services.trace_analyzer import TraceAnalyzer
 logger = logging.getLogger(__name__)
 
 
+def _slugify_sku(name: str) -> str:
+    """Uppercase ASCII slug for auto-generated skus. Non-ASCII/non-alnum runs
+    collapse to a single '-'; leading/trailing '-' stripped. Cyrillic/Vietnamese
+    names have no Latin transliteration here — they collapse toward empty and
+    the caller falls back to a short id-based sku (see generate_missing_skus)."""
+    ascii_only = name.encode("ascii", errors="ignore").decode("ascii")
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", ascii_only).strip("-").upper()
+    return slug
+
+
 # ---------------------------------------------------------------------------
 # Row models
 # ---------------------------------------------------------------------------
@@ -81,6 +91,7 @@ class ProductAdminRow(BaseModel):
     description: str | None = None
     image_url: str | None = None
     is_active: bool
+    sku: str | None = None
 
 
 class IncompleteCounts(BaseModel):
@@ -88,6 +99,13 @@ class IncompleteCounts(BaseModel):
 
     null_category: int
     null_price: int
+
+
+class SkuGenerationResult(BaseModel):
+    """Result of a batch auto-generate-missing-skus run."""
+
+    generated: int
+    assigned: list[dict[str, str]]  # [{"product_id": ..., "name": ..., "sku": ...}]
 
 
 class ImportReport(BaseModel):
@@ -417,6 +435,52 @@ class MenuImportService:
             counts = await self._load_incomplete_counts(session)
             return products, counts
 
+    async def generate_missing_skus(self) -> SkuGenerationResult:
+        """
+        Batch-assigns a sku to every product where sku IS NULL, so
+        sprint_inventory_menu_sync's sync_from_menu has something to key
+        off. Slug of name (see _slugify_sku), collisions get a -2/-3/...
+        suffix — checked against both already-committed skus and skus
+        assigned earlier in this same batch. Manually-set skus (non-NULL)
+        are never touched — this only fills gaps, same "fills gaps, doesn't
+        overwrite" contract as InventoryService.sync_from_menu.
+
+        Empty-after-slugify names (non-Latin, e.g. Cyrillic/Vietnamese with
+        no ASCII characters) fall back to ITEM-<first 8 chars of product id>.
+        """
+        async with self._session_factory() as session:
+            existing = await session.execute(text("SELECT sku FROM products WHERE sku IS NOT NULL"))
+            taken = {row._mapping["sku"] for row in existing.fetchall()}
+
+            rows = await session.execute(
+                text("SELECT id, name FROM products WHERE sku IS NULL ORDER BY name")
+            )
+            targets = rows.fetchall()
+
+            assigned: list[dict[str, str]] = []
+            for row in targets:
+                product_id = row._mapping["id"]
+                name = row._mapping["name"]
+                base = _slugify_sku(name) or f"ITEM-{str(product_id)[:8].upper()}"
+                candidate = base
+                suffix = 2
+                while candidate in taken:
+                    candidate = f"{base}-{suffix}"
+                    suffix += 1
+                taken.add(candidate)
+
+                await session.execute(
+                    text("UPDATE products SET sku = :sku WHERE id = :id"),
+                    {"sku": candidate, "id": product_id},
+                )
+                assigned.append(
+                    {"product_id": str(product_id), "name": name, "sku": candidate}
+                )
+
+            await session.commit()
+            logger.info("generate_missing_skus: assigned %d sku(s)", len(assigned))
+            return SkuGenerationResult(generated=len(assigned), assigned=assigned)
+
     # ------------------------------------------------------------------
     # DB reads
     # ------------------------------------------------------------------
@@ -477,7 +541,7 @@ class MenuImportService:
             text(
                 "SELECT p.id AS id, p.name AS name, c.name AS category_name, "
                 "p.price_rub AS price_rub, p.description AS description, "
-                "p.image_url AS image_url, p.is_active AS is_active "
+                "p.image_url AS image_url, p.is_active AS is_active, p.sku AS sku "
                 "FROM products p "
                 "LEFT JOIN categories c ON p.category_id = c.id "
                 "ORDER BY p.name"
@@ -493,6 +557,7 @@ class MenuImportService:
                 description=row._mapping["description"],
                 image_url=row._mapping["image_url"],
                 is_active=row._mapping["is_active"],
+                sku=row._mapping["sku"],
             )
             for row in rows
         ]
