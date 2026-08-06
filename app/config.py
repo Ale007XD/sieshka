@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # Telegram (M2+)
     TELEGRAM_BOT_TOKEN: str = ""
 
+    # MAX messenger (sprint_max_client)
+    # platform-api2.max.ru per Mintsifry TLS migration notice (deadline
+    # 2026-07-19) — platform-api.max.ru (no "2") is the pre-migration host.
+    MAX_BOT_TOKEN: str = ""
+    MAX_API_BASE_URL: str = "https://platform-api2.max.ru"
+
     # Dashboard auth (M6+)
     DASHBOARD_USER: str = "admin"
     DASHBOARD_PASSWORD_HASH: str = ""
