@@ -12,6 +12,26 @@
   </button>
 </div>
 
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+  <label class="block text-sm font-medium text-gray-700 mb-2">Restock (natural language)</label>
+  <div class="flex gap-3">
+    <input x-model="restockText" type="text" placeholder="Добавь 50 штук на burger-firm"
+           @keydown.enter="restock()"
+           class="flex-1 border border-gray-300 rounded-md shadow-sm text-sm p-2">
+    <button @click="restock()" :disabled="restockBusy || !restockText.trim()"
+            class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md
+                   hover:bg-green-700 disabled:opacity-50">
+      <span x-show="!restockBusy">Restock</span>
+      <span x-show="restockBusy">Working…</span>
+    </button>
+  </div>
+  <template x-if="restockResult">
+    <div class="mt-3 px-3 py-2 text-sm rounded-md"
+         :class="restockOk ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'"
+         x-text="restockResult"></div>
+  </template>
+</div>
+
 <template x-if="syncResult">
   <div class="mb-4 px-4 py-2 bg-blue-50 text-blue-800 text-sm rounded-md" x-text="syncResult"></div>
 </template>
@@ -76,6 +96,11 @@ function inventoryPanel() {
     syncBusy: false,
     syncResult: null,
 
+    restockText: '',
+    restockBusy: false,
+    restockResult: null,
+    restockOk: false,
+
     editingSku: null,
     editQuantity: 0,
     editBusy: false,
@@ -85,6 +110,40 @@ function inventoryPanel() {
       const resp = await fetch('/admin/ui/inventory/items');
       const data = await resp.json();
       this.items = data.items || [];
+    },
+
+    async restock() {
+      const instruction = this.restockText.trim();
+      if (!instruction) return;
+      this.restockBusy = true;
+      this.restockResult = null;
+      try {
+        const resp = await fetch('/admin/ui/inventory/restock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instruction }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          this.restockOk = false;
+          this.restockResult = `Server error ${resp.status}: ${text.slice(0, 200)}`;
+          return;
+        }
+        const data = await resp.json();
+        this.restockOk = data.ok;
+        if (data.items) this.items = data.items;
+        if (data.ok) {
+          this.restockResult = `Restocked ${data.command.sku} +${data.command.quantity}.`;
+          this.restockText = '';
+        } else {
+          this.restockResult = data.error || 'Restock failed.';
+        }
+      } catch (e) {
+        this.restockOk = false;
+        this.restockResult = String(e);
+      } finally {
+        this.restockBusy = false;
+      }
     },
 
     rowClass(state) {

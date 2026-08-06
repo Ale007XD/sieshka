@@ -8,12 +8,14 @@ sprint_inventory_restock_inline (2026-08)."""
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from httpx import ASGITransport, AsyncClient
 
+from app.agents.inventory_agent import InventoryAgent, InventoryAgentResult, InventoryApplyResult
 from app.domains.inventory.models import InventoryState
 from app.services.inventory_service import InventoryItemRead, InventorySyncResult
 from app.web.routes import get_inventory_service
@@ -118,5 +120,85 @@ class TestInventorySetQuantityRoute:
 
     async def test_non_integer_quantity_returns_422(self, client: AsyncClient) -> None:
         resp = await client.patch("/admin/ui/inventory/coffee", json={"quantity": "abc"})
+
+        assert resp.status_code == 422
+
+
+class TestInventoryRestockRoute:
+    """sprint_inventory_restock_agent (2026-08). InventoryAgent is instantiated
+    directly inside the route (no DI, same as PromotionAgent/promotion_apply),
+    so it's patched at the class level rather than via dependency_overrides."""
+
+    async def test_success(self, client: AsyncClient) -> None:
+        with (
+            patch.object(
+                InventoryAgent, "manage_restock",
+                AsyncMock(return_value=InventoryAgentResult(
+                    success=True, command={"sku": "coffee", "quantity": 50}
+                )),
+            ),
+            patch.object(
+                InventoryAgent, "apply_restock",
+                AsyncMock(return_value=InventoryApplyResult(
+                    applied=True, result={"applied": True, "sku": "coffee", "quantity": 50},
+                    trace_id="t1",
+                )),
+            ),
+        ):
+            resp = await client.post(
+                "/admin/ui/inventory/restock", json={"instruction": "Добавь 50 на coffee"}
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["command"] == {"sku": "coffee", "quantity": 50}
+        assert data["error"] is None
+        assert len(data["items"]) == 1
+
+    async def test_collect_failure(self, client: AsyncClient) -> None:
+        with patch.object(
+            InventoryAgent, "manage_restock",
+            AsyncMock(return_value=InventoryAgentResult(
+                success=False, error="could not identify which sku to restock"
+            )),
+        ):
+            resp = await client.post(
+                "/admin/ui/inventory/restock", json={"instruction": "gibberish"}
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["command"] is None
+        assert "sku" in data["error"]
+
+    async def test_apply_rejected(self, client: AsyncClient) -> None:
+        with (
+            patch.object(
+                InventoryAgent, "manage_restock",
+                AsyncMock(return_value=InventoryAgentResult(
+                    success=True, command={"sku": "ghost", "quantity": 5}
+                )),
+            ),
+            patch.object(
+                InventoryAgent, "apply_restock",
+                AsyncMock(return_value=InventoryApplyResult(
+                    applied=False, error="sku 'ghost' not found in inventory",
+                )),
+            ),
+        ):
+            resp = await client.post(
+                "/admin/ui/inventory/restock", json={"instruction": "Добавь 5 на ghost"}
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["command"] == {"sku": "ghost", "quantity": 5}
+        assert "not found" in data["error"]
+
+    async def test_missing_instruction_field_returns_422(self, client: AsyncClient) -> None:
+        resp = await client.post("/admin/ui/inventory/restock", json={})
 
         assert resp.status_code == 422

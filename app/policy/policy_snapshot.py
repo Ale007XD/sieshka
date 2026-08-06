@@ -139,6 +139,18 @@ PROMOTION_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "report_invalid_promotion_command": ["promotion:read"],
 }
 
+INVENTORY_AGENT_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_restock_command": ["inventory:read"],
+    "collect_restock_command": ["inventory:write"],
+    "report_collect_failure": ["inventory:read"],
+}
+
+INVENTORY_AGENT_APPLY_TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "validate_apply_restock_command": ["inventory:read"],
+    "apply_restock_command": ["inventory:write"],
+    "report_invalid_restock_command": ["inventory:read"],
+}
+
 ORDER_AGENT_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": ORDER_AGENT_TOOL_CAPABILITIES,
 }
@@ -173,6 +185,14 @@ PROMOTION_AGENT_POLICY_CONFIG: dict[str, object] = {
 
 PROMOTION_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
     "tool_capabilities": PROMOTION_AGENT_APPLY_TOOL_CAPABILITIES,
+}
+
+INVENTORY_AGENT_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": INVENTORY_AGENT_TOOL_CAPABILITIES,
+}
+
+INVENTORY_AGENT_APPLY_POLICY_CONFIG: dict[str, object] = {
+    "tool_capabilities": INVENTORY_AGENT_APPLY_TOOL_CAPABILITIES,
 }
 
 SUPPORT_AGENT_POLICY_CONFIG: dict[str, object] = {
@@ -284,6 +304,18 @@ PROMOTION_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
 PROMOTION_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
     PROMOTION_AGENT_APPLY_POLICY_CONFIG,
     policy_id="promotion-agent-apply-v1",
+    version="1.0.0",
+)
+
+INVENTORY_AGENT_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    INVENTORY_AGENT_POLICY_CONFIG,
+    policy_id="inventory-agent-v1",
+    version="1.0.0",
+)
+
+INVENTORY_AGENT_APPLY_POLICY_SNAPSHOT: PolicySnapshot = PolicySnapshot.from_config(
+    INVENTORY_AGENT_APPLY_POLICY_CONFIG,
+    policy_id="inventory-agent-apply-v1",
     version="1.0.0",
 )
 

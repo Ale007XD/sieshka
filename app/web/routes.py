@@ -9,6 +9,7 @@ from nano_vm_mcp.store import ProgramStore
 from pydantic import BaseModel
 from starlette.responses import Response
 
+from app.agents.inventory_agent import InventoryAgent
 from app.api.routes.admin import get_transitions_store
 from app.domains.kitchen.fsm import KitchenState
 from app.domains.orders.models import OrderRead, OrderState
@@ -238,6 +239,41 @@ async def inventory_set_quantity(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return {"item": item.model_dump(mode="json")}
+
+
+class InventoryRestockRequest(BaseModel):
+    instruction: str
+
+
+@router.post("/inventory/restock")
+async def inventory_restock(
+    payload: InventoryRestockRequest,
+    service: InventoryService = Depends(get_inventory_service),
+) -> dict[str, Any]:
+    """Run a free-text restock instruction through InventoryAgent end-to-end.
+
+    Collect phase (LLM parse) -> apply phase (governed write, increment_
+    inventory reason=RESTOCK_AGENT). Same shape as /admin/promotions/apply.
+    """
+    agent = InventoryAgent()
+    collect = await agent.manage_restock({"input_text": payload.instruction})
+    if not collect.success or collect.command is None:
+        items = await service.list_inventory()
+        return {
+            "ok": False,
+            "error": collect.error or "unparseable instruction",
+            "command": None,
+            "items": [i.model_dump(mode="json") for i in items],
+        }
+
+    apply = await agent.apply_restock(collect.command)
+    items = await service.list_inventory()
+    return {
+        "ok": apply.applied,
+        "error": apply.error,
+        "command": collect.command,
+        "items": [i.model_dump(mode="json") for i in items],
+    }
 
 
 @router.get("/promotions", response_class=Response)
