@@ -28,6 +28,7 @@ from app.web.auth import get_current_username
 from app.web.csp import CSPMiddleware
 from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
+from app.webhooks.max import router as max_router
 from app.webhooks.yookassa import router as yookassa_router
 
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -61,6 +62,7 @@ app.include_router(menu_router)
 app.include_router(web_router, dependencies=[Depends(get_current_username)])
 app.include_router(customer_router)
 app.include_router(yookassa_router)
+app.include_router(max_router)
 
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")

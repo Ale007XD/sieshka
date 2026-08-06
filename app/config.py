@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     # 2026-07-19) — platform-api.max.ru (no "2") is the pre-migration host.
     MAX_BOT_TOKEN: str = ""
     MAX_API_BASE_URL: str = "https://platform-api2.max.ru"
+    MAX_WEBHOOK_SECRET: str = ""
 
     # Dashboard auth (M6+)
     DASHBOARD_USER: str = "admin"
