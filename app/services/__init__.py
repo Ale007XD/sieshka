@@ -8,6 +8,7 @@ from app.services.notification_service import NotificationService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService
 from app.services.promotion_service import PromotionService
+from app.services.staff_service import StaffService
 
 __all__ = [
     "DeliveryService",
@@ -21,4 +22,5 @@ __all__ = [
     "OrderService",
     "PaymentService",
     "PromotionService",
+    "StaffService",
 ]
