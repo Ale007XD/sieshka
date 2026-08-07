@@ -158,5 +158,8 @@ class CheckoutRequest(BaseModel):
     # validated client-side when not pickup
     items: list[CheckoutItem]
     idempotency_key: str
-    client_max_uid: int | None = None  # MAX mini-app user id; persisted only
+    client_max_uid: int | None = None  # MAX mini-app user id; server-verified
+    # (sprint_max_storefront) — checkout.py overrides whatever this field
+    # carries in the client-submitted JSON with either a validate_init_data()
+    # result or None; a client can no longer just claim an arbitrary id here.
     promo_code: str | None = None  # separate from `comment` — see checkout.html

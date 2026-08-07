@@ -16,15 +16,18 @@ client-generated idempotency_key — no second mechanism is introduced.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.config import settings
 from app.db import async_session_factory
 from app.domains.orders.models import CheckoutRequest, OrderEvent
 from app.services.customer_service import CustomerService
 from app.services.idempotency import IdempotencyService
+from app.services.max_webapp_auth import validate_init_data
 from app.services.menu_service import MenuService
 from app.services.order_service import (
     OrderService,
@@ -34,6 +37,8 @@ from app.services.order_service import (
 )
 from app.services.payment_service import PaymentService
 from app.services.zone_service import ZoneService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/orders", tags=["checkout"])
 promo_router = APIRouter(prefix="/api/promo", tags=["promo"])
@@ -110,6 +115,7 @@ async def _recover_idempotent_result(
 @router.post("", status_code=200, response_model=CheckoutResponse)
 async def checkout(
     body: CheckoutRequest,
+    request: Request,
     order_service: OrderService = Depends(get_order_service),
     customer_service: CustomerService = Depends(get_customer_service),
     menu_service: MenuService = Depends(get_menu_service),
@@ -129,6 +135,19 @@ async def checkout(
         )
     if not body.items:
         raise HTTPException(status_code=400, detail="order must contain at least one item")
+
+    # sprint_max_storefront: body.client_max_uid is an unverified client
+    # claim until this point — a plain int anyone could set in the JSON
+    # body regardless of whether they came from MAX at all. Overriding it
+    # here (not merging/coalescing) means only a request MAX itself signed
+    # can end up with a non-null client_max_uid persisted on the order.
+    web_app_data = request.headers.get("X-Max-Init-Data")
+    verified_max_uid: int | None = None
+    if web_app_data:
+        verified_max_uid = validate_init_data(web_app_data, settings.MAX_BOT_TOKEN)
+        if verified_max_uid is None:
+            logger.warning("checkout: X-Max-Init-Data present but failed validation")
+    body.client_max_uid = verified_max_uid
 
     # Idempotency: key supplied by the client, wired into the existing service.
     idem_key = f"{_IDEMPOTENCY_PREFIX}{body.idempotency_key}"
@@ -213,8 +232,7 @@ async def checkout(
     await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
     cooking = await order_service.transition_order(str(order.id), OrderEvent.START_COOKING)
     if not cooking.success:
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "checkout: START_COOKING failed for cash order %s: %s",
             order.id, cooking.reason,
         )
