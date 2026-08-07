@@ -35,6 +35,7 @@ from app.tools.notification_tools import (
     notify_order_delivered,
     notify_order_failed,
     notify_payment_received,
+    notify_staff_new_kitchen_ticket,
 )
 from app.tools.order_agent_tools import (
     collect_order_command,
@@ -91,6 +92,7 @@ __all__ = [
     "notify_order_delivered",
     "notify_order_failed",
     "notify_payment_received",
+    "notify_staff_new_kitchen_ticket",
     "reserve_inventory_items",
     "set_inventory_state",
     "transition_order_state",

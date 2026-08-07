@@ -37,6 +37,7 @@ from app.programs.order_programs import (
 from app.repositories.kitchen_repo import KitchenRepository
 from app.repositories.order_repo import OrderRepository
 from app.services.menu_service import MenuService
+from app.tools.notification_tools import notify_staff_new_kitchen_ticket
 from app.tools.order_tools import (
     create_kitchen_ticket,
     log_validation_failure,
@@ -529,6 +530,7 @@ _ORDER_TOOLS: dict[str, Callable[..., Any]] = {
     "create_kitchen_ticket": create_kitchen_ticket,
     "log_validation_failure": log_validation_failure,
     "notify_inventory_insufficient": notify_inventory_insufficient,
+    "notify_staff_new_kitchen_ticket": notify_staff_new_kitchen_ticket,
     "transition_order_state": transition_order_state,
 }
 

@@ -144,6 +144,14 @@ PROGRAM_START_COOKING = Program(
             tool="write_order_state_cooking",  # terminal-tool
             args={"order_id": "$order_id", "ticket_id": "$create_kitchen_ticket.output"},
             output_key="write_result",
+            next_step="notify_staff_kitchen_ticket",
+        ),
+        Step(
+            id="notify_staff_kitchen_ticket",
+            type=StepType.TOOL,
+            tool="notify_staff_new_kitchen_ticket",
+            args={"order_id": "$order_id", "ticket_id": "$create_kitchen_ticket.output"},
+            output_key="notify_staff_result",
             is_terminal=True,
         ),
     ],

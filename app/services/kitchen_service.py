@@ -95,6 +95,21 @@ class KitchenService:
                                 "KitchenService: CLOSE failed for pickup order %s: %s",
                                 order_id, close.reason,
                             )
+                    else:
+                        # sprint_max_staff_notify: pickup orders skip courier
+                        # entirely (closed above); delivery orders now need a
+                        # courier — broadcast PACKING/ASSIGN_COURIER to every
+                        # active courier. Fire-and-forget by construction
+                        # (notify_courier_order_state never raises) — this
+                        # runs after packing.success already returned True,
+                        # so there is no transition left here for a
+                        # notification failure to roll back.
+                        from app.domains.orders.models import OrderState
+                        from app.services.max_staff_notify import (
+                            notify_courier_order_state,
+                        )
+
+                        await notify_courier_order_state(order_id, OrderState.PACKING)
             except Exception:
                 logger.exception(
                     "KitchenService: error advancing order after HAND_OFF ticket=%s",
@@ -102,6 +117,19 @@ class KitchenService:
                 )
 
         return result
+
+    async def get_order_id(self, ticket_id: str) -> str | None:
+        """sprint_max_staff_notify: resolves a kitchen ticket's order_id — the
+        MAX webhook's chain-notify (app.webhooks.max) only has ticket_id from
+        the callback payload, not order_id, and needs it for the notify text.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text("SELECT order_id FROM kitchen_tickets WHERE id = :id"),
+                {"id": UUID(ticket_id)},
+            )
+            row = result.fetchone()
+            return str(row._mapping["order_id"]) if row is not None else None
 
     async def list_tickets(
         self,

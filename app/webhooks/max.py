@@ -41,12 +41,16 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.domains.kitchen.fsm import KitchenEvent
-from app.domains.orders.models import OrderEvent
+from app.domains.kitchen.fsm import KitchenEvent, KitchenState
+from app.domains.orders.models import OrderEvent, OrderState
 from app.domains.staff.models import StaffRole
 from app.fsm.core.base import TransitionResult
 from app.services.kitchen_service import KitchenService
 from app.services.max_client import MaxClient, max_client
+from app.services.max_staff_notify import (
+    notify_courier_order_state,
+    notify_kitchen_ticket_state,
+)
 from app.services.order_service import OrderService
 from app.services.staff_service import StaffService
 
@@ -216,5 +220,34 @@ async def max_webhook(
         await client.answer_callback(
             callback_id, notification=_result_notification(result, str(event_str))
         )
+
+    if result.success and result.new_state is not None:
+        # sprint_max_staff_notify chain-notify: v1 has no message-editing (see
+        # app/services/max_staff_notify.py docstring for the tradeoff), so the
+        # NEXT allowed action is sent as a new message rather than updating
+        # this one. This is itself fire-and-forget — never lets a notify
+        # failure surface as a webhook error, since the governed transition
+        # already succeeded and answered above.
+        try:
+            if kind == "kitchen":
+                order_id = await kitchen.get_order_id(str(entity_id))
+                if order_id is not None and isinstance(result.new_state, KitchenState):
+                    await notify_kitchen_ticket_state(
+                        str(entity_id),
+                        order_id,
+                        result.new_state,
+                        staff_service=staff,
+                        client=client,
+                    )
+            elif staff_member.role == StaffRole.courier and isinstance(
+                result.new_state, OrderState
+            ):
+                await notify_courier_order_state(
+                    str(entity_id), result.new_state, staff_service=staff, client=client
+                )
+        except Exception:
+            logger.exception(
+                "MAX webhook: chain-notify failed for kind=%s id=%s", kind, entity_id
+            )
 
     return JSONResponse({"ok": True})

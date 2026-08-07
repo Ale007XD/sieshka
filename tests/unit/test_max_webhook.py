@@ -42,7 +42,12 @@ def _staff(role: StaffRole, max_user_id: int = 111) -> Staff:
 class _Mocks:
     def __init__(self) -> None:
         self.staff = AsyncMock(spec=StaffService)
+        # Chain-notify (sprint_max_staff_notify) calls list_active_by_role
+        # after every successful dispatch; default to "no staff registered
+        # yet" so existing dispatch-focused tests don't need to care about it.
+        self.staff.list_active_by_role = AsyncMock(return_value=[])
         self.kitchen = AsyncMock(spec=KitchenService)
+        self.kitchen.get_order_id = AsyncMock(return_value="order-1")
         self.orders = AsyncMock(spec=OrderService)
         self.max_client = AsyncMock(spec=MaxClient)
 
@@ -343,3 +348,127 @@ class TestOrderDispatch:
 
         assert resp.status_code == 200
         mocks.orders.transition_order.assert_not_awaited()
+
+
+class TestChainNotify:
+    """sprint_max_staff_notify: after a successful dispatch, the webhook sends
+    the NEXT allowed step's notification to the relevant role (no message-
+    editing in v1 — see app/services/max_staff_notify.py docstring)."""
+
+    async def test_kitchen_success_chain_notifies_next_stage(
+        self, client: AsyncClient, mocks: _Mocks
+    ) -> None:
+        mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.kitchen)
+        mocks.kitchen.transition_ticket.return_value = TransitionResult(
+            success=True, new_state=KitchenState.QUEUED, rejected_event=None, reason=None
+        )
+        mocks.kitchen.get_order_id.return_value = "order-1"
+        mocks.staff.list_active_by_role.return_value = [
+            _staff(StaffRole.kitchen, max_user_id=222)
+        ]
+        mock_send = AsyncMock(return_value="mid-x")
+        mocks.max_client.send_message = mock_send
+
+        resp = await client.post(
+            "/webhooks/max",
+            json=_callback_body(
+                payload={"kind": "kitchen", "id": "ticket-1", "event": "QUEUE"}
+            ),
+        )
+
+        assert resp.status_code == 200
+        mocks.kitchen.get_order_id.assert_awaited_once_with("ticket-1")
+        mock_send.assert_awaited_once()
+        args = mock_send.await_args.args
+        assert args[0] == 222  # max_user_id of the kitchen recipient
+        kwargs = mock_send.await_args.kwargs
+        # next button should be START_PREP (allowed from QUEUED)
+        payload = json.loads(kwargs["attachments"][0]["payload"]["buttons"][0][0]["payload"])
+        assert payload == {"kind": "kitchen", "id": "ticket-1", "event": "START_PREP"}
+
+    async def test_kitchen_handed_off_no_further_chain_notify(
+        self, client: AsyncClient, mocks: _Mocks
+    ) -> None:
+        mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.kitchen)
+        mocks.kitchen.transition_ticket.return_value = TransitionResult(
+            success=True, new_state=KitchenState.HANDED_OFF, rejected_event=None, reason=None
+        )
+        mock_send = AsyncMock()
+        mocks.max_client.send_message = mock_send
+
+        resp = await client.post(
+            "/webhooks/max",
+            json=_callback_body(
+                payload={"kind": "kitchen", "id": "ticket-1", "event": "HAND_OFF"}
+            ),
+        )
+
+        assert resp.status_code == 200
+        mock_send.assert_not_awaited()
+
+    async def test_courier_success_chain_notifies_next_stage(
+        self, client: AsyncClient, mocks: _Mocks
+    ) -> None:
+        mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.courier)
+        mocks.orders.transition_order.return_value = TransitionResult(
+            success=True,
+            new_state=OrderState.COURIER_ASSIGNED,
+            rejected_event=None,
+            reason=None,
+        )
+        mocks.staff.list_active_by_role.return_value = [
+            _staff(StaffRole.courier, max_user_id=333)
+        ]
+        mock_send = AsyncMock(return_value="mid-y")
+        mocks.max_client.send_message = mock_send
+
+        resp = await client.post(
+            "/webhooks/max",
+            json=_callback_body(
+                payload={"kind": "order", "id": "order-1", "event": "ASSIGN_COURIER"}
+            ),
+        )
+
+        assert resp.status_code == 200
+        mock_send.assert_awaited_once()
+        kwargs = mock_send.await_args.kwargs
+        payload = json.loads(kwargs["attachments"][0]["payload"]["buttons"][0][0]["payload"])
+        assert payload == {"kind": "order", "id": "order-1", "event": "PICKUP"}
+
+    async def test_admin_cancel_triggers_no_chain_notify(
+        self, client: AsyncClient, mocks: _Mocks
+    ) -> None:
+        mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.admin)
+        mocks.orders.transition_order.return_value = TransitionResult(
+            success=True, new_state=OrderState.CANCELLED, rejected_event=None, reason=None
+        )
+        mock_send = AsyncMock()
+        mocks.max_client.send_message = mock_send
+
+        resp = await client.post(
+            "/webhooks/max",
+            json=_callback_body(payload={"kind": "order", "id": "order-1", "event": "CANCEL"}),
+        )
+
+        assert resp.status_code == 200
+        mock_send.assert_not_awaited()
+
+    async def test_rejected_transition_triggers_no_chain_notify(
+        self, client: AsyncClient, mocks: _Mocks
+    ) -> None:
+        mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.kitchen)
+        mocks.kitchen.transition_ticket.return_value = TransitionResult(
+            success=False, new_state=None, rejected_event=None, reason="not allowed"
+        )
+        mock_send = AsyncMock()
+        mocks.max_client.send_message = mock_send
+
+        resp = await client.post(
+            "/webhooks/max",
+            json=_callback_body(
+                payload={"kind": "kitchen", "id": "ticket-1", "event": "START_PREP"}
+            ),
+        )
+
+        assert resp.status_code == 200
+        mock_send.assert_not_awaited()

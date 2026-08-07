@@ -11,6 +11,7 @@ ORDERS_TOOL_CAPABILITIES: dict[str, list[str]] = {
     "create_kitchen_ticket": ["kitchen:write"],
     "log_validation_failure": ["orders:write"],
     "notify_inventory_insufficient": ["notifications:send"],
+    "notify_staff_new_kitchen_ticket": ["notifications:send"],
     "yookassa_create_payment": ["payment:write"],
     "yookassa_verify_payment": ["payment:read"],
 }

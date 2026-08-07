@@ -80,7 +80,7 @@ class TestNotificationService:
 
 class TestNotificationTools:
     async def test_notify_order_confirmed(self) -> None:
-        with patch.object(notification_tools, "notification_service") as mock_ns:
+        with patch("app.services.notification_service.notification_service") as mock_ns:
             mock_ns.send_telegram = AsyncMock()
             result = await notification_tools.notify_order_confirmed(
                 order_id="order-1", chat_id="123"
@@ -90,7 +90,7 @@ class TestNotificationTools:
         mock_ns.send_telegram.assert_awaited_once()
 
     async def test_notify_payment_received(self) -> None:
-        with patch.object(notification_tools, "notification_service") as mock_ns:
+        with patch("app.services.notification_service.notification_service") as mock_ns:
             mock_ns.send_telegram = AsyncMock()
             result = await notification_tools.notify_payment_received(
                 order_id="order-1", chat_id="123"
@@ -100,21 +100,21 @@ class TestNotificationTools:
         mock_ns.send_telegram.assert_awaited_once()
 
     async def test_notify_order_cooking(self) -> None:
-        with patch.object(notification_tools, "notification_service") as mock_ns:
+        with patch("app.services.notification_service.notification_service") as mock_ns:
             mock_ns.send_telegram = AsyncMock()
             result = await notification_tools.notify_order_cooking(order_id="order-1")
 
         assert result == "NOTIFIED"
 
     async def test_notify_order_delivered(self) -> None:
-        with patch.object(notification_tools, "notification_service") as mock_ns:
+        with patch("app.services.notification_service.notification_service") as mock_ns:
             mock_ns.send_telegram = AsyncMock()
             result = await notification_tools.notify_order_delivered(order_id="order-1")
 
         assert result == "NOTIFIED"
 
     async def test_notify_order_failed(self) -> None:
-        with patch.object(notification_tools, "notification_service") as mock_ns:
+        with patch("app.services.notification_service.notification_service") as mock_ns:
             mock_ns.send_telegram = AsyncMock()
             result = await notification_tools.notify_order_failed(order_id="order-1")
 
