@@ -122,6 +122,7 @@ class TestCustomerRoutes:
         assert "script-src" in csp
         assert "nonce-" in csp
         assert "https://yookassa.ru" in csp
+        assert "https://st.max.ru" in csp  # sprint_max_storefront: MAX Bridge SDK
 
         # The nonce in the CSP header must match the nonce in the rendered
         # inline <script> tags (otherwise the browser rejects the scripts).

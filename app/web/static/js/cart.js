@@ -1583,19 +1583,29 @@ const errorDiv = document.getElementById('checkout-error');
         qty: item.qty
       })),
       idempotency_key: generateIdempotencyKey(),
-      promo_code: document.getElementById('f-promo-code')?.value || null,
-      client_max_uid: (() => {
-        const uid = new URLSearchParams(window.location.search).get('max_uid');
-        return uid ? (parseInt(uid, 10) || null) : null;
-      })()
+      promo_code: document.getElementById('f-promo-code')?.value || null
+      // client_max_uid intentionally NOT set here (sprint_max_storefront):
+      // the backend (app/api/routes/checkout.py) ignores whatever this
+      // field carries and derives it itself from the X-Max-Init-Data
+      // header below via validate_init_data() — a client-claimed int here
+      // was never trustworthy (that was the whole point of the sprint).
     };
+
+    // MAX Mini App: window.WebApp.initData is a raw, MAX-signed string
+    // (https://dev.max.ru/docs/webapps/bridge) — present only when this
+    // page is actually running inside the MAX client via the max-web-app.js
+    // bridge (see shop_base.html). Absent everywhere else (plain browser),
+    // in which case no header is sent and client_max_uid stays null
+    // server-side, same as before this sprint.
+    const maxInitData = (window.WebApp && window.WebApp.initData) || null;
 
     try {
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          ...(maxInitData ? { 'X-Max-Init-Data': maxInitData } : {})
         },
         body: JSON.stringify(formData)
       });

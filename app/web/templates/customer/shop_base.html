@@ -160,27 +160,18 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- MAX Bridge (sprint_max_storefront): https://dev.max.ru/docs/webapps/bridge
+     Populates window.WebApp on every page load when running inside MAX's
+     client — no-op script outside MAX (window.WebApp simply stays
+     undefined). cart.js reads window.WebApp.initData at checkout submit
+     time and sends it as X-Max-Init-Data for server-side validation
+     (app/services/max_webapp_auth.py) — this replaced the old insecure
+     ?max_uid= URL param + sessionStorage propagation, which required
+     patching every /checkout link on every page. initData needs no such
+     propagation: MAX injects it fresh on every page the mini-app loads. -->
+<script src="https://st.max.ru/js/max-web-app.js"></script>
 <script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
 <script src="/static/js/lightbox.js" nonce="{{ csp_nonce }}"></script>
-
-<script nonce="{{ csp_nonce }}">
-  // MAX mini-app: сохраняем max_uid из URL в sessionStorage
-  (function () {
-    var uid = new URLSearchParams(window.location.search).get('max_uid');
-    if (uid && /^\d+$/.test(uid)) sessionStorage.setItem('max_uid', uid);
-    var stored = sessionStorage.getItem('max_uid');
-    if (!stored) return;
-    function patchLinks() {
-      document.querySelectorAll('a[href="/checkout"], a[href^="/checkout?"]').forEach(function(el) {
-        var url = new URL(el.href, window.location.origin);
-        url.searchParams.set('max_uid', stored);
-        el.href = url.toString();
-      });
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', patchLinks);
-    else patchLinks();
-  })();
-</script>
 
 {% block scripts %}{% endblock %}
 </body>

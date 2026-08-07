@@ -11,6 +11,12 @@ The policy explicitly allows:
   - https://yookassa.ru : cart.js dynamically injects the YooKassa widget
                           script from there; a strict CSP without this
                           exception would silently break the payment widget.
+  - https://st.max.ru : shop_base.html loads the MAX Bridge SDK
+                        (max-web-app.js, sprint_max_storefront) from here as
+                        a bare <script src>, not nonce-tagged — a third-party
+                        CDN script can't carry our per-request nonce, so it
+                        needs its own origin exception, same shape as the
+                        YooKassa one above.
 """
 from __future__ import annotations
 
@@ -29,6 +35,10 @@ _CSP_NONCE_STATE_KEY = "csp_nonce"
 # the embedded payment flow to load — flagged as an explicit allow because the
 # default strict policy would otherwise block it.
 _YOOKASSA_ORIGIN = "https://yookassa.ru"
+
+# MAX Bridge SDK (https://dev.max.ru/docs/webapps/bridge) — populates
+# window.WebApp for the mini-app storefront (sprint_max_storefront).
+_MAX_BRIDGE_ORIGIN = "https://st.max.ru"
 
 
 def make_nonce() -> str:
@@ -55,7 +65,7 @@ def _build_csp_header(nonce: str) -> str:
     return (
         "default-src 'self'; "
         "img-src 'self' data:; "
-        f"script-src 'nonce-{nonce}' 'self' {_YOOKASSA_ORIGIN}; "
+        f"script-src 'nonce-{nonce}' 'self' {_YOOKASSA_ORIGIN} {_MAX_BRIDGE_ORIGIN}; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
         "frame-src 'self' https://yookassa.ru; "
