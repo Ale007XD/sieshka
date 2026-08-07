@@ -16,10 +16,12 @@ from app.agents.zone_agent import ZoneAgent
 from app.db import async_session_factory
 from app.db_nano import get_store as get_nano_store
 from app.domains.orders.models import OrderRead, OrderState
+from app.domains.staff.models import Staff, StaffRole
 from app.services.menu_import_service import ImportReport, MenuImportService
 from app.services.order_service import OrderService
 from app.services.promotion_service import PromotionService
 from app.services.schedule_service import ScheduleService
+from app.services.staff_service import StaffConflictError, StaffService
 from app.services.trace_analyzer import ExecutionReceipt, TraceAnalyzer
 from app.services.zone_service import ZoneService
 
@@ -55,6 +57,10 @@ def get_zone_service() -> ZoneService:
 
 def get_promotion_service() -> PromotionService:
     return PromotionService()
+
+
+def get_staff_service() -> StaffService:
+    return StaffService()
 
 
 def get_db_session_factory() -> async_sessionmaker[AsyncSession]:
@@ -571,3 +577,158 @@ async def promotion_apply(
         "receipt": receipt.model_dump() if receipt is not None else None,
         "promotions": [p.model_dump(mode="json") for p in promotions],
     }
+
+
+def _staff_view(staff: list[Staff]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "role": s.role.value,
+            "max_user_id": s.max_user_id,
+            "telegram_user_id": s.telegram_user_id,
+            "active": s.active,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in staff
+    ]
+
+
+@router.get("/ui/messengers", response_class=HTMLResponse)
+async def messengers_admin_ui(
+    request: Request,
+    service: StaffService = Depends(get_staff_service),
+) -> HTMLResponse:
+    """Render the Messengers admin page: staff accounts grouped by channel
+    (MAX / Telegram), each collapsible like the Menu page's Categories panel.
+
+    sprint_max_admin_panel: closes the gap sprint_staff_table's own docstring
+    flagged — staff rows had no UI, only psql. One flat list is fetched here
+    and split into per-channel sub-lists client-side (Alpine), same shape as
+    menu_admin.html's categories_full — simpler than three separate queries
+    for what's already a small table.
+    """
+    staff = await service.list_all()
+    return request.app.state.templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "messengers_admin.html",
+        {
+            "staff": _staff_view(staff),
+            "roles": [r.value for r in StaffRole],
+            "staff_form_action": "/admin/staff/apply",
+            "staff_update_form_action_base": "/admin/staff",
+        },
+    )
+
+
+@router.post("/staff/apply")
+async def staff_apply(
+    payload: dict[str, Any],
+    service: StaffService = Depends(get_staff_service),
+) -> dict[str, Any]:
+    """Create one staff account from a structured admin form.
+
+    No LLM collect phase, no nano-vm Agent — staff is deliberately
+    ungoverned (sprint_staff_table decision: a routing lookup, not a
+    business FSM). Same "form IS the confirmed command" shape as the other
+    admin apply endpoints, minus the governance layer those have and this
+    doesn't need.
+    """
+    name = str(payload.get("name") or "").strip()
+    role_raw = payload.get("role")
+    if not name:
+        staff = await service.list_all()
+        return {"ok": False, "error": "name is required", "staff": _staff_view(staff)}
+    try:
+        role = StaffRole(role_raw)
+    except ValueError:
+        staff = await service.list_all()
+        return {
+            "ok": False,
+            "error": f"invalid role: {role_raw!r}",
+            "staff": _staff_view(staff),
+        }
+
+    max_user_id = payload.get("max_user_id")
+    telegram_user_id = payload.get("telegram_user_id")
+    try:
+        created = await service.create(
+            name=name,
+            role=role,
+            max_user_id=int(max_user_id) if max_user_id not in (None, "") else None,
+            telegram_user_id=(
+                int(telegram_user_id) if telegram_user_id not in (None, "") else None
+            ),
+        )
+    except StaffConflictError as e:
+        staff = await service.list_all()
+        return {"ok": False, "error": str(e), "staff": _staff_view(staff)}
+    except (TypeError, ValueError):
+        staff = await service.list_all()
+        return {
+            "ok": False,
+            "error": "max_user_id/telegram_user_id must be integers",
+            "staff": _staff_view(staff),
+        }
+
+    staff = await service.list_all()
+    return {
+        "ok": True,
+        "error": None,
+        "created": str(created.id),
+        "staff": _staff_view(staff),
+    }
+
+
+@router.patch("/staff/{staff_id}/apply")
+async def staff_update(
+    staff_id: UUID,
+    payload: dict[str, Any],
+    service: StaffService = Depends(get_staff_service),
+) -> dict[str, Any]:
+    """Update one staff account — name/role/active, or link/unlink a
+    messenger id (max_user_id/telegram_user_id, explicitly settable to null
+    to unlink; see StaffService.update's docstring on why this entity uses
+    key-presence PATCH semantics instead of this codebase's usual
+    COALESCE(new, old) partial-update convention)."""
+    fields: dict[str, Any] = {}
+    for key in ("name", "active"):
+        if key in payload:
+            fields[key] = payload[key]
+    if "role" in payload:
+        try:
+            fields["role"] = StaffRole(payload["role"]).value
+        except ValueError:
+            staff = await service.list_all()
+            return {
+                "ok": False,
+                "error": f"invalid role: {payload['role']!r}",
+                "staff": _staff_view(staff),
+            }
+    for key in ("max_user_id", "telegram_user_id"):
+        if key in payload:
+            raw = payload[key]
+            if raw in (None, ""):
+                fields[key] = None
+            else:
+                try:
+                    fields[key] = int(raw)
+                except (TypeError, ValueError):
+                    staff = await service.list_all()
+                    return {
+                        "ok": False,
+                        "error": f"{key} must be an integer",
+                        "staff": _staff_view(staff),
+                    }
+
+    try:
+        updated = await service.update(staff_id, fields)
+    except StaffConflictError as e:
+        staff = await service.list_all()
+        return {"ok": False, "error": str(e), "staff": _staff_view(staff)}
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="staff not found")
+
+    staff = await service.list_all()
+    return {"ok": True, "error": None, "staff": _staff_view(staff)}
