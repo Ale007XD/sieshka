@@ -3,7 +3,7 @@ Session provided directly by test (mocked), no async_session_factory patching ne
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -251,6 +251,87 @@ class TestReserveInventoryItems:
             mock_session, sku="coffee", delta=-2, reason="SALE",
             source_type="order", source_id=order_id, below_zero=False,
         )
+
+    async def test_resolves_sku_via_product_id_when_item_has_no_sku(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """2026-08 fix (sale-decrement-product-id-gap, DECISIONS.md): real
+        checkout orders (resolve_checkout_items/OrderItem) persist product_id,
+        never sku — prior to this fix, reserve_inventory_items silently
+        skipped every item of every real customer order, decrement never
+        happened in production despite passing tests (tests only exercised
+        the sku-present shape used by agent-created orders)."""
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        product_id = str(uuid4())
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            f'[{{"product_id": "{product_id}", "qty": 2}}]',  # items — no sku key
+            "coffee",  # products.sku resolution
+            "10",  # inventory stock for resolved sku
+        ]
+        order_id = str(uuid4())
+
+        result = await reserve_inventory_items(mock_session, order_id=order_id)
+
+        assert result == 0
+        record.assert_awaited_once_with(
+            mock_session, sku="coffee", delta=-2, reason="SALE",
+            source_type="order", source_id=order_id, below_zero=False,
+        )
+        # verify the resolution query was keyed on the item's product_id
+        resolve_call = mock_session.execute.await_args_list[1]
+        assert resolve_call.args[1] == {"id": UUID(product_id)}
+
+    async def test_product_id_with_null_sku_skips_item(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """product_id resolves to a real product row, but that product still
+        has sku=NULL (never ran Generate SKUs / Sync from menu) — skip, same
+        as the sku-not-in-inventory case, don't raise."""
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        product_id = str(uuid4())
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            f'[{{"product_id": "{product_id}", "qty": 1}}]',  # items
+            None,  # products.sku is NULL
+        ]
+
+        result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+
+        assert result == 0
+        record.assert_not_awaited()
+
+    async def test_no_sku_and_no_product_id_skips_item(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            '[{"qty": 1}]',  # items — neither sku nor product_id
+        ]
+
+        result = await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+
+        assert result == 0
+        record.assert_not_awaited()
+
+    async def test_explicit_sku_skips_product_id_resolution_entirely(
+        self, mock_session: AsyncMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agent-created orders (order_agent_program.py) already carry sku
+        directly — must not trigger the product_id resolution query at all."""
+        record = AsyncMock()
+        monkeypatch.setattr("app.services.inventory_ledger.record_movement", record)
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            '[{"sku": "coffee", "qty": 2}]',  # items — explicit sku
+            "10",  # inventory stock — NOT a products.sku resolution call
+        ]
+
+        await reserve_inventory_items(mock_session, order_id=str(uuid4()))
+
+        assert mock_session.execute.await_count == 3  # items, stock, UPDATE
+        # (record_movement's own execute is on a separately-patched mock,
+        # not counted against mock_session here)
 
 
 class TestCreateKitchenTicket:

@@ -323,7 +323,29 @@ async def reserve_inventory_items(session: AsyncSession, order_id: str, **kwargs
     for item in items:
         sku = item.get("sku") if isinstance(item, dict) else ""
         qty = int(item.get("qty", 1)) if isinstance(item, dict) else 1
+
         if not sku:
+            # Real checkout orders (resolve_checkout_items, OrderItem model)
+            # persist product_id, never sku — sku only exists directly on
+            # agent-created order items (order_agent_program.py's LLM schema).
+            # Resolve product_id -> sku so real customer orders actually
+            # decrement inventory. 2026-08 fix — see DECISIONS.md
+            # sale-decrement-product-id-gap: prior to this, EVERY real
+            # checkout order silently skipped decrement for every item,
+            # since item.get("sku") was always None/missing.
+            product_id = item.get("product_id") if isinstance(item, dict) else None
+            if product_id:
+                resolved = await session.execute(
+                    sql_text("SELECT sku FROM products WHERE id = :id"),
+                    {"id": UUID(str(product_id))},
+                )
+                sku = resolved.scalar_one_or_none() or ""
+
+        if not sku:
+            logger.warning(
+                "reserve_inventory_items: item has neither sku nor a resolvable "
+                "product_id->sku, skipping: %r", item,
+            )
             continue
         stock = await session.execute(
             sql_text("SELECT quantity FROM inventory WHERE sku = :sku FOR UPDATE"),
