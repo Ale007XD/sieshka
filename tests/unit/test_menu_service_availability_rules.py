@@ -56,7 +56,8 @@ class TestMenuServiceAvailability:
         prod_rows = [
             _make_row(
                 id=prod_id, name="Чизбургер", price_rub=199,
-                time_period_override=None, description=None, image_url=None, is_active=True,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=None,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -78,7 +79,8 @@ class TestMenuServiceAvailability:
         prod_rows = [
             _make_row(
                 id=prod_id, name="Вода", price_rub=50,
-                time_period_override=None, description=None, image_url=None, is_active=True,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=None,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -101,7 +103,8 @@ class TestMenuServiceAvailability:
         prod_rows = [
             _make_row(
                 id=prod_id, name="Кофе", price_rub=100,
-                time_period_override="morning", description=None, image_url=None, is_active=True,
+                time_period_override="morning", description=None, image_url=None,
+                is_active=True, inventory_quantity=None,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -125,7 +128,7 @@ class TestMenuServiceAvailability:
             _make_row(
                 id=prod_id, name="Старый бургер", price_rub=199,
                 time_period_override=None, description=None, image_url=None,
-                is_active=False,
+                is_active=False, inventory_quantity=None,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -148,7 +151,7 @@ class TestMenuServiceAvailability:
             _make_row(
                 id=prod_id, name="Кофе", price_rub=100,
                 time_period_override=None, description=None, image_url=None,
-                is_active=True,
+                is_active=True, inventory_quantity=None,
             ),
         ]
         session = _mock_session(cat_rows, {cat_id: prod_rows})
@@ -190,6 +193,140 @@ class TestMenuServiceAvailability:
             monkeypatch.setattr("app.services.menu_service.datetime", _fake_dt)
             expected = "morning" if _fixed_value.hour < 16 else "evening"
             assert _current_menu_period() == expected
+
+
+class TestMenuServiceStockAvailability:
+    """sprint_inventory_menu_stock_badge (2026-08). Untracked sku (no
+    inventory row, LEFT JOIN -> NULL) never blocks — stock unknown is not
+    stock absent. Only an explicit quantity <= 0 on a TRACKED sku blocks."""
+
+    async def test_tracked_sku_out_of_stock_blocks(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Бургер Фирменный", price_rub=289,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=0,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.available is False
+        assert p.cta_type == "out_of_stock"
+        assert p.reason_code == "OUT_OF_STOCK"
+
+    async def test_tracked_sku_negative_quantity_blocks(self) -> None:
+        """allow-negative-with-alert (sprint_inventory_sale_decrement) means
+        quantity can go below zero — still counts as out of stock for menu
+        display purposes."""
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Сэндвич с беконом", price_rub=199,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=-11,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.available is False
+        assert p.cta_type == "out_of_stock"
+
+    async def test_tracked_sku_with_stock_available(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Бургер Пикантный", price_rub=289,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=100,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.available is True
+        assert p.cta_type == "add_to_cart"
+        assert p.reason_code is None
+
+    async def test_untracked_sku_never_blocks(self) -> None:
+        """No inventory row for this sku (LEFT JOIN -> NULL) — stock unknown,
+        not stock absent. Product must behave exactly as before this
+        feature existed."""
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Пицца", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Пицца Мясная", price_rub=697,
+                time_period_override=None, description=None, image_url=None,
+                is_active=True, inventory_quantity=None,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.available is True
+        assert p.cta_type == "add_to_cart"
+        assert p.reason_code is None
+
+    async def test_inactive_takes_priority_over_out_of_stock(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Бургеры", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Старый бургер", price_rub=199,
+                time_period_override=None, description=None, image_url=None,
+                is_active=False, inventory_quantity=0,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.reason_code == "INACTIVE"  # not OUT_OF_STOCK
+
+    async def test_outside_window_takes_priority_over_out_of_stock(self) -> None:
+        cat_id = uuid4()
+        prod_id = uuid4()
+        cat_rows = [_make_row(id=cat_id, name="Напитки", time_period="both")]
+        prod_rows = [
+            _make_row(
+                id=prod_id, name="Кофе", price_rub=100,
+                time_period_override="morning", description=None, image_url=None,
+                is_active=True, inventory_quantity=0,
+            ),
+        ]
+        session = _mock_session(cat_rows, {cat_id: prod_rows})
+        svc = MenuService()
+        svc._session_factory = lambda: _asession(session)  # type: ignore[assignment]
+
+        with patch("app.services.menu_service._current_menu_period", return_value="evening"):
+            result = await svc.get_menu(method="delivery")
+        p = result.categories[0].products[0]
+        assert p.reason_code == "OUTSIDE_WINDOW"  # not OUT_OF_STOCK
 
 
 

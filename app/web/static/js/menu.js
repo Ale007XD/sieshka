@@ -30,14 +30,16 @@ const REASON_LABELS = {
     METHOD_NOT_ALLOWED: 'Недоступно для этого способа',
     TOMORROW_CUTOFF: 'Заказы на завтра до 23:00',
     INACTIVE: 'Временно недоступно',
-    NO_RULE: 'Нет правил доступности'
+    NO_RULE: 'Нет правил доступности',
+    OUT_OF_STOCK: 'Нет в наличии'
 };
 
 const CTA_LABELS = {
     add_to_cart: 'Добавить',
     select_time: 'Выбрать время',
     preorder: 'Предзаказ',
-    unavailable: 'Недоступно'
+    unavailable: 'Недоступно',
+    out_of_stock: 'Нет в наличии'
 };
 
 // ============================================================================
@@ -302,7 +304,7 @@ function renderMenu(data) {
 
         category.products.forEach(product => {
             updateProductCard(product);
-            if (product.available || product.cta_type === 'preorder') {
+            if (product.available || product.cta_type === 'preorder' || product.cta_type === 'out_of_stock') {
                 hasVisibleProducts = true;
             }
         });
@@ -315,7 +317,7 @@ function renderMenu(data) {
             categorySection = createCategoryElement(category);
             menuContainer.appendChild(categorySection);
             hasVisibleProducts = category.products.some(
-                p => p.available || p.cta_type === 'preorder'
+                p => p.available || p.cta_type === 'preorder' || p.cta_type === 'out_of_stock'
             );
         }
 
@@ -410,8 +412,12 @@ function updateProductCard(product) {
     card.classList.toggle('unavailable', !product.available);
 
     // Visibility: hide only truly unavailable (OUTSIDE_WINDOW, NO_RULE, etc.)
-    // Products with cta_type='preorder' stay visible — they can be ordered in advance
-    const isHidden = !product.available && product.cta_type !== 'preorder';
+    // Products with cta_type='preorder' stay visible — they can be ordered in advance.
+    // out_of_stock also stays visible — badge shown, add button hidden below,
+    // customer should still see the item exists (sprint_inventory_menu_stock_badge, 2026-08).
+    const isHidden = !product.available
+        && product.cta_type !== 'preorder'
+        && product.cta_type !== 'out_of_stock';
     card.style.display = isHidden ? 'none' : '';
 
     // Update badge

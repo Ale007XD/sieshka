@@ -94,12 +94,14 @@ class MenuService:
     ) -> list[MenuProductItem]:
         result = await session.execute(
             text(
-                "SELECT id, name, price_rub, time_period_override, "
-                "  description, image_url, is_active "
-                "FROM products "
-                "WHERE category_id = :category_id "
-                "AND price_rub IS NOT NULL "
-                "ORDER BY name"
+                "SELECT p.id, p.name, p.price_rub, p.time_period_override, "
+                "  p.description, p.image_url, p.is_active, "
+                "  inv.quantity AS inventory_quantity "
+                "FROM products p "
+                "LEFT JOIN inventory inv ON inv.sku = p.sku "
+                "WHERE p.category_id = :category_id "
+                "AND p.price_rub IS NOT NULL "
+                "ORDER BY p.name"
             ),
             {"category_id": category_id},
         )
@@ -112,6 +114,7 @@ class MenuService:
             )
             in_window = effective_period in ("both", current_period)
             is_active = row._mapping["is_active"]
+            inventory_quantity = row._mapping["inventory_quantity"]
 
             if not is_active:
                 available = False
@@ -121,6 +124,14 @@ class MenuService:
                 available = False
                 cta_type = "unavailable"
                 reason_code = "OUTSIDE_WINDOW"
+            elif inventory_quantity is not None and inventory_quantity <= 0:
+                # sku not tracked (no inventory row, LEFT JOIN -> NULL) means
+                # "stock unknown" — never blocks ordering. Only an explicit
+                # quantity <= 0 on a TRACKED sku blocks. sprint_inventory_
+                # menu_stock_badge (2026-08). See DECISIONS.md.
+                available = False
+                cta_type = "out_of_stock"
+                reason_code = "OUT_OF_STOCK"
             else:
                 available = True
                 cta_type = "add_to_cart"
