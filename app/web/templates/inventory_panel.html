@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
-<div x-data="inventoryPanel()" x-init="load()">
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<div x-data="inventoryPanel()" x-init="load(); loadStats()">
 
 <div class="flex items-center justify-between mb-6">
   <h1 class="text-2xl font-semibold text-gray-900">Stock Levels</h1>
@@ -30,6 +31,30 @@
          :class="restockOk ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'"
          x-text="restockResult"></div>
   </template>
+</div>
+
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+  <div class="flex items-end justify-between mb-4 flex-wrap gap-3">
+    <div>
+      <h2 class="text-lg font-medium text-gray-900 mb-2">Movements</h2>
+      <div class="flex items-center gap-2 text-sm">
+        <label class="text-gray-600">From</label>
+        <input x-model="statsFrom" type="date" @change="loadStats()"
+               class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
+        <label class="text-gray-600">To</label>
+        <input x-model="statsTo" type="date" @change="loadStats()"
+               class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
+      </div>
+    </div>
+    <a :href="exportUrl()" download
+       class="px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-md hover:bg-gray-800">
+      Export CSV
+    </a>
+  </div>
+  <template x-if="!statsHasData">
+    <p class="text-sm text-gray-400">No movements in this period.</p>
+  </template>
+  <canvas x-show="statsHasData" id="movementsChart" height="80"></canvas>
 </div>
 
 <template x-if="syncResult">
@@ -95,6 +120,50 @@ function inventoryPanel() {
     items: [],
     syncBusy: false,
     syncResult: null,
+
+    statsFrom: '',
+    statsTo: '',
+    statsHasData: false,
+    _chart: null,
+
+    async loadStats() {
+      const params = new URLSearchParams();
+      if (this.statsFrom) params.set('from_date', this.statsFrom);
+      if (this.statsTo) params.set('to_date', this.statsTo);
+      const resp = await fetch(`/admin/ui/inventory/movements-summary?${params}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      this.statsHasData = (data.labels || []).length > 0;
+      this.$nextTick(() => this.renderChart(data));
+    },
+
+    renderChart(data) {
+      if (!this.statsHasData || typeof Chart === 'undefined') return;
+      const canvas = document.getElementById('movementsChart');
+      if (!canvas) return;
+      if (this._chart) this._chart.destroy();
+      this._chart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: data.labels,
+          datasets: [
+            { label: 'Restocked', data: data.restocked, backgroundColor: '#22c55e' },
+            { label: 'Sold', data: data.sold, backgroundColor: '#ef4444' },
+          ],
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } },
+        },
+      });
+    },
+
+    exportUrl() {
+      const params = new URLSearchParams();
+      if (this.statsFrom) params.set('from_date', this.statsFrom);
+      if (this.statsTo) params.set('to_date', this.statsTo);
+      return `/admin/ui/inventory/export?${params}`;
+    },
 
     restockText: '',
     restockBusy: false,

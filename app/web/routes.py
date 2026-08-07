@@ -1,6 +1,7 @@
 """app/web/routes.py — dashboard UI routes, mounted at /admin/ui/*."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -274,6 +275,38 @@ async def inventory_restock(
         "command": collect.command,
         "items": [i.model_dump(mode="json") for i in items],
     }
+
+
+@router.get("/inventory/movements-summary")
+async def inventory_movements_summary(
+    from_date: date | None = None,
+    to_date: date | None = None,
+    service: InventoryService = Depends(get_inventory_service),
+) -> dict[str, Any]:
+    """Daily restocked-vs-sold totals for the stats chart (sprint_inventory_
+    stats_viz, 2026-08). Both query params optional — ?from_date=2026-08-01&
+    to_date=2026-08-07, ISO date format."""
+    summary = await service.movements_summary(from_date, to_date)
+    return summary.model_dump(mode="json")
+
+
+@router.get("/inventory/export")
+async def inventory_export_csv(
+    from_date: date | None = None,
+    to_date: date | None = None,
+    service: InventoryService = Depends(get_inventory_service),
+) -> Response:
+    """CSV export of inventory_movements in the given period (sprint_
+    inventory_stats_viz, 2026-08). Both query params optional."""
+    csv_text = await service.export_movements_csv(from_date, to_date)
+    filename = "inventory_movements"
+    if from_date or to_date:
+        filename += f"_{from_date or 'start'}_{to_date or 'now'}"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
 
 
 @router.get("/promotions", response_class=Response)

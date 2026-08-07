@@ -8,6 +8,7 @@ sprint_inventory_restock_inline (2026-08)."""
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,7 +18,11 @@ from httpx import ASGITransport, AsyncClient
 
 from app.agents.inventory_agent import InventoryAgent, InventoryAgentResult, InventoryApplyResult
 from app.domains.inventory.models import InventoryState
-from app.services.inventory_service import InventoryItemRead, InventorySyncResult
+from app.services.inventory_service import (
+    InventoryItemRead,
+    InventorySyncResult,
+    MovementsSummary,
+)
 from app.web.routes import get_inventory_service
 from app.web.routes import router as web_router
 
@@ -31,6 +36,23 @@ class FakeInventoryService:
         ]
         self.sync_result = InventorySyncResult(created=0, skipped_no_sku=0)
         self.set_quantity_error: Exception | None = None
+        self.summary_result = MovementsSummary(
+            labels=["2026-08-01"], restocked=[10], sold=[3]
+        )
+        self.csv_result = "sku,delta,reason,source_type,source_id,below_zero,created_at\n"
+        self.received_dates: tuple[date | None, date | None] | None = None
+
+    async def movements_summary(
+        self, from_date: date | None = None, to_date: date | None = None
+    ) -> MovementsSummary:
+        self.received_dates = (from_date, to_date)
+        return self.summary_result
+
+    async def export_movements_csv(
+        self, from_date: date | None = None, to_date: date | None = None
+    ) -> str:
+        self.received_dates = (from_date, to_date)
+        return self.csv_result
 
     async def list_inventory(self) -> list[InventoryItemRead]:
         return self.items
@@ -202,3 +224,75 @@ class TestInventoryRestockRoute:
         resp = await client.post("/admin/ui/inventory/restock", json={})
 
         assert resp.status_code == 422
+
+
+class TestInventoryMovementsSummaryRoute:
+    """sprint_inventory_stats_viz (2026-08)."""
+
+    async def test_returns_summary_json(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/ui/inventory/movements-summary")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"labels": ["2026-08-01"], "restocked": [10], "sold": [3]}
+
+    async def test_passes_date_query_params_through(
+        self, client: AsyncClient, fake_service: FakeInventoryService,
+    ) -> None:
+        resp = await client.get(
+            "/admin/ui/inventory/movements-summary",
+            params={"from_date": "2026-08-01", "to_date": "2026-08-07"},
+        )
+
+        assert resp.status_code == 200
+        assert fake_service.received_dates == (date(2026, 8, 1), date(2026, 8, 7))
+
+    async def test_no_date_params_passes_none(
+        self, client: AsyncClient, fake_service: FakeInventoryService,
+    ) -> None:
+        resp = await client.get("/admin/ui/inventory/movements-summary")
+
+        assert resp.status_code == 200
+        assert fake_service.received_dates == (None, None)
+
+    async def test_invalid_date_returns_422(self, client: AsyncClient) -> None:
+        resp = await client.get(
+            "/admin/ui/inventory/movements-summary",
+            params={"from_date": "not-a-date"},
+        )
+
+        assert resp.status_code == 422
+
+
+class TestInventoryExportRoute:
+    """sprint_inventory_stats_viz (2026-08)."""
+
+    async def test_returns_csv_with_attachment_headers(self, client: AsyncClient) -> None:
+        resp = await client.get("/admin/ui/inventory/export")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/csv")
+        assert "attachment" in resp.headers["content-disposition"]
+        assert "inventory_movements.csv" in resp.headers["content-disposition"]
+        assert resp.text == "sku,delta,reason,source_type,source_id,below_zero,created_at\n"
+
+    async def test_filename_includes_date_range_when_provided(
+        self, client: AsyncClient,
+    ) -> None:
+        resp = await client.get(
+            "/admin/ui/inventory/export",
+            params={"from_date": "2026-08-01", "to_date": "2026-08-07"},
+        )
+
+        assert resp.status_code == 200
+        assert "2026-08-01_2026-08-07" in resp.headers["content-disposition"]
+
+    async def test_passes_date_query_params_through(
+        self, client: AsyncClient, fake_service: FakeInventoryService,
+    ) -> None:
+        await client.get(
+            "/admin/ui/inventory/export",
+            params={"from_date": "2026-08-01"},
+        )
+
+        assert fake_service.received_dates == (date(2026, 8, 1), None)
