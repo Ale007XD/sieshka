@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<div x-data="inventoryPanel()" x-init="load(); loadStats()">
+<div x-data="inventoryPanel()" x-init="load()">
 
 <div class="flex items-center justify-between mb-6">
   <h1 class="text-2xl font-semibold text-gray-900">Stock Levels</h1>
@@ -33,29 +33,32 @@
   </template>
 </div>
 
-<div class="bg-white rounded-lg shadow p-4 mb-6">
-  <div class="flex items-end justify-between mb-4 flex-wrap gap-3">
-    <div>
-      <h2 class="text-lg font-medium text-gray-900 mb-2">Movements</h2>
-      <div class="flex items-center gap-2 text-sm">
-        <label class="text-gray-600">From</label>
-        <input x-model="statsFrom" type="date" @change="loadStats()"
-               class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
-        <label class="text-gray-600">To</label>
-        <input x-model="statsTo" type="date" @change="loadStats()"
-               class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
-      </div>
+<details class="bg-white rounded-lg shadow p-4 mb-6" @toggle="onStatsToggle($event)">
+  <summary class="text-lg font-medium text-gray-900 cursor-pointer select-none">
+    Movements
+  </summary>
+  <div class="flex items-end justify-between mb-4 mt-4 flex-wrap gap-3">
+    <div class="flex items-center gap-2 text-sm">
+      <label class="text-gray-600">From</label>
+      <input x-model="statsFrom" type="date" @change="loadStats()"
+             class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
+      <label class="text-gray-600">To</label>
+      <input x-model="statsTo" type="date" @change="loadStats()"
+             class="border border-gray-300 rounded-md shadow-sm text-sm p-1">
     </div>
     <a :href="exportUrl()" download
        class="px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-md hover:bg-gray-800">
       Export CSV
     </a>
   </div>
-  <template x-if="!statsHasData">
+  <template x-if="statsError">
+    <p class="text-sm text-red-600 mb-2" x-text="statsError"></p>
+  </template>
+  <template x-if="!statsError && !statsHasData">
     <p class="text-sm text-gray-400">No movements in this period.</p>
   </template>
-  <canvas x-show="statsHasData" id="movementsChart" height="80"></canvas>
-</div>
+  <canvas x-show="!statsError && statsHasData" id="movementsChart" height="80"></canvas>
+</details>
 
 <template x-if="syncResult">
   <div class="mb-4 px-4 py-2 bg-blue-50 text-blue-800 text-sm rounded-md" x-text="syncResult"></div>
@@ -124,17 +127,37 @@ function inventoryPanel() {
     statsFrom: '',
     statsTo: '',
     statsHasData: false,
+    statsError: null,
+    _statsLoadedOnce: false,
     _chart: null,
 
+    onStatsToggle(event) {
+      if (event.target.open && !this._statsLoadedOnce) {
+        this._statsLoadedOnce = true;
+        this.loadStats();
+      }
+    },
+
     async loadStats() {
-      const params = new URLSearchParams();
-      if (this.statsFrom) params.set('from_date', this.statsFrom);
-      if (this.statsTo) params.set('to_date', this.statsTo);
-      const resp = await fetch(`/admin/ui/inventory/movements-summary?${params}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      this.statsHasData = (data.labels || []).length > 0;
-      this.$nextTick(() => this.renderChart(data));
+      this.statsError = null;
+      try {
+        const params = new URLSearchParams();
+        if (this.statsFrom) params.set('from_date', this.statsFrom);
+        if (this.statsTo) params.set('to_date', this.statsTo);
+        const resp = await fetch(`/admin/ui/inventory/movements-summary?${params}`);
+        if (!resp.ok) {
+          const text = await resp.text();
+          this.statsError = `Server error ${resp.status}: ${text.slice(0, 300)}`;
+          this.statsHasData = false;
+          return;
+        }
+        const data = await resp.json();
+        this.statsHasData = (data.labels || []).length > 0;
+        this.$nextTick(() => this.renderChart(data));
+      } catch (e) {
+        this.statsError = String(e);
+        this.statsHasData = false;
+      }
     },
 
     renderChart(data) {
