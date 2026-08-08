@@ -3,17 +3,32 @@ and export_movements_csv against REAL Postgres.
 
 Why this file exists: the unit tests (test_inventory_stats.py) mock
 session.execute entirely — they prove the Python-side aggregation logic is
-correct, but they can NEVER catch a raw-SQL bug that only manifests against
-a real asyncpg/Postgres connection, e.g. "could not determine data type of
-parameter" (asyncpg error 42P18) from a `:param IS NULL` comparison with no
-other typed context for that parameter — exactly the bug found in
-sprint_inventory_stats_viz's first cut (2026-08): both methods used
-`(:from_date IS NULL OR created_at >= :from_date)` unfixed, which raised
-that exact error whenever from_date/to_date were both None (the default,
-unfiltered dashboard view) — always looked like "no movements" client-side
-because the JS silently swallowed the 500. Fixed with explicit `::date`
-casts on both parameter usages. This file is the regression guard for that
-whole bug class, not just this one instance of it.
+correct, but they can NEVER catch a bug that only manifests when SQLAlchemy
+actually compiles and binds the raw SQL string. That's exactly what happened
+here, twice, in sprint_inventory_stats_viz (2026-08):
+
+  (1) First cut used `(:from_date IS NULL OR created_at >= :from_date)`.
+      Every call 500'd — asyncpg couldn't determine the parameter's type
+      from an `IS NULL`-only context.
+
+  (2) The apparent fix used `:from_date::date` (Postgres cast syntax).
+      This made it WORSE in a way integration tests would have caught
+      immediately: SQLAlchemy's text() bind-parameter parser sees the `:`
+      in `::date` as the start of a NEW bind expression and greedily
+      consumes into it, producing a mis-parsed parameter name (confirmed:
+      `text("...:from_date::date...")._bindparams` resolves to a key named
+      `from_dat`, not `from_date` — SQLAlchemy's regex trims the trailing
+      character too). The params dict passes `{"from_date": ...}`, which no
+      longer matches — every call, filtered or not, 500'd.
+
+  Fixed with `CAST(:from_date AS DATE)` — the pattern already used
+  elsewhere in this codebase (app/services/idempotency.py) for exactly this
+  reason. `:name` inside `CAST(...)` has no adjacent `:` to confuse the
+  parser.
+
+Both of these are real-SQL-compilation bugs — mocked-session unit tests are
+structurally incapable of catching either one. This file is the regression
+guard for the whole class, not just one instance of it.
 """
 from __future__ import annotations
 

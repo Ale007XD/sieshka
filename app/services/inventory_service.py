@@ -152,9 +152,10 @@ class InventoryService:
                     "  SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END) AS in_qty, "
                     "  SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END) AS out_qty "
                     "FROM inventory_movements "
-                    "WHERE (:from_date::date IS NULL OR created_at >= :from_date::date) "
-                    "  AND (:to_date::date IS NULL "
-                    "       OR created_at < :to_date::date + INTERVAL '1 day') "
+                    "WHERE (CAST(:from_date AS DATE) IS NULL "
+                    "       OR created_at >= CAST(:from_date AS DATE)) "
+                    "  AND (CAST(:to_date AS DATE) IS NULL "
+                    "       OR created_at < CAST(:to_date AS DATE) + INTERVAL '1 day') "
                     "GROUP BY DATE(created_at) "
                     "ORDER BY day"
                 ),
@@ -178,9 +179,10 @@ class InventoryService:
                     "SELECT sku, delta, reason, source_type, source_id, "
                     "below_zero, created_at "
                     "FROM inventory_movements "
-                    "WHERE (:from_date::date IS NULL OR created_at >= :from_date::date) "
-                    "  AND (:to_date::date IS NULL "
-                    "       OR created_at < :to_date::date + INTERVAL '1 day') "
+                    "WHERE (CAST(:from_date AS DATE) IS NULL "
+                    "       OR created_at >= CAST(:from_date AS DATE)) "
+                    "  AND (CAST(:to_date AS DATE) IS NULL "
+                    "       OR created_at < CAST(:to_date AS DATE) + INTERVAL '1 day') "
                     "ORDER BY created_at"
                 ),
                 {"from_date": from_date, "to_date": to_date},

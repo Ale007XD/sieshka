@@ -103,3 +103,72 @@ class TestExportMovementsCsv:
         lines = csv_text.strip().splitlines()
         assert len(lines) == 1
         assert lines[0] == "sku,delta,reason,source_type,source_id,below_zero,created_at"
+
+
+class TestSqlBindParamNamesMatchPassedParams:
+    """Fast, no-Postgres-needed regression guard for a real bug class:
+    SQLAlchemy's text() bind-parameter parser misreads `:name::type` cast
+    syntax (the `:` in `::` starts a NEW bind expression and the regex
+    truncates the parameter name — confirmed empirically:
+    `text("...:from_date::date...")._bindparams` resolves to a key named
+    `from_dat`, not `from_date`). That mismatch against the params dict
+    passed to session.execute() 500s on every call, not just the None case —
+    exactly what shipped and broke sprint_inventory_stats_viz twice (2026-08).
+    See tests/integration/test_inventory_stats_integration.py for the
+    live-Postgres version of this guard; this one runs unconditionally,
+    every CI run, no Docker needed — it inspects the compiled TextClause
+    SQLAlchemy actually receives, without executing it."""
+
+    async def test_movements_summary_bind_params_match_passed_dict(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def _capture_execute(query: object, params: dict[str, object]) -> MagicMock:
+            captured["query"] = query
+            captured["params"] = params
+            result = MagicMock()
+            result.fetchall.return_value = []
+            return result
+
+        session = AsyncMock()
+        session.execute = _capture_execute
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        service = InventoryService(session_factory=session_factory)
+
+        await service.movements_summary(from_date=date(2026, 8, 1), to_date=date(2026, 8, 7))
+
+        query = captured["query"]
+        params = captured["params"]
+        assert isinstance(params, dict)
+        bind_names = set(query._bindparams.keys())  # type: ignore[attr-defined]
+        assert bind_names == set(params.keys()), (
+            f"SQL bind param names {bind_names} don't match the params dict "
+            f"keys {set(params.keys())} — SQLAlchemy will raise at execute "
+            f"time regardless of what values are passed"
+        )
+
+    async def test_export_movements_csv_bind_params_match_passed_dict(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def _capture_execute(query: object, params: dict[str, object]) -> MagicMock:
+            captured["query"] = query
+            captured["params"] = params
+            result = MagicMock()
+            result.fetchall.return_value = []
+            return result
+
+        session = AsyncMock()
+        session.execute = _capture_execute
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        service = InventoryService(session_factory=session_factory)
+
+        await service.export_movements_csv(from_date=date(2026, 8, 1), to_date=date(2026, 8, 7))
+
+        query = captured["query"]
+        params = captured["params"]
+        assert isinstance(params, dict)
+        bind_names = set(query._bindparams.keys())  # type: ignore[attr-defined]
+        assert bind_names == set(params.keys())
