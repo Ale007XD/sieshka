@@ -48,6 +48,7 @@ from app.fsm.core.base import TransitionResult
 from app.services.kitchen_service import KitchenService
 from app.services.max_client import MaxClient, max_client
 from app.services.max_staff_notify import (
+    notify_admin_order_state,
     notify_courier_order_state,
     notify_kitchen_ticket_state,
 )
@@ -243,6 +244,10 @@ async def max_webhook(
                 result.new_state, OrderState
             ):
                 await notify_courier_order_state(
+                    str(entity_id), result.new_state, staff_service=staff, client=client
+                )
+            if kind == "order" and isinstance(result.new_state, OrderState):
+                await notify_admin_order_state(
                     str(entity_id), result.new_state, staff_service=staff, client=client
                 )
         except Exception:

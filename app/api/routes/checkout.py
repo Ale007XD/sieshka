@@ -24,9 +24,10 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db import async_session_factory
-from app.domains.orders.models import CheckoutRequest, OrderEvent
+from app.domains.orders.models import CheckoutRequest, OrderEvent, OrderState
 from app.services.customer_service import CustomerService
 from app.services.idempotency import IdempotencyService
+from app.services.max_staff_notify import notify_admin_order_state
 from app.services.max_webapp_auth import validate_init_data
 from app.services.menu_service import MenuService
 from app.services.order_service import (
@@ -205,6 +206,7 @@ async def checkout(
         # payment attempt was ever made.
         await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
         await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
+        await notify_admin_order_state(str(order.id), OrderState.PAYMENT_PENDING)
         payment = await payment_service.create_payment(
             order_id=str(order.id),
             amount=Decimal(total_rub),
@@ -231,6 +233,10 @@ async def checkout(
     # Cash: no external payment — confirm the order so the kitchen can proceed.
     await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
     cooking = await order_service.transition_order(str(order.id), OrderEvent.START_COOKING)
+    await notify_admin_order_state(
+        str(order.id),
+        OrderState.COOKING if cooking.success else OrderState.CONFIRMED,
+    )
     if not cooking.success:
         logger.warning(
             "checkout: START_COOKING failed for cash order %s: %s",

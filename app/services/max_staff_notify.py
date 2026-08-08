@@ -211,3 +211,46 @@ async def notify_courier_order_state(
                 "notify_courier_order_state: send failed for max_user_id=%s",
                 member.max_user_id,
             )
+
+
+async def notify_admin_order_state(
+    order_id: str,
+    state: OrderState,
+    *,
+    staff_service: StaffService | None = None,
+    client: MaxClient | None = None,
+) -> None:
+    """Broadcast to every active admin-role staff member — CANCEL only,
+    per _ORDER_ROLE_EVENTS. No-op (no message sent, no staff lookup even
+    attempted) once the order leaves a cancellable state (COOKING onward) —
+    same keyboard-empty short-circuit as notify_courier_order_state, so
+    callers can invoke this unconditionally after any order transition
+    without checking ORDER_TRANSITIONS themselves.
+
+    Same fire-and-forget / no-op-if-nothing-actionable contract as
+    notify_kitchen_ticket_state / notify_courier_order_state.
+    """
+    keyboard = _order_keyboard(order_id, state, StaffRole.admin)
+    if not keyboard:
+        return
+
+    staff = staff_service or StaffService()
+    mc = client or max_client
+    text = f"🧾 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
+
+    try:
+        recipients = await staff.list_active_by_role(StaffRole.admin)
+    except Exception:
+        logger.exception("notify_admin_order_state: staff lookup failed")
+        return
+
+    for member in recipients:
+        if member.max_user_id is None:
+            continue
+        try:
+            await mc.send_message(member.max_user_id, text, attachments=keyboard)
+        except Exception:
+            logger.exception(
+                "notify_admin_order_state: send failed for max_user_id=%s",
+                member.max_user_id,
+            )
