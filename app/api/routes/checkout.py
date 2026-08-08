@@ -232,11 +232,14 @@ async def checkout(
 
     # Cash: no external payment — confirm the order so the kitchen can proceed.
     await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
+    # notify_admin_order_state fires HERE (state=CONFIRMED), not after
+    # START_COOKING below: once START_COOKING succeeds the order is in
+    # COOKING, where CANCEL is no longer a valid transition, so the same
+    # call made after that point would silently no-op (keyboard-empty
+    # short-circuit) — admin would never see the order at all for the
+    # common cash-order path (2026-08-08, reported as "ничего не приходит").
+    await notify_admin_order_state(str(order.id), OrderState.CONFIRMED)
     cooking = await order_service.transition_order(str(order.id), OrderEvent.START_COOKING)
-    await notify_admin_order_state(
-        str(order.id),
-        OrderState.COOKING if cooking.success else OrderState.CONFIRMED,
-    )
     if not cooking.success:
         logger.warning(
             "checkout: START_COOKING failed for cash order %s: %s",

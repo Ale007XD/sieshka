@@ -28,6 +28,17 @@ correctness does not depend on it.
 Button payload contract (consumed by app.webhooks.max):
     {"kind": "kitchen", "id": "<ticket_uuid>", "event": "<KitchenEvent value>"}
     {"kind": "order",   "id": "<order_uuid>",  "event": "<OrderEvent value>"}
+
+Order detail enrichment (2026-08-08): kitchen/courier/admin cards originally
+carried only the order's short id + state label — not enough for kitchen to
+actually prep the right items or for courier/admin to find the address.
+_fetch_order_details() below is a self-contained, read-only lookup (own
+session via app.db.async_session_factory, raw SQL) rather than importing
+app.services.order_service — mirrors the reason app.tools.notification_tools
+and app.services.kitchen_service both keep their own imports of THIS module
+lazy (see their source): importing order_service here would add a new
+module-level edge into the app.services.__init__ eager-import chain that
+does not currently exist, for a read-only convenience that doesn't need it.
 """
 from __future__ import annotations
 
@@ -35,6 +46,9 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy import text as sql_text
+
+from app.db import async_session_factory
 from app.domains.kitchen.fsm import KITCHEN_TRANSITIONS, KitchenEvent, KitchenState
 from app.domains.orders.models import ORDER_TRANSITIONS, OrderEvent, OrderState
 from app.domains.staff.models import StaffRole
@@ -59,6 +73,9 @@ _KITCHEN_EVENT_BUTTON: dict[KitchenEvent, tuple[str, str]] = {
 }
 
 _ORDER_STATE_TEXT: dict[OrderState, str] = {
+    OrderState.CONFIRMED: "🆕 Новый заказ",
+    OrderState.PAYMENT_PENDING: "🆕 Новый заказ (ожидает оплаты)",
+    OrderState.PAID: "🆕 Новый заказ (оплачен)",
     OrderState.PACKING: "📦 Упаковка",
     OrderState.COURIER_ASSIGNED: "🛵 Курьер назначен",
     OrderState.DELIVERING: "🚗 В пути",
@@ -134,6 +151,64 @@ def _order_keyboard(
     return [{"type": "inline_keyboard", "payload": {"buttons": [row]}}]
 
 
+async def _fetch_order_details(order_id: str) -> str:
+    """Read-only composition/address/phone block for notification text.
+
+    Self-contained session (own async_session_factory call) — see module
+    docstring for why this does not import app.services.order_service.
+    Returns "" (not raised) on any failure or missing row: this is called
+    from inside notify_* functions that must never let a detail-formatting
+    problem block sending the base state notification.
+    """
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                sql_text(
+                    "SELECT o.items, o.delivery_address, o.comment, "
+                    "c.phone AS customer_phone "
+                    "FROM orders o LEFT JOIN customers c ON c.id = o.customer_id "
+                    "WHERE o.id = :id"
+                ),
+                {"id": order_id},
+            )
+            row = result.fetchone()
+    except Exception:
+        logger.exception("_fetch_order_details: query failed for order_id=%s", order_id)
+        return ""
+
+    if row is None:
+        return ""
+
+    items_val = row._mapping["items"]
+    try:
+        items = items_val if isinstance(items_val, list) else json.loads(items_val)
+    except Exception:
+        items = []
+
+    lines: list[str] = []
+    composition = ", ".join(
+        f"{item.get('name', '?')} x{item.get('qty', '?')}"
+        for item in items
+        if isinstance(item, dict)
+    )
+    if composition:
+        lines.append(f"🧺 {composition}")
+
+    address = row._mapping.get("delivery_address")
+    if address:
+        lines.append(f"📍 {address}")
+
+    phone = row._mapping.get("customer_phone")
+    if phone:
+        lines.append(f"📞 {phone}")
+
+    comment = row._mapping.get("comment")
+    if comment:
+        lines.append(f"💬 {comment}")
+
+    return ("\n" + "\n".join(lines)) if lines else ""
+
+
 async def notify_kitchen_ticket_state(
     ticket_id: str,
     order_id: str,
@@ -155,7 +230,11 @@ async def notify_kitchen_ticket_state(
 
     staff = staff_service or StaffService()
     mc = client or max_client
-    text = f"🍳 Заказ {order_id[:8]}\n{_KITCHEN_STATE_TEXT.get(state, state.value)}"
+    details = await _fetch_order_details(order_id)
+    text = (
+        f"🍳 Заказ {order_id[:8]}\n{_KITCHEN_STATE_TEXT.get(state, state.value)}"
+        f"{details}"
+    )
 
     try:
         recipients = await staff.list_active_by_role(StaffRole.kitchen)
@@ -193,7 +272,11 @@ async def notify_courier_order_state(
 
     staff = staff_service or StaffService()
     mc = client or max_client
-    text = f"🚗 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
+    details = await _fetch_order_details(order_id)
+    text = (
+        f"🚗 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
+        f"{details}"
+    )
 
     try:
         recipients = await staff.list_active_by_role(StaffRole.courier)
@@ -236,7 +319,11 @@ async def notify_admin_order_state(
 
     staff = staff_service or StaffService()
     mc = client or max_client
-    text = f"🧾 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
+    details = await _fetch_order_details(order_id)
+    text = (
+        f"🧾 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
+        f"{details}"
+    )
 
     try:
         recipients = await staff.list_active_by_role(StaffRole.admin)
