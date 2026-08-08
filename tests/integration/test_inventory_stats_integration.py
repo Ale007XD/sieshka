@@ -68,6 +68,8 @@ async def session_factory(
     engine = create_async_engine(postgres_dsn)
     schema_paths = [
         _MIGRATIONS_DIR / "001_initial_schema.sql",
+        _MIGRATIONS_DIR / "004_menu.sql",
+        _MIGRATIONS_DIR / "015_products_sku.sql",
         _MIGRATIONS_DIR / "016_inventory_movements.sql",
     ]
     raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
@@ -75,19 +77,32 @@ async def session_factory(
     try:
         for sp in schema_paths:
             await conn.execute(sp.read_text())
-        await conn.execute("TRUNCATE TABLE inventory_movements, inventory")
+        await conn.execute(
+            "TRUNCATE TABLE inventory_movements, inventory, orders, products, categories CASCADE"
+        )
         await conn.execute(
             "INSERT INTO inventory (sku, name, quantity, state) "
             "VALUES ('coffee', 'Coffee', 10, 'AVAILABLE')"
+        )
+        product_id = await conn.fetchval(
+            "INSERT INTO products (name, sku, price_rub, is_active) "
+            "VALUES ('Coffee', 'coffee', 150, TRUE) RETURNING id"
+        )
+        order_id = await conn.fetchval(
+            "INSERT INTO orders (customer_id, state, items, delivery_address) "
+            "VALUES (uuid_generate_v4(), 'PAID', $1, 'Test Address 1') RETURNING id",
+            f'[{{"product_id": "{product_id}", "name": "Coffee", '
+            f'"price_rub": 150, "qty": 2}}]',
         )
         await conn.execute(
             "INSERT INTO inventory_movements "
             "(sku, delta, reason, source_type, source_id, below_zero, created_at) "
             "VALUES "
             "('coffee', 50, 'RESTOCK_MANUAL', NULL, NULL, FALSE, $1), "
-            "('coffee', -3, 'SALE', 'order', 'order-1', FALSE, $2)",
+            "('coffee', -3, 'SALE', 'order', $3, FALSE, $2)",
             datetime(2026, 8, 1, 9, 0, 0),
             datetime(2026, 8, 2, 15, 0, 0),
+            str(order_id),
         )
     finally:
         await conn.close()
@@ -166,9 +181,14 @@ class TestExportMovementsCsvLivePostgres:
         csv_text = await service.export_movements_csv()
 
         lines = csv_text.strip().splitlines()
-        assert len(lines) == 3  # header + 2 rows
+        assert lines[0] == (
+            "sku,delta,reason,source_type,source_id,below_zero,created_at,"
+            "price_rub,sale_amount"
+        )
         assert "coffee,50,RESTOCK_MANUAL" in lines[1]
         assert "coffee,-3,SALE" in lines[2]
+        assert "Daily sales totals" in lines
+        assert lines[-1].startswith("Grand total,")
 
     async def test_filtered_export(
         self, session_factory: async_sessionmaker[AsyncSession],
@@ -180,5 +200,22 @@ class TestExportMovementsCsvLivePostgres:
         )
 
         lines = csv_text.strip().splitlines()
-        assert len(lines) == 2  # header + 1 row
         assert "SALE" in lines[1]
+
+    async def test_sale_price_resolved_from_real_order_on_live_postgres(
+        self, session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """The one thing mocked-session tests structurally can't verify:
+        `WHERE sku = ANY(:skus)` / `WHERE id = ANY(:ids)` array-binding
+        against real asyncpg, and the actual JSONB decode shape of
+        orders.items as returned by the live driver."""
+        service = InventoryService(session_factory=session_factory)
+
+        csv_text = await service.export_movements_csv(
+            from_date=date(2026, 8, 2), to_date=date(2026, 8, 2)
+        )
+
+        lines = csv_text.strip().splitlines()
+        sale_line = next(line for line in lines if line.startswith("coffee,-3,SALE"))
+        assert sale_line.endswith(",150,450")  # price_rub=150, |delta|*price=450
+        assert lines[-1] == "Grand total,450"

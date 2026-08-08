@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import logging
 from datetime import date
 from typing import Any, cast
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -13,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db import async_session_factory
 from app.domains.inventory.models import InventoryState
+
+logger = logging.getLogger(__name__)
 
 
 class InventoryItemRead(BaseModel):
@@ -172,7 +177,20 @@ class InventoryService:
         self, from_date: date | None = None, to_date: date | None = None
     ) -> str:
         """Row-level CSV of inventory_movements in the given period (both
-        bounds optional, same semantics as movements_summary)."""
+        bounds optional, same semantics as movements_summary).
+
+        price_rub/sale_amount are populated ONLY for SALE-reason rows —
+        restock/adjustment/sync movements have no sale price concept.
+        price_rub is resolved from the ORDER's item snapshot (orders.items,
+        frozen at order-creation time — see OrderItem's documented
+        immutability contract), NOT the product's current price. A later
+        price change must not retroactively alter what an already-completed
+        sale's CSV export shows it sold for.
+
+        Ends with two summary sections: daily sale_amount totals, then a
+        grand total — both computed only over rows where sale_amount was
+        successfully resolved (2026-08, sprint_inventory_stats_viz follow-up).
+        """
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
@@ -189,13 +207,77 @@ class InventoryService:
             )
             rows = result.fetchall()
 
+            sale_rows = [
+                row for row in rows
+                if row._mapping["reason"] == "SALE" and row._mapping["source_id"]
+            ]
+
+            sku_to_product_id: dict[str, str] = {}
+            items_by_order: dict[str, list[dict[str, Any]]] = {}
+            if sale_rows:
+                skus = {row._mapping["sku"] for row in sale_rows}
+                sku_rows = await session.execute(
+                    text("SELECT id, sku FROM products WHERE sku = ANY(:skus)"),
+                    {"skus": list(skus)},
+                )
+                sku_to_product_id = {
+                    r._mapping["sku"]: str(r._mapping["id"]) for r in sku_rows.fetchall()
+                }
+
+                order_ids = {row._mapping["source_id"] for row in sale_rows}
+                valid_order_uuids = []
+                for oid in order_ids:
+                    try:
+                        valid_order_uuids.append(UUID(oid))
+                    except ValueError:
+                        logger.warning(
+                            "export_movements_csv: source_id %r is not a valid UUID, "
+                            "skipping price resolution for its rows", oid,
+                        )
+                if valid_order_uuids:
+                    order_rows = await session.execute(
+                        text("SELECT id, items FROM orders WHERE id = ANY(:ids)"),
+                        {"ids": valid_order_uuids},
+                    )
+                    for r in order_rows.fetchall():
+                        raw_items = r._mapping["items"]
+                        items = (
+                            raw_items if isinstance(raw_items, list) else json.loads(raw_items)
+                        )
+                        items_by_order[str(r._mapping["id"])] = items
+
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
-            ["sku", "delta", "reason", "source_type", "source_id", "below_zero", "created_at"]
+            [
+                "sku", "delta", "reason", "source_type", "source_id", "below_zero",
+                "created_at", "price_rub", "sale_amount",
+            ]
         )
+
+        daily_totals: dict[str, int] = {}
+        grand_total = 0
+
         for row in rows:
             m = row._mapping
+            price_rub: int | None = None
+            sale_amount: int | None = None
+
+            if m["reason"] == "SALE" and m["source_id"]:
+                product_id = sku_to_product_id.get(m["sku"])
+                order_items = items_by_order.get(m["source_id"], [])
+                if product_id is not None:
+                    matched = next(
+                        (i for i in order_items if str(i.get("product_id")) == product_id),
+                        None,
+                    )
+                    if matched is not None:
+                        price_rub = int(matched["price_rub"])
+                        sale_amount = price_rub * abs(int(m["delta"]))
+                        day_key = m["created_at"].date().isoformat()
+                        daily_totals[day_key] = daily_totals.get(day_key, 0) + sale_amount
+                        grand_total += sale_amount
+
             writer.writerow(
                 [
                     m["sku"],
@@ -205,6 +287,18 @@ class InventoryService:
                     m["source_id"] or "",
                     m["below_zero"],
                     m["created_at"].isoformat(),
+                    price_rub if price_rub is not None else "",
+                    sale_amount if sale_amount is not None else "",
                 ]
             )
+
+        writer.writerow([])
+        writer.writerow(["Daily sales totals"])
+        writer.writerow(["date", "sale_amount"])
+        for day_key in sorted(daily_totals):
+            writer.writerow([day_key, daily_totals[day_key]])
+
+        writer.writerow([])
+        writer.writerow(["Grand total", grand_total])
+
         return buffer.getvalue()
