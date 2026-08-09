@@ -16,14 +16,23 @@ Called from three places:
   3. app.webhooks.max, after a successful transition, to chain-notify the
      NEXT allowed step for the same role.
 
-Design tradeoff (v1, stated explicitly rather than silently simplified): no
-message-editing. Each stage sends a NEW MAX message rather than editing one
-message in place (which is what SieshKa-Site's older bot does). Editing would
-require persisting a MAX message_id per (ticket_or_order, recipient) pair —
-multiple kitchen/courier staff can each receive their own message, so it's a
-mapping table, not a single column. Deferred to a later sprint if the
-multi-message UX proves annoying in practice; the FSM/ACL/dispatch
-correctness does not depend on it.
+Edit-in-place (2026-08-09): the original v1 tradeoff ("no message-editing,
+each stage sends a NEW MAX message") is now implemented via
+_send_or_edit()/app.services.max_message_refs — a (entity_kind, entity_id,
+max_user_id) -> message_id tracking table. Every notify_* function now edits
+the recipient's existing tracked message in place when one exists (including
+the button-presser's own message: they're one of list_active_by_role()'s
+recipients too, so the same broadcast loop naturally finds and edits it — no
+separate app.webhooks.max/answer_callback special-casing needed), falling
+back to sending a fresh message when there's no tracked ref yet or the
+tracked one has gone stale (edit_message() returns False — e.g. the MAX-side
+message was deleted or, for non-inline_keyboard messages, aged past MAX's
+7-day edit window — see max_message_refs.py table docstring). Consequence: no
+notify_* function early-returns on an empty keyboard anymore (that used to
+mean "nothing to do" for kitchen/courier — now it means "edit the existing
+message to show the terminal status, with no buttons", matching the
+observer-role behavior notify_admin_order_state already had before this
+change).
 
 Button payload contract (consumed by app.webhooks.max):
     {"kind": "kitchen", "id": "<ticket_uuid>", "event": "<KitchenEvent value>"}
@@ -39,11 +48,14 @@ and app.services.kitchen_service both keep their own imports of THIS module
 lazy (see their source): importing order_service here would add a new
 module-level edge into the app.services.__init__ eager-import chain that
 does not currently exist, for a read-only convenience that doesn't need it.
+app.services.max_message_refs follows the same self-contained-session
+pattern for the same reason.
 """
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import text as sql_text
@@ -53,6 +65,7 @@ from app.domains.kitchen.fsm import KITCHEN_TRANSITIONS, KitchenEvent, KitchenSt
 from app.domains.orders.models import ORDER_TRANSITIONS, OrderEvent, OrderState
 from app.domains.staff.models import StaffRole
 from app.services.max_client import MaxClient, max_client
+from app.services.max_message_refs import get_message_ref, save_message_ref
 from app.services.staff_service import StaffService
 
 logger = logging.getLogger(__name__)
@@ -244,6 +257,44 @@ async def _fetch_order_details(order_id: str) -> str:
     return ("\n" + "\n".join(lines)) if lines else ""
 
 
+_GetRefFn = Callable[[str, str, int], Awaitable["str | None"]]
+_SaveRefFn = Callable[[str, str, int, str], Awaitable[None]]
+
+
+async def _send_or_edit(
+    entity_kind: str,
+    entity_id: str,
+    max_user_id: int,
+    text: str,
+    keyboard: list[dict[str, Any]],
+    client: MaxClient,
+    *,
+    get_ref: _GetRefFn = get_message_ref,
+    save_ref: _SaveRefFn = save_message_ref,
+) -> None:
+    """Edit the recipient's existing tracked message if one exists; otherwise
+    send a fresh message and start tracking it.
+
+    get_ref/save_ref are injectable (default to the real
+    app.services.max_message_refs functions) purely for unit testing without
+    a DB — same DI pattern as this module's staff_service/client params.
+
+    edit_message() returning False (stale/deleted/expired tracked message_id)
+    falls through to sending a fresh message rather than silently dropping
+    the update — see max_message_refs.py's max_message_refs table docstring.
+    """
+    existing_mid = await get_ref(entity_kind, entity_id, max_user_id)
+    if existing_mid is not None:
+        edited = await client.edit_message(existing_mid, text, attachments=keyboard)
+        if edited:
+            return
+        # Stale ref — fall through and send fresh, overwriting it below.
+
+    new_mid = await client.send_message(max_user_id, text, attachments=keyboard)
+    if new_mid:
+        await save_ref(entity_kind, entity_id, max_user_id, new_mid)
+
+
 async def notify_kitchen_ticket_state(
     ticket_id: str,
     order_id: str,
@@ -256,12 +307,12 @@ async def notify_kitchen_ticket_state(
 
     Fire-and-forget: every exception is caught and logged, never raised — a
     failed staff notification must never fail the governed transition that
-    triggered it (same contract as app.tools.notification_tools). No-op if
-    the state has no further kitchen-actionable event (HANDED_OFF).
+    triggered it (same contract as app.tools.notification_tools). Always
+    sends/edits — even on a terminal state with no further kitchen-actionable
+    event (HANDED_OFF), the existing tracked message is edited to show the
+    final status with no buttons (2026-08-09, see module docstring).
     """
     keyboard = _kitchen_keyboard(ticket_id, state)
-    if not keyboard:
-        return
 
     staff = staff_service or StaffService()
     mc = client or max_client
@@ -281,7 +332,7 @@ async def notify_kitchen_ticket_state(
         if member.max_user_id is None:
             continue
         try:
-            await mc.send_message(member.max_user_id, text, attachments=keyboard)
+            await _send_or_edit("kitchen", ticket_id, member.max_user_id, text, keyboard, mc)
         except Exception:
             logger.exception(
                 "notify_kitchen_ticket_state: send failed for max_user_id=%s",
@@ -298,12 +349,10 @@ async def notify_courier_order_state(
 ) -> None:
     """Broadcast to every active courier-role staff member.
 
-    Same fire-and-forget / no-op-if-nothing-actionable contract as
-    notify_kitchen_ticket_state.
+    Same fire-and-forget / always-send-or-edit contract as
+    notify_kitchen_ticket_state (2026-08-09).
     """
     keyboard = _order_keyboard(order_id, state, StaffRole.courier)
-    if not keyboard:
-        return
 
     staff = staff_service or StaffService()
     mc = client or max_client
@@ -323,7 +372,7 @@ async def notify_courier_order_state(
         if member.max_user_id is None:
             continue
         try:
-            await mc.send_message(member.max_user_id, text, attachments=keyboard)
+            await _send_or_edit("order", order_id, member.max_user_id, text, keyboard, mc)
         except Exception:
             logger.exception(
                 "notify_courier_order_state: send failed for max_user_id=%s",
@@ -340,14 +389,10 @@ async def notify_admin_order_state(
 ) -> None:
     """Broadcast to every active admin-role staff member.
 
-    Unlike notify_kitchen_ticket_state/notify_courier_order_state, admin is
-    an OBSERVER role, not an actor: it always sends the status line (kitchen/
-    courier progress visibility, 2026-08-08 request), attaching the CANCEL
-    button (per _ORDER_ROLE_EVENTS) only when the order is still in a
-    cancellable state. Deliberately does NOT no-op when the keyboard is
-    empty — that early-return is correct for kitchen/courier (nothing to do
-    without a button) but wrong for admin (still wants to see "courier
-    delivered", "order closed", etc. with no button attached).
+    Admin is an OBSERVER role, not an actor: it always sends/edits the status
+    line (kitchen/courier progress visibility, 2026-08-08 request), attaching
+    the CANCEL button (per _ORDER_ROLE_EVENTS) only when the order is still
+    in a cancellable state.
     """
     keyboard = _order_keyboard(order_id, state, StaffRole.admin)
 
@@ -369,7 +414,7 @@ async def notify_admin_order_state(
         if member.max_user_id is None:
             continue
         try:
-            await mc.send_message(member.max_user_id, text, attachments=keyboard)
+            await _send_or_edit("order", order_id, member.max_user_id, text, keyboard, mc)
         except Exception:
             logger.exception(
                 "notify_admin_order_state: send failed for max_user_id=%s",
@@ -391,8 +436,9 @@ async def notify_admin_kitchen_ticket_state(
     _ORDER_ROLE_EVENTS/webhooks.max role_gate) — this exists purely so admin
     sees the same NEW→QUEUED→PREPARING→READY→HANDED_OFF progression kitchen
     staff act on, per 2026-08-08 request ("статус менялся при изменении
-    кухней"). Always sends (no _kitchen_keyboard-emptiness gate — that check
-    exists to decide whether kitchen has a next action, irrelevant here).
+    кухней"). Always sends/edits (no _kitchen_keyboard-emptiness gate — that
+    check exists to decide whether kitchen has a next action, irrelevant
+    here — keyboard is always []).
     """
     staff = staff_service or StaffService()
     mc = client or max_client
@@ -412,7 +458,9 @@ async def notify_admin_kitchen_ticket_state(
         if member.max_user_id is None:
             continue
         try:
-            await mc.send_message(member.max_user_id, text, attachments=[])
+            await _send_or_edit(
+                "kitchen_admin", ticket_id, member.max_user_id, text, [], mc
+            )
         except Exception:
             logger.exception(
                 "notify_admin_kitchen_ticket_state: send failed for max_user_id=%s",

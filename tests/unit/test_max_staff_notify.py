@@ -15,6 +15,7 @@ from app.services.max_staff_notify import (
     _fetch_order_details,
     _kitchen_keyboard,
     _order_keyboard,
+    _send_or_edit,
     notify_admin_kitchen_ticket_state,
     notify_admin_order_state,
     notify_courier_order_state,
@@ -101,9 +102,16 @@ class TestNotifyKitchenTicketState:
 
         client.send_message.assert_not_awaited()
 
-    async def test_terminal_state_never_calls_staff_lookup(self) -> None:
+    async def test_terminal_state_still_edits_final_status_no_buttons(self) -> None:
+        # 2026-08-09: edit-in-place — terminal state no longer skips the
+        # broadcast, it edits the existing tracked message down to a
+        # no-buttons final status instead (see _send_or_edit).
         staff_service = AsyncMock()
+        staff_service.list_active_by_role.return_value = [
+            _staff(StaffRole.kitchen, max_user_id=222)
+        ]
         client = AsyncMock()
+        client.send_message.return_value = "mid-1"
 
         await notify_kitchen_ticket_state(
             "ticket-1",
@@ -113,8 +121,9 @@ class TestNotifyKitchenTicketState:
             client=client,
         )
 
-        staff_service.list_active_by_role.assert_not_awaited()
-        client.send_message.assert_not_awaited()
+        staff_service.list_active_by_role.assert_awaited_once_with(StaffRole.kitchen)
+        client.send_message.assert_awaited_once()
+        assert client.send_message.await_args.kwargs["attachments"] == []
 
     async def test_staff_lookup_failure_is_swallowed(self) -> None:
         staff_service = AsyncMock()
@@ -167,16 +176,23 @@ class TestNotifyCourierOrderState:
         client.send_message.assert_awaited_once()
         assert client.send_message.await_args.args[0] == 333
 
-    async def test_no_actionable_state_skips_staff_lookup_entirely(self) -> None:
+    async def test_no_actionable_state_still_edits_final_status_no_buttons(self) -> None:
+        # 2026-08-09: edit-in-place — same contract change as kitchen's
+        # terminal-state test above.
         staff_service = AsyncMock()
+        staff_service.list_active_by_role.return_value = [
+            _staff(StaffRole.courier, max_user_id=333)
+        ]
         client = AsyncMock()
+        client.send_message.return_value = "mid-1"
 
         await notify_courier_order_state(
             "order-1", OrderState.DELIVERED, staff_service=staff_service, client=client
         )
 
-        staff_service.list_active_by_role.assert_not_awaited()
-        client.send_message.assert_not_awaited()
+        staff_service.list_active_by_role.assert_awaited_once_with(StaffRole.courier)
+        client.send_message.assert_awaited_once()
+        assert client.send_message.await_args.kwargs["attachments"] == []
 
 
 class TestNotifyAdminOrderState:
@@ -407,3 +423,166 @@ class TestFetchOrderDetails:
         details = await _fetch_order_details("order-1")
 
         assert details == ""
+
+
+class TestSendOrEdit:
+    """2026-08-09: edit-in-place — (entity_kind, entity_id, max_user_id) ->
+    message_id lookup/save is injectable (get_ref/save_ref) precisely so
+    this branching logic is testable without a DB."""
+
+    async def test_no_existing_ref_sends_fresh_and_saves(self) -> None:
+        client = AsyncMock()
+        client.send_message.return_value = "mid-new"
+        get_ref = AsyncMock(return_value=None)
+        save_ref = AsyncMock()
+
+        await _send_or_edit(
+            "kitchen", "ticket-1", 222, "text", [], client, get_ref=get_ref, save_ref=save_ref
+        )
+
+        get_ref.assert_awaited_once_with("kitchen", "ticket-1", 222)
+        client.send_message.assert_awaited_once_with(222, "text", attachments=[])
+        client.edit_message.assert_not_awaited()
+        save_ref.assert_awaited_once_with("kitchen", "ticket-1", 222, "mid-new")
+
+    async def test_existing_ref_edits_and_never_sends(self) -> None:
+        client = AsyncMock()
+        client.edit_message.return_value = True
+        get_ref = AsyncMock(return_value="mid-old")
+        save_ref = AsyncMock()
+
+        await _send_or_edit(
+            "kitchen", "ticket-1", 222, "text", [], client, get_ref=get_ref, save_ref=save_ref
+        )
+
+        client.edit_message.assert_awaited_once_with("mid-old", "text", attachments=[])
+        client.send_message.assert_not_awaited()
+        save_ref.assert_not_awaited()
+
+    async def test_stale_ref_falls_back_to_send_and_overwrites(self) -> None:
+        # edit_message() returning False (e.g. message deleted MAX-side)
+        # must not silently drop the update.
+        client = AsyncMock()
+        client.edit_message.return_value = False
+        client.send_message.return_value = "mid-fresh"
+        get_ref = AsyncMock(return_value="mid-stale")
+        save_ref = AsyncMock()
+
+        await _send_or_edit(
+            "kitchen", "ticket-1", 222, "text", [], client, get_ref=get_ref, save_ref=save_ref
+        )
+
+        client.edit_message.assert_awaited_once_with("mid-stale", "text", attachments=[])
+        client.send_message.assert_awaited_once_with(222, "text", attachments=[])
+        save_ref.assert_awaited_once_with("kitchen", "ticket-1", 222, "mid-fresh")
+
+    async def test_send_failure_does_not_save_ref(self) -> None:
+        # send_message returns None on failure (MaxClient contract) — no
+        # message_id to track.
+        client = AsyncMock()
+        client.send_message.return_value = None
+        get_ref = AsyncMock(return_value=None)
+        save_ref = AsyncMock()
+
+        await _send_or_edit(
+            "kitchen", "ticket-1", 222, "text", [], client, get_ref=get_ref, save_ref=save_ref
+        )
+
+        save_ref.assert_not_awaited()
+
+
+class _FakeMsgRefRow:
+    def __init__(self, message_id: str | None) -> None:
+        self._mapping = {"message_id": message_id}
+
+
+class _FakeMsgRefResult:
+    def __init__(self, row: _FakeMsgRefRow | None) -> None:
+        self._row = row
+
+    def fetchone(self) -> _FakeMsgRefRow | None:
+        return self._row
+
+
+class _FakeMsgRefSession:
+    def __init__(self, row: _FakeMsgRefRow | None) -> None:
+        self._row = row
+        self.committed = False
+        self.executed_params: dict[str, object] | None = None
+
+    async def __aenter__(self) -> _FakeMsgRefSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def execute(self, stmt: object, params: dict[str, object]) -> _FakeMsgRefResult:
+        self.executed_params = params
+        return _FakeMsgRefResult(self._row)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+class TestMaxMessageRefs:
+    """max_message_refs.py — mocked session, no DB required."""
+
+    async def test_get_message_ref_found(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_message_refs as module
+
+        session = _FakeMsgRefSession(_FakeMsgRefRow("mid-123"))
+        monkeypatch.setattr(module, "async_session_factory", lambda: session)
+
+        result = await module.get_message_ref("kitchen", "ticket-1", 222)
+
+        assert result == "mid-123"
+        assert session.executed_params == {"kind": "kitchen", "id": "ticket-1", "uid": 222}
+
+    async def test_get_message_ref_missing_returns_none(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_message_refs as module
+
+        session = _FakeMsgRefSession(None)
+        monkeypatch.setattr(module, "async_session_factory", lambda: session)
+
+        result = await module.get_message_ref("kitchen", "ticket-1", 222)
+
+        assert result is None
+
+    async def test_get_message_ref_query_failure_returns_none(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_message_refs as module
+
+        def _boom() -> object:
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr(module, "async_session_factory", _boom)
+
+        result = await module.get_message_ref("kitchen", "ticket-1", 222)
+
+        assert result is None
+
+    async def test_save_message_ref_commits(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_message_refs as module
+
+        session = _FakeMsgRefSession(None)
+        monkeypatch.setattr(module, "async_session_factory", lambda: session)
+
+        await module.save_message_ref("order", "order-1", 999, "mid-abc")
+
+        assert session.committed is True
+        assert session.executed_params == {
+            "kind": "order",
+            "id": "order-1",
+            "uid": 999,
+            "mid": "mid-abc",
+        }
+
+    async def test_save_message_ref_failure_does_not_raise(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_message_refs as module
+
+        def _boom() -> object:
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr(module, "async_session_factory", _boom)
+
+        # Must not raise.
+        await module.save_message_ref("order", "order-1", 999, "mid-abc")

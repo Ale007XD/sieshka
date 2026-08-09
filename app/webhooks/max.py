@@ -224,12 +224,14 @@ async def max_webhook(
         )
 
     if result.success and result.new_state is not None:
-        # sprint_max_staff_notify chain-notify: v1 has no message-editing (see
-        # app/services/max_staff_notify.py docstring for the tradeoff), so the
-        # NEXT allowed action is sent as a new message rather than updating
-        # this one. This is itself fire-and-forget — never lets a notify
-        # failure surface as a webhook error, since the governed transition
-        # already succeeded and answered above.
+        # sprint_max_staff_notify chain-notify: notify_* below edits the
+        # presser's own message in place (2026-08-09, see
+        # app/services/max_staff_notify.py docstring — the presser is one of
+        # list_active_by_role()'s recipients too, so no special-casing is
+        # needed here beyond calling the same broadcast). This block is
+        # itself fire-and-forget — never lets a notify failure surface as a
+        # webhook error, since the governed transition already succeeded and
+        # answered above.
         try:
             if kind == "kitchen":
                 order_id = await kitchen.get_order_id(str(entity_id))
