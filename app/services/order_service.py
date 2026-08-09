@@ -141,6 +141,7 @@ class OrderService:
         items: list[OrderItem],
         total_rub: int,
         promo_code: str | None = None,
+        discount_rub: int = 0,
     ) -> OrderRead:
         """Persist a checkout-built order with a typed, price-snapshotted item list.
 
@@ -161,10 +162,11 @@ class OrderService:
                 text(
                     "INSERT INTO orders "
                     "(customer_id, items, delivery_address, state, delivery_mode, "
-                    " zone_id, comment, client_max_uid, total_rub, payment_method, promo_code) "
+                    " zone_id, comment, client_max_uid, total_rub, payment_method, "
+                    " promo_code, discount_rub) "
                     "VALUES (:customer_id, :items, :delivery_address, :state, "
                     " :delivery_mode, :zone_id, :comment, :client_max_uid, "
-                    " :total_rub, :payment_method, :promo_code) "
+                    " :total_rub, :payment_method, :promo_code, :discount_rub) "
                     "RETURNING id, customer_id, state, items, delivery_address, trace_id"
                 ),
                 {
@@ -179,6 +181,7 @@ class OrderService:
                     "total_rub": total_rub,
                     "payment_method": data.payment_method,
                     "promo_code": promo_code,
+                    "discount_rub": discount_rub,
                 },
             )
             await session.commit()
@@ -193,6 +196,11 @@ class OrderService:
                 ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
+                delivery_mode=data.delivery_mode,
+                payment_method=data.payment_method,
+                comment=data.comment,
+                total_rub=total_rub,
+                discount_rub=discount_rub,
             )
 
     async def transition_order(
@@ -335,9 +343,12 @@ class OrderService:
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT id, customer_id, state, items, delivery_address, "
-                    "trace_id, total_rub "
-                    "FROM orders WHERE id = :id"
+                    "SELECT o.id, o.customer_id, o.state, o.items, o.delivery_address, "
+                    "o.trace_id, o.total_rub, o.discount_rub, o.delivery_mode, "
+                    "o.payment_method, o.comment, "
+                    "c.name AS customer_name, c.phone AS customer_phone "
+                    "FROM orders o LEFT JOIN customers c ON c.id = o.customer_id "
+                    "WHERE o.id = :id"
                 ),
                 {"id": order_id},
             )
@@ -355,6 +366,12 @@ class OrderService:
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
                 total_rub=row._mapping.get("total_rub"),
+                discount_rub=row._mapping.get("discount_rub"),
+                delivery_mode=row._mapping.get("delivery_mode"),
+                payment_method=row._mapping.get("payment_method"),
+                comment=row._mapping.get("comment"),
+                customer_name=row._mapping.get("customer_name"),
+                customer_phone=row._mapping.get("customer_phone"),
             )
 
     async def list_orders(

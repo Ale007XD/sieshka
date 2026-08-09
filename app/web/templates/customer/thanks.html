@@ -5,10 +5,35 @@
   <h1>Спасибо за заказ!</h1>
   {% if order %}
     <p>Номер заказа: <strong>{{ order.id }}</strong></p>
-    <p>Статус: {{ order.state.value }}</p>
-    {% if delivery_fee %}
-      <p>Стоимость доставки: {{ delivery_fee }} ₽</p>
+    <p>Статус: {{ state_label or order.state.value }}</p>
+    {% if order.customer_name or order.customer_phone %}
+      <p>
+        {% if order.customer_name %}{{ order.customer_name }}{% endif %}
+        {% if order.customer_phone %}· {{ order.customer_phone }}{% endif %}
+      </p>
     {% endif %}
+
+    <h3>Состав заказа</h3>
+    <ul class="thanks-items">
+      {% for item in order.items %}
+        <li>{{ item.name }} × {{ item.qty }}</li>
+      {% endfor %}
+    </ul>
+
+    {% if order.delivery_mode == "pickup" %}
+      <p>Самовывоз</p>
+    {% else %}
+      <p>Доставка{% if delivery_fee %} — {{ delivery_fee }} ₽{% endif %}</p>
+    {% endif %}
+
+    {% if order.discount_rub %}
+      <p>Скидка по промокоду: −{{ order.discount_rub }} ₽</p>
+    {% endif %}
+
+    {% if order.total_rub is not none %}
+      <p><strong>Итого: {{ order.total_rub }} ₽</strong></p>
+    {% endif %}
+
     <p class="muted">Мы свяжемся с вами для подтверждения.</p>
   {% else %}
     <p class="muted">Заказ не найден.</p>

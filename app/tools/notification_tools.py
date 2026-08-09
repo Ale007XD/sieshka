@@ -85,7 +85,10 @@ async def notify_staff_new_kitchen_ticket(
     right after write_order_state_cooking, same fire-and-forget contract as
     the notify_order_* tools above (no PG session, never raises)."""
     from app.domains.kitchen.fsm import KitchenState
-    from app.services.max_staff_notify import notify_kitchen_ticket_state
+    from app.services.max_staff_notify import (
+        notify_admin_kitchen_ticket_state,
+        notify_kitchen_ticket_state,
+    )
 
     try:
         await notify_kitchen_ticket_state(
@@ -100,6 +103,21 @@ async def notify_staff_new_kitchen_ticket(
         # already-succeeded order->COOKING state write alongside it.
         logger.exception(
             "notify_staff_new_kitchen_ticket: notify failed order_id=%s ticket_id=%s",
+            order_id,
+            ticket_id,
+        )
+
+    try:
+        # 2026-08-08: admin sees the ticket the moment it exists, not just
+        # once it starts moving through kitchen's own button-driven chain —
+        # independent try/except so a failure here never masks (or is masked
+        # by) the kitchen-facing notify above.
+        await notify_admin_kitchen_ticket_state(
+            ticket_id=str(ticket_id), order_id=order_id, state=KitchenState.NEW
+        )
+    except Exception:
+        logger.exception(
+            "notify_staff_new_kitchen_ticket: admin notify failed order_id=%s ticket_id=%s",
             order_id,
             ticket_id,
         )

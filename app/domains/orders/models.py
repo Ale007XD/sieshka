@@ -102,6 +102,30 @@ class OrderRead(BaseModel):
     # "what did this order actually cost", vs re-deriving from current
     # settings/zone data which can drift after the order was placed
     # (2026-08-01, thanks.html delivery-fee display fix).
+    discount_rub: int | None = None  # persisted promo discount snapshot, RUB
+    # (migration 018) — never recomputed from live promotions.discount at
+    # read time, same non-goal as total_rub above: an edited/deactivated
+    # promotion must not change what an already-placed order shows it saved.
+
+
+# Customer-facing status labels for thanks.html / order-confirmation surfaces.
+# Deliberately separate from app.services.max_staff_notify's staff-facing
+# _ORDER_STATE_TEXT (different audience, different microcopy register — no
+# emoji-prefixed "🆕 Новый заказ" staff framing belongs on a page the
+# customer who JUST PLACED that order is reading).
+ORDER_STATE_LABELS_RU: dict[OrderState, str] = {
+    OrderState.DRAFT: "Оформляется",
+    OrderState.CONFIRMED: "Подтверждён",
+    OrderState.PAYMENT_PENDING: "Ожидает оплаты",
+    OrderState.PAID: "Оплачен",
+    OrderState.COOKING: "Готовится",
+    OrderState.PACKING: "Упаковывается",
+    OrderState.COURIER_ASSIGNED: "Курьер назначен",
+    OrderState.DELIVERING: "В пути",
+    OrderState.DELIVERED: "Доставлен",
+    OrderState.CLOSED: "Завершён",
+    OrderState.CANCELLED: "Отменён",
+}
 
 
 class OrderItem(BaseModel):

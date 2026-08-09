@@ -191,6 +191,7 @@ async def checkout(
         items=items,
         total_rub=total_rub,
         promo_code=promo_effect.applied_code if promo_effect else None,
+        discount_rub=promo_effect.discount_rub if promo_effect else 0,
     )
 
     if body.payment_method == "yookassa_card":

@@ -48,6 +48,7 @@ from app.fsm.core.base import TransitionResult
 from app.services.kitchen_service import KitchenService
 from app.services.max_client import MaxClient, max_client
 from app.services.max_staff_notify import (
+    notify_admin_kitchen_ticket_state,
     notify_admin_order_state,
     notify_courier_order_state,
     notify_kitchen_ticket_state,
@@ -234,6 +235,16 @@ async def max_webhook(
                 order_id = await kitchen.get_order_id(str(entity_id))
                 if order_id is not None and isinstance(result.new_state, KitchenState):
                     await notify_kitchen_ticket_state(
+                        str(entity_id),
+                        order_id,
+                        result.new_state,
+                        staff_service=staff,
+                        client=client,
+                    )
+                    # 2026-08-08: admin observes kitchen-ticket progress too
+                    # (NEW→QUEUED→PREPARING→READY→HANDED_OFF) — admin has no
+                    # action here (informational only, see function docstring).
+                    await notify_admin_kitchen_ticket_state(
                         str(entity_id),
                         order_id,
                         result.new_state,

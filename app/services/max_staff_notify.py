@@ -76,10 +76,12 @@ _ORDER_STATE_TEXT: dict[OrderState, str] = {
     OrderState.CONFIRMED: "🆕 Новый заказ",
     OrderState.PAYMENT_PENDING: "🆕 Новый заказ (ожидает оплаты)",
     OrderState.PAID: "🆕 Новый заказ (оплачен)",
+    OrderState.COOKING: "🍳 Готовится",
     OrderState.PACKING: "📦 Упаковка",
     OrderState.COURIER_ASSIGNED: "🛵 Курьер назначен",
     OrderState.DELIVERING: "🚗 В пути",
     OrderState.DELIVERED: "✅ Доставлено",
+    OrderState.CLOSED: "🏁 Завершён",
     OrderState.CANCELLED: "❌ Отменён",
 }
 
@@ -102,6 +104,23 @@ _ORDER_ROLE_EVENTS: dict[StaffRole, frozenset[OrderEvent]] = {
     ),
     StaffRole.admin: frozenset({OrderEvent.CANCEL}),
 }
+
+# States reached only after a successful YooKassa payment (PAID onward, minus
+# the terminal failure/cancel states). Used solely to phrase the payment-status
+# line in _fetch_order_details — "оплачено" vs "ожидает оплаты" — never for
+# any transition/authorization decision, which stays entirely in
+# ORDER_TRANSITIONS/OrderService.
+_PAID_OR_LATER_STATES: frozenset[OrderState] = frozenset(
+    {
+        OrderState.PAID,
+        OrderState.COOKING,
+        OrderState.PACKING,
+        OrderState.COURIER_ASSIGNED,
+        OrderState.DELIVERING,
+        OrderState.DELIVERED,
+        OrderState.CLOSED,
+    }
+)
 
 
 def _kitchen_keyboard(ticket_id: str, state: KitchenState) -> list[dict[str, Any]]:
@@ -165,6 +184,7 @@ async def _fetch_order_details(order_id: str) -> str:
             result = await session.execute(
                 sql_text(
                     "SELECT o.items, o.delivery_address, o.comment, "
+                    "o.payment_method, o.state AS order_state, "
                     "c.phone AS customer_phone "
                     "FROM orders o LEFT JOIN customers c ON c.id = o.customer_id "
                     "WHERE o.id = :id"
@@ -205,6 +225,21 @@ async def _fetch_order_details(order_id: str) -> str:
     comment = row._mapping.get("comment")
     if comment:
         lines.append(f"💬 {comment}")
+
+    payment_method = row._mapping.get("payment_method")
+    order_state_raw = row._mapping.get("order_state")
+    if payment_method == "yookassa_card":
+        try:
+            paid = (
+                OrderState(order_state_raw) in _PAID_OR_LATER_STATES
+                if order_state_raw
+                else False
+            )
+        except ValueError:
+            paid = False
+        lines.append(f"💳 ЮKassa — {'оплачено' if paid else 'ожидает оплаты'}")
+    elif payment_method == "cash":
+        lines.append("💵 Наличные — при получении")
 
     return ("\n" + "\n".join(lines)) if lines else ""
 
@@ -303,19 +338,18 @@ async def notify_admin_order_state(
     staff_service: StaffService | None = None,
     client: MaxClient | None = None,
 ) -> None:
-    """Broadcast to every active admin-role staff member — CANCEL only,
-    per _ORDER_ROLE_EVENTS. No-op (no message sent, no staff lookup even
-    attempted) once the order leaves a cancellable state (COOKING onward) —
-    same keyboard-empty short-circuit as notify_courier_order_state, so
-    callers can invoke this unconditionally after any order transition
-    without checking ORDER_TRANSITIONS themselves.
+    """Broadcast to every active admin-role staff member.
 
-    Same fire-and-forget / no-op-if-nothing-actionable contract as
-    notify_kitchen_ticket_state / notify_courier_order_state.
+    Unlike notify_kitchen_ticket_state/notify_courier_order_state, admin is
+    an OBSERVER role, not an actor: it always sends the status line (kitchen/
+    courier progress visibility, 2026-08-08 request), attaching the CANCEL
+    button (per _ORDER_ROLE_EVENTS) only when the order is still in a
+    cancellable state. Deliberately does NOT no-op when the keyboard is
+    empty — that early-return is correct for kitchen/courier (nothing to do
+    without a button) but wrong for admin (still wants to see "courier
+    delivered", "order closed", etc. with no button attached).
     """
     keyboard = _order_keyboard(order_id, state, StaffRole.admin)
-    if not keyboard:
-        return
 
     staff = staff_service or StaffService()
     mc = client or max_client
@@ -339,5 +373,48 @@ async def notify_admin_order_state(
         except Exception:
             logger.exception(
                 "notify_admin_order_state: send failed for max_user_id=%s",
+                member.max_user_id,
+            )
+
+
+async def notify_admin_kitchen_ticket_state(
+    ticket_id: str,
+    order_id: str,
+    state: KitchenState,
+    *,
+    staff_service: StaffService | None = None,
+    client: MaxClient | None = None,
+) -> None:
+    """Broadcast kitchen-ticket progress to every active admin-role staff
+    member — informational only, no keyboard. Admin has no kitchen-side
+    action (kitchen-role ACL owns QUEUE/START_PREP/MARK_READY/HAND_OFF, see
+    _ORDER_ROLE_EVENTS/webhooks.max role_gate) — this exists purely so admin
+    sees the same NEW→QUEUED→PREPARING→READY→HANDED_OFF progression kitchen
+    staff act on, per 2026-08-08 request ("статус менялся при изменении
+    кухней"). Always sends (no _kitchen_keyboard-emptiness gate — that check
+    exists to decide whether kitchen has a next action, irrelevant here).
+    """
+    staff = staff_service or StaffService()
+    mc = client or max_client
+    details = await _fetch_order_details(order_id)
+    text = (
+        f"🍳 Заказ {order_id[:8]} — кухня\n{_KITCHEN_STATE_TEXT.get(state, state.value)}"
+        f"{details}"
+    )
+
+    try:
+        recipients = await staff.list_active_by_role(StaffRole.admin)
+    except Exception:
+        logger.exception("notify_admin_kitchen_ticket_state: staff lookup failed")
+        return
+
+    for member in recipients:
+        if member.max_user_id is None:
+            continue
+        try:
+            await mc.send_message(member.max_user_id, text, attachments=[])
+        except Exception:
+            logger.exception(
+                "notify_admin_kitchen_ticket_state: send failed for max_user_id=%s",
                 member.max_user_id,
             )

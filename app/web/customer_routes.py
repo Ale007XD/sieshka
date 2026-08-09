@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
 from app.config import settings
+from app.domains.orders.models import ORDER_STATE_LABELS_RU
 from app.services.order_service import OrderService
 from app.services.schedule_service import ScheduleService
 from app.web.csp import csp_nonce
@@ -166,14 +167,22 @@ async def shop_thanks(
 
     order = await order_service.get_order(str(parsed_id)) if parsed_id is not None else None
     delivery_fee = None
+    goods_total = None
+    state_label = None
     if order is not None:
+        goods_total = sum(item.price_rub * item.qty for item in order.items)
         if order.total_rub is not None:
-            goods_total = sum(item.price_rub * item.qty for item in order.items)
-            delivery_fee = order.total_rub - goods_total
+            # total_rub already nets out discount_rub (compute_checkout_total
+            # subtracts it before adding the delivery fee) — delivery_fee here
+            # is a pure remainder, not "total - goods", so it must add the
+            # discount back before subtracting goods, or a discounted order
+            # would show an artificially-low (or negative) delivery fee.
+            delivery_fee = order.total_rub - goods_total + (order.discount_rub or 0)
         else:
             # Pre-migration orders (no total_rub recorded) — fall back to the
             # old flat-fee heuristic rather than showing nothing.
             delivery_fee = settings.DELIVERY_FEE if order.delivery_address else 0
+        state_label = ORDER_STATE_LABELS_RU.get(order.state, order.state.value)
 
     templates = request.app.state.templates
     return templates.TemplateResponse(  # type: ignore[no-any-return]
@@ -183,5 +192,7 @@ async def shop_thanks(
             "csp_nonce": nonce,
             "order": order,
             "delivery_fee": delivery_fee,
+            "goods_total": goods_total,
+            "state_label": state_label,
         },
     )
