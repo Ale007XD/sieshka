@@ -256,10 +256,34 @@ class TestNotifyAdminOrderState:
 
 
 class TestNotifyAdminKitchenTicketState:
-    """Informational only — no _kitchen_keyboard concept applies to admin,
-    so this always attempts staff lookup/send regardless of ticket state."""
+    """2026-08-09: consolidated into the SAME card as notify_admin_order_state
+    (see _build_admin_card) — no longer a separate no-keyboard card. Needs
+    _fetch_order_state's DB call faked (monkeypatch on async_session_factory,
+    same pattern as TestFetchOrderDetails) since this path now looks up the
+    order's current state before building the merged card."""
 
-    async def test_broadcasts_with_no_attachments(self) -> None:
+    def _patch_factory(self, monkeypatch, row: _FakeRow) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_staff_notify as module
+
+        monkeypatch.setattr(module, "async_session_factory", lambda: _FakeSession(row))
+
+    async def test_broadcasts_with_order_keyboard_and_kitchen_line(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        # Single fake row carries the union of columns both internal queries
+        # read (_fetch_order_state reads "state"; _fetch_order_details reads
+        # the rest) — the fake doesn't discriminate by SQL text, see
+        # TestFetchOrderDetails for the same convention.
+        row = _FakeRow(
+            {
+                "state": "CONFIRMED",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "CONFIRMED",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
         staff_service = AsyncMock()
         staff_service.list_active_by_role.return_value = [_staff(StaffRole.admin, 999)]
         client = AsyncMock()
@@ -275,11 +299,26 @@ class TestNotifyAdminKitchenTicketState:
         staff_service.list_active_by_role.assert_awaited_once_with(StaffRole.admin)
         client.send_message.assert_awaited_once()
         assert client.send_message.await_args.args[0] == 999
-        assert client.send_message.await_args.kwargs["attachments"] == []
+        text = client.send_message.await_args.args[1]
+        assert "Кухня: 🍳 Готовится" in text
+        # CONFIRMED is cancellable — the merged card still carries CANCEL.
+        kwargs = client.send_message.await_args.kwargs
+        payload = json.loads(kwargs["attachments"][0]["payload"]["buttons"][0][0]["payload"])
+        assert payload == {"kind": "order", "id": "order-1", "event": "CANCEL"}
 
-    async def test_terminal_handed_off_state_still_notifies_admin(self) -> None:
-        # Unlike notify_kitchen_ticket_state (no-ops on HANDED_OFF — nothing
-        # actionable left for kitchen), admin still wants the final update.
+    async def test_terminal_handed_off_state_still_notifies_admin(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        row = _FakeRow(
+            {
+                "state": "COOKING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
         staff_service = AsyncMock()
         staff_service.list_active_by_role.return_value = [_staff(StaffRole.admin, 999)]
         client = AsyncMock()
@@ -293,8 +332,35 @@ class TestNotifyAdminKitchenTicketState:
         )
 
         client.send_message.assert_awaited_once()
+        # COOKING has no admin-actionable event — no buttons on the merged
+        # card, same rule as notify_admin_order_state.
+        assert client.send_message.await_args.kwargs["attachments"] == []
 
-    async def test_staff_lookup_failure_is_swallowed(self) -> None:
+    async def test_order_row_missing_skips_entirely(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._patch_factory(monkeypatch, None)  # type: ignore[arg-type]
+        staff_service = AsyncMock()
+        client = AsyncMock()
+
+        await notify_admin_kitchen_ticket_state(
+            "ticket-1", "order-1", KitchenState.NEW, staff_service=staff_service, client=client
+        )
+
+        staff_service.list_active_by_role.assert_not_awaited()
+        client.send_message.assert_not_awaited()
+
+    async def test_staff_lookup_failure_is_swallowed(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        row = _FakeRow(
+            {
+                "state": "COOKING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
         staff_service = AsyncMock()
         staff_service.list_active_by_role.side_effect = RuntimeError("db down")
         client = AsyncMock()

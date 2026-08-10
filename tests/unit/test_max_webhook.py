@@ -351,13 +351,46 @@ class TestOrderDispatch:
 
 
 class TestChainNotify:
-    """sprint_max_staff_notify: after a successful dispatch, the webhook sends
-    the NEXT allowed step's notification to the relevant role (no message-
-    editing in v1 — see app/services/max_staff_notify.py docstring)."""
+    """sprint_max_staff_notify: after a successful dispatch, the webhook edits
+    the relevant role's tracked status card in place (2026-08-09 — see
+    app/services/max_staff_notify.py docstring)."""
 
     async def test_kitchen_success_chain_notifies_next_stage(
-        self, client: AsyncClient, mocks: _Mocks
+        self, client: AsyncClient, mocks: _Mocks, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # notify_admin_kitchen_ticket_state (2026-08-09 merge) looks up the
+        # order's current state before building the merged admin card — fake
+        # that DB call so the admin branch of this test's assertions is
+        # actually reached, same pattern as test_max_staff_notify.py's
+        # TestNotifyAdminKitchenTicketState.
+        import app.services.max_staff_notify as msn_module
+
+        class _FakeRow:
+            _mapping = {
+                "state": "COOKING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+
+        class _FakeSession:
+            async def __aenter__(self) -> _FakeSession:
+                return self
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+            async def execute(self, *a: object, **kw: object) -> object:
+                class _Result:
+                    def fetchone(self) -> _FakeRow:
+                        return _FakeRow()
+
+                return _Result()
+
+        monkeypatch.setattr(msn_module, "async_session_factory", lambda: _FakeSession())
         mocks.staff.find_by_max_user_id.return_value = _staff(StaffRole.kitchen)
         mocks.kitchen.transition_ticket.return_value = TransitionResult(
             success=True, new_state=KitchenState.QUEUED, rejected_event=None, reason=None
@@ -396,7 +429,10 @@ class TestChainNotify:
         )
         assert payload == {"kind": "kitchen", "id": "ticket-1", "event": "START_PREP"}
         admin_call = next(c for c in mock_send.await_args_list if c.args[0] == 999)
-        # admin's kitchen-progress card is informational — no buttons at all
+        # merged admin card (2026-08-09): COOKING isn't a cancellable order
+        # state, so no CANCEL button — but the card itself now always exists
+        # (order status + kitchen status in one message), not "informational
+        # only" as before the merge.
         assert admin_call.kwargs["attachments"] == []
 
     async def test_kitchen_handed_off_no_further_chain_notify(

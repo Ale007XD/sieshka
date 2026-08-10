@@ -380,6 +380,97 @@ async def notify_courier_order_state(
             )
 
 
+async def _fetch_order_state(order_id: str) -> OrderState | None:
+    """Self-contained current-state lookup (own session — see module
+    docstring). Used only by notify_admin_kitchen_ticket_state, which learns
+    about a kitchen-side event but needs the order's CURRENT state to build
+    the merged admin card (header text + CANCEL-button eligibility)."""
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                sql_text("SELECT state FROM orders WHERE id = :id"), {"id": order_id}
+            )
+            row = result.fetchone()
+    except Exception:
+        logger.exception("_fetch_order_state: query failed order_id=%s", order_id)
+        return None
+    if row is None:
+        return None
+    try:
+        return OrderState(row._mapping["state"])
+    except ValueError:
+        return None
+
+
+async def _fetch_kitchen_state_for_order(order_id: str) -> KitchenState | None:
+    """Self-contained lookup (own session) of the most recent kitchen ticket
+    for an order, if one exists. Used by notify_admin_order_state, which
+    knows the order's new state but not any kitchen ticket's current stage.
+    Returns None if no ticket exists yet (order hasn't reached COOKING) —
+    a legitimate, common case, not an error."""
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                sql_text(
+                    "SELECT state FROM kitchen_tickets WHERE order_id = :id "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"id": order_id},
+            )
+            row = result.fetchone()
+    except Exception:
+        logger.exception(
+            "_fetch_kitchen_state_for_order: query failed order_id=%s", order_id
+        )
+        return None
+    if row is None:
+        return None
+    try:
+        return KitchenState(row._mapping["state"])
+    except ValueError:
+        return None
+
+
+async def _build_admin_card(
+    order_id: str,
+    order_state: OrderState,
+    kitchen_state: KitchenState | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Single admin card = order status + (if a kitchen ticket exists)
+    kitchen-ticket status, in one message. Consolidated 2026-08-09 — the
+    original design (notify_admin_order_state and
+    notify_admin_kitchen_ticket_state each editing their OWN separate
+    tracked message) produced two near-identical cards for the same order
+    (one with CANCEL, one without), reported as looking like duplication.
+
+    kitchen_state: pass the authoritative value when the caller already
+    knows it (notify_admin_kitchen_ticket_state does — it's the event
+    payload); pass None otherwise (notify_admin_order_state does) to have
+    this function look it up via _fetch_kitchen_state_for_order. Both
+    callers always pass their OWN axis's fresh value and let this function
+    resolve the other axis — this is what keeps a kitchen-triggered edit
+    from clobbering the order-status line and vice versa, since both writers
+    target the same tracked message (entity_kind="order", entity_id=order_id).
+    """
+    keyboard = _order_keyboard(order_id, order_state, StaffRole.admin)
+    details = await _fetch_order_details(order_id)
+    resolved_kitchen_state = kitchen_state
+    if resolved_kitchen_state is None:
+        resolved_kitchen_state = await _fetch_kitchen_state_for_order(order_id)
+    kitchen_line = ""
+    if resolved_kitchen_state is not None:
+        kitchen_label = _KITCHEN_STATE_TEXT.get(
+            resolved_kitchen_state, resolved_kitchen_state.value
+        )
+        kitchen_line = f"\n🍳 Кухня: {kitchen_label}"
+    text = (
+        f"🧾 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(order_state, order_state.value)}"
+        f"{kitchen_line}"
+        f"{details}"
+    )
+    return text, keyboard
+
+
 async def notify_admin_order_state(
     order_id: str,
     state: OrderState,
@@ -392,17 +483,14 @@ async def notify_admin_order_state(
     Admin is an OBSERVER role, not an actor: it always sends/edits the status
     line (kitchen/courier progress visibility, 2026-08-08 request), attaching
     the CANCEL button (per _ORDER_ROLE_EVENTS) only when the order is still
-    in a cancellable state.
+    in a cancellable state. Shares ONE tracked message per order with
+    notify_admin_kitchen_ticket_state (see _build_admin_card, 2026-08-09) —
+    do not reintroduce a second admin card for the same order_id.
     """
-    keyboard = _order_keyboard(order_id, state, StaffRole.admin)
+    text, keyboard = await _build_admin_card(order_id, state, kitchen_state=None)
 
     staff = staff_service or StaffService()
     mc = client or max_client
-    details = await _fetch_order_details(order_id)
-    text = (
-        f"🧾 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(state, state.value)}"
-        f"{details}"
-    )
 
     try:
         recipients = await staff.list_active_by_role(StaffRole.admin)
@@ -430,23 +518,29 @@ async def notify_admin_kitchen_ticket_state(
     staff_service: StaffService | None = None,
     client: MaxClient | None = None,
 ) -> None:
-    """Broadcast kitchen-ticket progress to every active admin-role staff
-    member — informational only, no keyboard. Admin has no kitchen-side
-    action (kitchen-role ACL owns QUEUE/START_PREP/MARK_READY/HAND_OFF, see
-    _ORDER_ROLE_EVENTS/webhooks.max role_gate) — this exists purely so admin
-    sees the same NEW→QUEUED→PREPARING→READY→HANDED_OFF progression kitchen
-    staff act on, per 2026-08-08 request ("статус менялся при изменении
-    кухней"). Always sends/edits (no _kitchen_keyboard-emptiness gate — that
-    check exists to decide whether kitchen has a next action, irrelevant
-    here — keyboard is always []).
+    """Update the SAME single admin card for this order (see
+    _build_admin_card, 2026-08-09) with the kitchen ticket's current stage —
+    NOT a separate card. ticket_id is accepted for call-site signature
+    stability (webhooks.max/notification_tools both pass it) but no longer
+    used to key the tracked message; the merged card is keyed by order_id
+    alone, same as notify_admin_order_state.
+
+    Admin has no kitchen-side action (kitchen-role ACL owns
+    QUEUE/START_PREP/MARK_READY/HAND_OFF, see _ORDER_ROLE_EVENTS/
+    webhooks.max role_gate) — the CANCEL button (if any) on this merged card
+    still comes from the order's own state, exactly as in
+    notify_admin_order_state.
     """
+    order_state = await _fetch_order_state(order_id)
+    if order_state is None:
+        # Order row missing/DB hiccup — nothing sane to build against; same
+        # defensive posture as _fetch_order_details returning "".
+        return
+
+    text, keyboard = await _build_admin_card(order_id, order_state, kitchen_state=state)
+
     staff = staff_service or StaffService()
     mc = client or max_client
-    details = await _fetch_order_details(order_id)
-    text = (
-        f"🍳 Заказ {order_id[:8]} — кухня\n{_KITCHEN_STATE_TEXT.get(state, state.value)}"
-        f"{details}"
-    )
 
     try:
         recipients = await staff.list_active_by_role(StaffRole.admin)
@@ -458,9 +552,7 @@ async def notify_admin_kitchen_ticket_state(
         if member.max_user_id is None:
             continue
         try:
-            await _send_or_edit(
-                "kitchen_admin", ticket_id, member.max_user_id, text, [], mc
-            )
+            await _send_or_edit("order", order_id, member.max_user_id, text, keyboard, mc)
         except Exception:
             logger.exception(
                 "notify_admin_kitchen_ticket_state: send failed for max_user_id=%s",
