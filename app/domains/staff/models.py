@@ -20,6 +20,7 @@ class StaffRole(str, Enum):
     kitchen = "kitchen"
     courier = "courier"
     admin = "admin"
+    staff = "staff"
 
 
 class Staff(BaseModel):

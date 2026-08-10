@@ -52,6 +52,7 @@ from app.services.max_staff_notify import (
     notify_admin_order_state,
     notify_courier_order_state,
     notify_kitchen_ticket_state,
+    notify_staff_card,
 )
 from app.services.order_service import OrderService
 from app.services.staff_service import StaffService
@@ -62,12 +63,21 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _KITCHEN_ROLE_EVENTS: dict[StaffRole, frozenset[KitchenEvent]] = {
     StaffRole.kitchen: frozenset(KitchenEvent),
+    StaffRole.staff: frozenset(KitchenEvent),
 }
 _ORDER_ROLE_EVENTS: dict[StaffRole, frozenset[OrderEvent]] = {
     StaffRole.courier: frozenset(
         {OrderEvent.ASSIGN_COURIER, OrderEvent.PICKUP, OrderEvent.DELIVER}
     ),
     StaffRole.admin: frozenset({OrderEvent.CANCEL}),
+    StaffRole.staff: frozenset(
+        {
+            OrderEvent.ASSIGN_COURIER,
+            OrderEvent.PICKUP,
+            OrderEvent.DELIVER,
+            OrderEvent.CANCEL,
+        }
+    ),
 }
 
 _DENIED = "Недопустимое действие для вашей роли"
@@ -253,6 +263,16 @@ async def max_webhook(
                         staff_service=staff,
                         client=client,
                     )
+                    # 2026-08-09: full-authority 'staff' role gets the same
+                    # progress on its own combined card, WITH kitchen action
+                    # buttons attached (unlike admin's informational line).
+                    await notify_staff_card(
+                        order_id,
+                        ticket_id=str(entity_id),
+                        kitchen_state=result.new_state,
+                        staff_service=staff,
+                        client=client,
+                    )
             elif staff_member.role == StaffRole.courier and isinstance(
                 result.new_state, OrderState
             ):
@@ -262,6 +282,12 @@ async def max_webhook(
             if kind == "order" and isinstance(result.new_state, OrderState):
                 await notify_admin_order_state(
                     str(entity_id), result.new_state, staff_service=staff, client=client
+                )
+                await notify_staff_card(
+                    str(entity_id),
+                    order_state=result.new_state,
+                    staff_service=staff,
+                    client=client,
                 )
         except Exception:
             logger.exception(

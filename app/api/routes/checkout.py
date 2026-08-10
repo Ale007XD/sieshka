@@ -27,7 +27,7 @@ from app.db import async_session_factory
 from app.domains.orders.models import CheckoutRequest, OrderEvent, OrderState
 from app.services.customer_service import CustomerService
 from app.services.idempotency import IdempotencyService
-from app.services.max_staff_notify import notify_admin_order_state
+from app.services.max_staff_notify import notify_admin_order_state, notify_staff_card
 from app.services.max_webapp_auth import validate_init_data
 from app.services.menu_service import MenuService
 from app.services.order_service import (
@@ -208,6 +208,7 @@ async def checkout(
         await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
         await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
         await notify_admin_order_state(str(order.id), OrderState.PAYMENT_PENDING)
+        await notify_staff_card(str(order.id), order_state=OrderState.PAYMENT_PENDING)
         payment = await payment_service.create_payment(
             order_id=str(order.id),
             amount=Decimal(total_rub),
@@ -240,6 +241,7 @@ async def checkout(
     # short-circuit) — admin would never see the order at all for the
     # common cash-order path (2026-08-08, reported as "ничего не приходит").
     await notify_admin_order_state(str(order.id), OrderState.CONFIRMED)
+    await notify_staff_card(str(order.id), order_state=OrderState.CONFIRMED)
     cooking = await order_service.transition_order(str(order.id), OrderEvent.START_COOKING)
     if not cooking.success:
         logger.warning(

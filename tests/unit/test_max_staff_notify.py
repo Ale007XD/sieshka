@@ -12,6 +12,7 @@ from app.domains.kitchen.fsm import KitchenState
 from app.domains.orders.models import OrderState
 from app.domains.staff.models import Staff, StaffRole
 from app.services.max_staff_notify import (
+    _combine_keyboards,
     _fetch_order_details,
     _kitchen_keyboard,
     _order_keyboard,
@@ -20,6 +21,7 @@ from app.services.max_staff_notify import (
     notify_admin_order_state,
     notify_courier_order_state,
     notify_kitchen_ticket_state,
+    notify_staff_card,
 )
 
 
@@ -652,3 +654,181 @@ class TestMaxMessageRefs:
 
         # Must not raise.
         await module.save_message_ref("order", "order-1", 999, "mid-abc")
+
+
+class TestCombineKeyboards:
+    def test_merges_rows_from_multiple_keyboards(self) -> None:
+        kitchen_kb = _kitchen_keyboard("ticket-1", KitchenState.QUEUED)
+        order_kb = _order_keyboard("order-1", OrderState.CONFIRMED, StaffRole.staff)
+
+        combined = _combine_keyboards(kitchen_kb, order_kb)
+
+        assert len(combined) == 1
+        rows = combined[0]["payload"]["buttons"]
+        assert len(rows) == 2  # one row per source keyboard
+        events = {json.loads(btn["payload"])["event"] for row in rows for btn in row}
+        assert "START_PREP" in events  # from kitchen_kb (QUEUED -> START_PREP)
+        assert "CANCEL" in events  # from order_kb (CONFIRMED -> CANCEL, staff-permitted)
+
+    def test_empty_inputs_yield_empty_list(self) -> None:
+        assert _combine_keyboards([], []) == []
+
+    def test_skips_empty_keyboards_among_non_empty(self) -> None:
+        order_kb = _order_keyboard("order-1", OrderState.CONFIRMED, StaffRole.staff)
+
+        combined = _combine_keyboards([], order_kb)
+
+        assert len(combined) == 1
+        assert len(combined[0]["payload"]["buttons"]) == 1
+
+
+class TestNotifyStaffCard:
+    """2026-08-09: full-authority 'staff' role — one combined card with
+    kitchen action buttons AND order action buttons (courier's + admin's
+    CANCEL) together. Uses the same monkeypatch-on-async_session_factory
+    pattern as TestNotifyAdminKitchenTicketState for the internal DB lookups
+    (_fetch_order_state / _fetch_kitchen_ticket_for_order)."""
+
+    def _patch_factory(self, monkeypatch, row: _FakeRow) -> None:  # type: ignore[no-untyped-def]
+        import app.services.max_staff_notify as module
+
+        monkeypatch.setattr(module, "async_session_factory", lambda: _FakeSession(row))
+
+    async def test_order_triggered_resolves_kitchen_axis_from_db(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        # Order-level caller (checkout, order-kind webhook callback) passes
+        # order_state directly and leaves ticket_id/kitchen_state None — this
+        # function must resolve the kitchen ticket itself.
+        row = _FakeRow(
+            {
+                "id": "ticket-9",
+                "state": "PREPARING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
+        staff_service = AsyncMock()
+        staff_service.list_active_by_role.return_value = [_staff(StaffRole.staff, 777)]
+        client = AsyncMock()
+
+        await notify_staff_card(
+            "order-1",
+            order_state=OrderState.COOKING,
+            staff_service=staff_service,
+            client=client,
+        )
+
+        staff_service.list_active_by_role.assert_awaited_once_with(StaffRole.staff)
+        client.send_message.assert_awaited_once()
+        text = client.send_message.await_args.args[1]
+        assert "Кухня: 🍳 Готовится" in text
+        kwargs = client.send_message.await_args.kwargs
+        rows = kwargs["attachments"][0]["payload"]["buttons"]
+        events = {json.loads(btn["payload"])["event"] for row_ in rows for btn in row_}
+        # PREPARING's kitchen button (MARK_READY) present even though this
+        # call only knew the ORDER axis.
+        assert "MARK_READY" in events
+
+    async def test_kitchen_triggered_resolves_order_axis_from_db(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        # Kitchen-level caller (ticket creation, kitchen-kind webhook
+        # callback) passes ticket_id+kitchen_state and leaves order_state
+        # None — this function must resolve the order's current state.
+        row = _FakeRow(
+            {
+                "state": "CONFIRMED",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "CONFIRMED",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
+        staff_service = AsyncMock()
+        staff_service.list_active_by_role.return_value = [_staff(StaffRole.staff, 777)]
+        client = AsyncMock()
+
+        await notify_staff_card(
+            "order-1",
+            ticket_id="ticket-1",
+            kitchen_state=KitchenState.NEW,
+            staff_service=staff_service,
+            client=client,
+        )
+
+        client.send_message.assert_awaited_once()
+        kwargs = client.send_message.await_args.kwargs
+        rows = kwargs["attachments"][0]["payload"]["buttons"]
+        events = {json.loads(btn["payload"])["event"] for row_ in rows for btn in row_}
+        # QUEUE (kitchen, from the passed-in ticket_id/state) AND CANCEL
+        # (order, resolved from DB as CONFIRMED) both present in one card.
+        assert "QUEUE" in events
+        assert "CANCEL" in events
+
+    async def test_order_row_missing_skips_entirely(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        self._patch_factory(monkeypatch, None)  # type: ignore[arg-type]
+        staff_service = AsyncMock()
+        client = AsyncMock()
+
+        await notify_staff_card(
+            "order-1", staff_service=staff_service, client=client
+        )
+
+        staff_service.list_active_by_role.assert_not_awaited()
+        client.send_message.assert_not_awaited()
+
+    async def test_staff_lookup_failure_is_swallowed(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        row = _FakeRow(
+            {
+                "id": "ticket-9",
+                "state": "COOKING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
+        staff_service = AsyncMock()
+        staff_service.list_active_by_role.side_effect = RuntimeError("db down")
+        client = AsyncMock()
+
+        await notify_staff_card(
+            "order-1", order_state=OrderState.COOKING, staff_service=staff_service, client=client
+        )
+
+        client.send_message.assert_not_awaited()
+
+    async def test_skips_recipients_without_max_user_id(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        row = _FakeRow(
+            {
+                "id": "ticket-9",
+                "state": "COOKING",
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": None,
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
+        staff_service = AsyncMock()
+        base = _staff(StaffRole.staff, 777)
+        staff_service.list_active_by_role.return_value = [
+            base.model_copy(update={"max_user_id": None})
+        ]
+        client = AsyncMock()
+
+        await notify_staff_card(
+            "order-1", order_state=OrderState.COOKING, staff_service=staff_service, client=client
+        )
+
+        client.send_message.assert_not_awaited()

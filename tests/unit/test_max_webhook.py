@@ -396,16 +396,16 @@ class TestChainNotify:
             success=True, new_state=KitchenState.QUEUED, rejected_event=None, reason=None
         )
         mocks.kitchen.get_order_id.return_value = "order-1"
-        # 2026-08-08: admin now also observes kitchen-ticket progress
-        # (notify_admin_kitchen_ticket_state, informational, no keyboard) —
-        # role-aware side_effect so kitchen and admin recipients are
+        # 2026-08-08/09: admin (informational-merged) and staff (full-
+        # authority, WITH kitchen buttons) both also observe kitchen-ticket
+        # progress — role-aware side_effect so all three recipients are
         # distinguishable in the assertions below.
         mocks.staff.list_active_by_role = AsyncMock(
-            side_effect=lambda role: (
-                [_staff(StaffRole.kitchen, max_user_id=222)]
-                if role == StaffRole.kitchen
-                else [_staff(StaffRole.admin, max_user_id=999)]
-            )
+            side_effect=lambda role: {
+                StaffRole.kitchen: [_staff(StaffRole.kitchen, max_user_id=222)],
+                StaffRole.admin: [_staff(StaffRole.admin, max_user_id=999)],
+                StaffRole.staff: [_staff(StaffRole.staff, max_user_id=777)],
+            }.get(role, [])
         )
         mock_send = AsyncMock(return_value="mid-x")
         mocks.max_client.send_message = mock_send
@@ -419,9 +419,9 @@ class TestChainNotify:
 
         assert resp.status_code == 200
         mocks.kitchen.get_order_id.assert_awaited_once_with("ticket-1")
-        assert mock_send.await_count == 2
+        assert mock_send.await_count == 3
         recipients = {call.args[0] for call in mock_send.await_args_list}
-        assert recipients == {222, 999}
+        assert recipients == {222, 999, 777}
         kitchen_call = next(c for c in mock_send.await_args_list if c.args[0] == 222)
         # next button should be START_PREP (allowed from QUEUED)
         payload = json.loads(
@@ -434,6 +434,13 @@ class TestChainNotify:
         # (order status + kitchen status in one message), not "informational
         # only" as before the merge.
         assert admin_call.kwargs["attachments"] == []
+        staff_call = next(c for c in mock_send.await_args_list if c.args[0] == 777)
+        # staff's combined card DOES get the kitchen action button (unlike
+        # admin's line-only view) — same START_PREP button kitchen's own
+        # card gets, just as a second row alongside any order-level buttons.
+        staff_rows = staff_call.kwargs["attachments"][0]["payload"]["buttons"]
+        staff_payloads = {json.loads(btn["payload"])["event"] for row in staff_rows for btn in row}
+        assert "START_PREP" in staff_payloads
 
     async def test_kitchen_handed_off_no_further_chain_notify(
         self, client: AsyncClient, mocks: _Mocks
@@ -465,17 +472,16 @@ class TestChainNotify:
             rejected_event=None,
             reason=None,
         )
-        # 2026-08-08: admin now also observes order-level progress
-        # (notify_admin_order_state no longer no-ops on an empty keyboard —
-        # COURIER_ASSIGNED has no admin-actionable button, but admin still
-        # gets the status line). Role-aware side_effect distinguishes the
-        # two recipients in the assertions below.
+        # 2026-08-08/09: admin (merged, CANCEL only) and staff (full-
+        # authority, courier+admin buttons combined) both also observe
+        # order-level progress — role-aware side_effect distinguishes all
+        # three recipients in the assertions below.
         mocks.staff.list_active_by_role = AsyncMock(
-            side_effect=lambda role: (
-                [_staff(StaffRole.courier, max_user_id=333)]
-                if role == StaffRole.courier
-                else [_staff(StaffRole.admin, max_user_id=999)]
-            )
+            side_effect=lambda role: {
+                StaffRole.courier: [_staff(StaffRole.courier, max_user_id=333)],
+                StaffRole.admin: [_staff(StaffRole.admin, max_user_id=999)],
+                StaffRole.staff: [_staff(StaffRole.staff, max_user_id=777)],
+            }.get(role, [])
         )
         mock_send = AsyncMock(return_value="mid-y")
         mocks.max_client.send_message = mock_send
@@ -488,9 +494,9 @@ class TestChainNotify:
         )
 
         assert resp.status_code == 200
-        assert mock_send.await_count == 2
+        assert mock_send.await_count == 3
         recipients = {call.args[0] for call in mock_send.await_args_list}
-        assert recipients == {333, 999}
+        assert recipients == {333, 999, 777}
         courier_call = next(c for c in mock_send.await_args_list if c.args[0] == 333)
         payload = json.loads(
             courier_call.kwargs["attachments"][0]["payload"]["buttons"][0][0]["payload"]
@@ -500,6 +506,13 @@ class TestChainNotify:
         # COURIER_ASSIGNED has no admin-actionable event (CANCEL only, and
         # only pre-cooking) — admin still gets the status line, no keyboard.
         assert admin_call.kwargs["attachments"] == []
+        staff_call = next(c for c in mock_send.await_args_list if c.args[0] == 777)
+        # staff gets the same PICKUP button courier's own card gets — staff's
+        # ACL is a strict superset of courier's for order events.
+        staff_payload = json.loads(
+            staff_call.kwargs["attachments"][0]["payload"]["buttons"][0][0]["payload"]
+        )
+        assert staff_payload == {"kind": "order", "id": "order-1", "event": "PICKUP"}
 
     async def test_admin_cancel_triggers_no_chain_notify(
         self, client: AsyncClient, mocks: _Mocks

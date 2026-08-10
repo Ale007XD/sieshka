@@ -88,6 +88,7 @@ async def notify_staff_new_kitchen_ticket(
     from app.services.max_staff_notify import (
         notify_admin_kitchen_ticket_state,
         notify_kitchen_ticket_state,
+        notify_staff_card,
     )
 
     try:
@@ -118,6 +119,20 @@ async def notify_staff_new_kitchen_ticket(
     except Exception:
         logger.exception(
             "notify_staff_new_kitchen_ticket: admin notify failed order_id=%s ticket_id=%s",
+            order_id,
+            ticket_id,
+        )
+
+    try:
+        # 2026-08-09: full-authority 'staff' role sees the ticket the moment
+        # it exists too, on its combined card (WITH kitchen action buttons
+        # this time) — independent try/except, same isolation rationale.
+        await notify_staff_card(
+            order_id, ticket_id=str(ticket_id), kitchen_state=KitchenState.NEW
+        )
+    except Exception:
+        logger.exception(
+            "notify_staff_new_kitchen_ticket: staff notify failed order_id=%s ticket_id=%s",
             order_id,
             ticket_id,
         )

@@ -116,6 +116,14 @@ _ORDER_ROLE_EVENTS: dict[StaffRole, frozenset[OrderEvent]] = {
         {OrderEvent.ASSIGN_COURIER, OrderEvent.PICKUP, OrderEvent.DELIVER}
     ),
     StaffRole.admin: frozenset({OrderEvent.CANCEL}),
+    StaffRole.staff: frozenset(
+        {
+            OrderEvent.ASSIGN_COURIER,
+            OrderEvent.PICKUP,
+            OrderEvent.DELIVER,
+            OrderEvent.CANCEL,
+        }
+    ),
 }
 
 # States reached only after a successful YooKassa payment (PAID onward, minus
@@ -402,17 +410,20 @@ async def _fetch_order_state(order_id: str) -> OrderState | None:
         return None
 
 
-async def _fetch_kitchen_state_for_order(order_id: str) -> KitchenState | None:
+async def _fetch_kitchen_ticket_for_order(order_id: str) -> tuple[str, KitchenState] | None:
     """Self-contained lookup (own session) of the most recent kitchen ticket
-    for an order, if one exists. Used by notify_admin_order_state, which
-    knows the order's new state but not any kitchen ticket's current stage.
-    Returns None if no ticket exists yet (order hasn't reached COOKING) —
-    a legitimate, common case, not an error."""
+    for an order, if one exists — returns (ticket_id, state). Returns None
+    if no ticket exists yet (order hasn't reached COOKING) — a legitimate,
+    common case, not an error.
+
+    Used by notify_admin_order_state (only needs the state half — see
+    _build_admin_card) and notify_staff_card (needs both: the id to build
+    kitchen action buttons, the state to know which buttons apply)."""
     try:
         async with async_session_factory() as session:
             result = await session.execute(
                 sql_text(
-                    "SELECT state FROM kitchen_tickets WHERE order_id = :id "
+                    "SELECT id, state FROM kitchen_tickets WHERE order_id = :id "
                     "ORDER BY created_at DESC LIMIT 1"
                 ),
                 {"id": order_id},
@@ -420,14 +431,14 @@ async def _fetch_kitchen_state_for_order(order_id: str) -> KitchenState | None:
             row = result.fetchone()
     except Exception:
         logger.exception(
-            "_fetch_kitchen_state_for_order: query failed order_id=%s", order_id
+            "_fetch_kitchen_ticket_for_order: query failed order_id=%s", order_id
         )
         return None
     if row is None:
         return None
     try:
-        return KitchenState(row._mapping["state"])
-    except ValueError:
+        return str(row._mapping["id"]), KitchenState(row._mapping["state"])
+    except (KeyError, ValueError):
         return None
 
 
@@ -456,7 +467,8 @@ async def _build_admin_card(
     details = await _fetch_order_details(order_id)
     resolved_kitchen_state = kitchen_state
     if resolved_kitchen_state is None:
-        resolved_kitchen_state = await _fetch_kitchen_state_for_order(order_id)
+        ticket = await _fetch_kitchen_ticket_for_order(order_id)
+        resolved_kitchen_state = ticket[1] if ticket is not None else None
     kitchen_line = ""
     if resolved_kitchen_state is not None:
         kitchen_label = _KITCHEN_STATE_TEXT.get(
@@ -557,4 +569,120 @@ async def notify_admin_kitchen_ticket_state(
             logger.exception(
                 "notify_admin_kitchen_ticket_state: send failed for max_user_id=%s",
                 member.max_user_id,
+            )
+
+
+def _combine_keyboards(*keyboards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge multiple single-row inline_keyboard attachments (as returned by
+    _kitchen_keyboard/_order_keyboard) into ONE inline_keyboard attachment
+    with multiple button rows — MAX supports several rows per keyboard, this
+    just collects them under one attachment instead of stacking several
+    inline_keyboard attachments. Empty inputs are skipped; returns [] if
+    every input was empty (nothing actionable at all)."""
+    rows: list[list[dict[str, Any]]] = []
+    for kb in keyboards:
+        for attachment in kb:
+            rows.extend(attachment["payload"]["buttons"])
+    if not rows:
+        return []
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
+
+
+async def _build_staff_card(
+    order_id: str,
+    order_state: OrderState,
+    ticket_id: str | None,
+    kitchen_state: KitchenState | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Single card for the full-authority 'staff' role (2026-08-09): order
+    status + kitchen status (if a ticket exists) + BOTH kitchen action
+    buttons AND order action buttons (everything courier or admin could
+    individually press) in one message, as two button rows.
+
+    Mirrors _build_admin_card's "always resolve both axes fresh" contract
+    (2026-08-09 admin-card-merge fix, same rationale here): two independent
+    triggers (a kitchen event, an order event) edit the SAME tracked
+    message, so each caller (notify_staff_card) always reconstructs the
+    FULL card from both axes — never just the axis that changed — or the
+    other axis's info/buttons would flicker or vanish on every edit that
+    doesn't happen to know about it.
+    """
+    order_kb = _order_keyboard(order_id, order_state, StaffRole.staff)
+    kitchen_kb: list[dict[str, Any]] = []
+    if ticket_id is not None and kitchen_state is not None:
+        kitchen_kb = _kitchen_keyboard(ticket_id, kitchen_state)
+    keyboard = _combine_keyboards(kitchen_kb, order_kb)
+
+    details = await _fetch_order_details(order_id)
+    kitchen_line = ""
+    if kitchen_state is not None:
+        kitchen_label = _KITCHEN_STATE_TEXT.get(kitchen_state, kitchen_state.value)
+        kitchen_line = f"\n🍳 Кухня: {kitchen_label}"
+    text = (
+        f"👤 Заказ {order_id[:8]}\n{_ORDER_STATE_TEXT.get(order_state, order_state.value)}"
+        f"{kitchen_line}"
+        f"{details}"
+    )
+    return text, keyboard
+
+
+async def notify_staff_card(
+    order_id: str,
+    *,
+    order_state: OrderState | None = None,
+    ticket_id: str | None = None,
+    kitchen_state: KitchenState | None = None,
+    staff_service: StaffService | None = None,
+    client: MaxClient | None = None,
+) -> None:
+    """Broadcast/edit the ONE combined card for the full-authority 'staff'
+    role — order status + kitchen status + every button kitchen/courier/
+    admin can individually press, per _ORDER_ROLE_EVENTS[StaffRole.staff]/
+    _KITCHEN_ROLE_EVENTS[StaffRole.staff] (webhooks/max.py enforcement).
+
+    Callers pass whichever axis they already know: an order-level trigger
+    (checkout, or an order-kind webhook callback) passes order_state and
+    leaves ticket_id/kitchen_state None; a kitchen-level trigger (ticket
+    creation, or a kitchen-kind webhook callback) passes ticket_id+
+    kitchen_state together and leaves order_state None. Either way this
+    function resolves whatever's missing via DB lookup before building the
+    card — see _build_staff_card docstring for why both axes are always
+    resolved, not just the triggering one.
+    """
+    resolved_order_state = order_state
+    if resolved_order_state is None:
+        resolved_order_state = await _fetch_order_state(order_id)
+    if resolved_order_state is None:
+        # Order row missing/DB hiccup — nothing sane to build against, same
+        # defensive posture as _fetch_order_details returning "".
+        return
+
+    resolved_ticket_id = ticket_id
+    resolved_kitchen_state = kitchen_state
+    if resolved_ticket_id is None or resolved_kitchen_state is None:
+        ticket = await _fetch_kitchen_ticket_for_order(order_id)
+        if ticket is not None:
+            resolved_ticket_id, resolved_kitchen_state = ticket
+
+    text, keyboard = await _build_staff_card(
+        order_id, resolved_order_state, resolved_ticket_id, resolved_kitchen_state
+    )
+
+    staff = staff_service or StaffService()
+    mc = client or max_client
+
+    try:
+        recipients = await staff.list_active_by_role(StaffRole.staff)
+    except Exception:
+        logger.exception("notify_staff_card: staff lookup failed")
+        return
+
+    for member in recipients:
+        if member.max_user_id is None:
+            continue
+        try:
+            await _send_or_edit("order", order_id, member.max_user_id, text, keyboard, mc)
+        except Exception:
+            logger.exception(
+                "notify_staff_card: send failed for max_user_id=%s", member.max_user_id
             )
