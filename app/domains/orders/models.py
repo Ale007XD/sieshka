@@ -186,4 +186,8 @@ class CheckoutRequest(BaseModel):
     # (sprint_max_storefront) — checkout.py overrides whatever this field
     # carries in the client-submitted JSON with either a validate_init_data()
     # result or None; a client can no longer just claim an arbitrary id here.
+    client_zalo_uid: str | None = None  # Zalo Mini App user id; server-
+    # verified the same way (sprint_zalo_storefront_auth) — checkout.py
+    # overrides this with a ZaloClient.get_user_profile()-verified value or
+    # None, same non-trust posture as client_max_uid above.
     promo_code: str | None = None  # separate from `comment` — see checkout.html

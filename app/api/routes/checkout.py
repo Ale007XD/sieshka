@@ -37,6 +37,7 @@ from app.services.order_service import (
     resolve_promo_effect,
 )
 from app.services.payment_service import PaymentService
+from app.services.zalo_client import ZaloProfileError, zalo_client
 from app.services.zone_service import ZoneService
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,20 @@ async def checkout(
         if verified_max_uid is None:
             logger.warning("checkout: X-Max-Init-Data present but failed validation")
     body.client_max_uid = verified_max_uid
+
+    # sprint_zalo_storefront_auth: same non-trust posture as client_max_uid
+    # above, adapted for Zalo's opaque access_token (no offline HMAC check
+    # possible — see app/web/zalo_auth.py's docstring on why this must be a
+    # live call, not pure computation like validate_init_data()).
+    zalo_access_token = request.headers.get("X-Zalo-Access-Token")
+    verified_zalo_uid: str | None = None
+    if zalo_access_token:
+        try:
+            profile = await zalo_client.get_user_profile(zalo_access_token)
+            verified_zalo_uid = str(profile["id"]) if profile.get("id") else None
+        except ZaloProfileError:
+            logger.warning("checkout: X-Zalo-Access-Token present but failed validation")
+    body.client_zalo_uid = verified_zalo_uid
 
     # Idempotency: key supplied by the client, wired into the existing service.
     idem_key = f"{_IDEMPOTENCY_PREFIX}{body.idempotency_key}"

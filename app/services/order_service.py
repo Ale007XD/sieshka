@@ -162,11 +162,12 @@ class OrderService:
                 text(
                     "INSERT INTO orders "
                     "(customer_id, items, delivery_address, state, delivery_mode, "
-                    " zone_id, comment, client_max_uid, total_rub, payment_method, "
-                    " promo_code, discount_rub) "
+                    " zone_id, comment, client_max_uid, client_zalo_uid, total_rub, "
+                    " payment_method, promo_code, discount_rub) "
                     "VALUES (:customer_id, :items, :delivery_address, :state, "
                     " :delivery_mode, :zone_id, :comment, :client_max_uid, "
-                    " :total_rub, :payment_method, :promo_code, :discount_rub) "
+                    " :client_zalo_uid, :total_rub, :payment_method, :promo_code, "
+                    " :discount_rub) "
                     "RETURNING id, customer_id, state, items, delivery_address, trace_id"
                 ),
                 {
@@ -178,6 +179,7 @@ class OrderService:
                     "zone_id": data.zone_id,
                     "comment": data.comment,
                     "client_max_uid": data.client_max_uid,
+                    "client_zalo_uid": data.client_zalo_uid,
                     "total_rub": total_rub,
                     "payment_method": data.payment_method,
                     "promo_code": promo_code,
