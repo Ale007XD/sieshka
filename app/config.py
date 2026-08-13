@@ -53,6 +53,25 @@ class Settings(BaseSettings):
     MAX_API_BASE_URL: str = "https://platform-api2.max.ru"
     MAX_WEBHOOK_SECRET: str = ""
 
+    # Zalo Mini App (sprint_zalo_client)
+    # ZALO_APP_ID vs MINI_APP_ID: app-level vs mini-app-level identifier,
+    # deliberately NOT confused — see ZaloClient module docstring.
+    ZALO_APP_ID: str = ""
+    ZALO_APP_SECRET_KEY: str = ""
+    ZALO_MINI_APP_ID: str = ""
+    ZALO_OA_ID: str = ""
+    ZALO_API_KEY: str = ""
+    ZALO_WEBHOOK_SECRET: str = ""
+    ZALO_API_BASE_URL: str = "https://graph.zalo.me/v2.0"
+    ZALO_MINIAPP_API_BASE: str = "https://openapi.mini.zalo.me"
+    # Outbound proxy for server-to-server Zalo API calls (get_user_profile,
+    # future ZaloPay). None when the host itself has a Vietnam-registered IP
+    # — see DECISIONS.md sprint_zalo_client (2026-08-11): Zalo OpenAPI has
+    # withheld certain user-data-related response fields from non-VN
+    # App/Webhook IPs since 2024-02-29. Empty string ("") is treated as
+    # "no proxy", same as None — see ZaloClient.__init__.
+    ZALO_API_PROXY_URL: str = ""
+
     # Dashboard auth (M6+)
     DASHBOARD_USER: str = "admin"
     DASHBOARD_PASSWORD_HASH: str = ""

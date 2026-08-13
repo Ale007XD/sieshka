@@ -24,6 +24,8 @@ async def session_factory(
     schema_paths = [
         Path(__file__).resolve().parents[2] / "migrations" / "001_initial_schema.sql",
         Path(__file__).resolve().parents[2] / "migrations" / "017_staff.sql",
+        Path(__file__).resolve().parents[2] / "migrations" / "020_staff_role_staff.sql",
+        Path(__file__).resolve().parents[2] / "migrations" / "021_staff_zalo_user_id.sql",
     ]
     raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(raw_dsn)
@@ -57,19 +59,23 @@ async def _insert_staff(
     role: StaffRole,
     max_user_id: int | None = None,
     telegram_user_id: int | None = None,
+    zalo_user_id: str | None = None,
     active: bool = True,
 ) -> None:
     async with session_factory() as session:
         await session.execute(
             text(
-                "INSERT INTO staff (name, role, max_user_id, telegram_user_id, active) "
-                "VALUES (:name, :role, :max_user_id, :telegram_user_id, :active)"
+                "INSERT INTO staff "
+                "(name, role, max_user_id, telegram_user_id, zalo_user_id, active) "
+                "VALUES (:name, :role, :max_user_id, :telegram_user_id, "
+                ":zalo_user_id, :active)"
             ),
             {
                 "name": name,
                 "role": role.value,
                 "max_user_id": max_user_id,
                 "telegram_user_id": telegram_user_id,
+                "zalo_user_id": zalo_user_id,
                 "active": active,
             },
         )
@@ -115,6 +121,46 @@ class TestStaffService:
         assert found is not None
         assert found.role == StaffRole.courier
         assert found.telegram_user_id == 222
+
+    async def test_find_by_zalo_user_id_returns_match(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        service: StaffService,
+    ) -> None:
+        await _insert_staff(
+            session_factory,
+            name="Курьер Зало",
+            role=StaffRole.courier,
+            zalo_user_id="zalo-abc123",
+        )
+
+        found = await service.find_by_zalo_user_id("zalo-abc123")
+
+        assert found is not None
+        assert found.role == StaffRole.courier
+        assert found.zalo_user_id == "zalo-abc123"
+
+    async def test_find_by_zalo_user_id_unknown_returns_none(
+        self, service: StaffService
+    ) -> None:
+        assert await service.find_by_zalo_user_id("no-such-id") is None
+
+    async def test_zalo_user_id_unique_constraint(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _insert_staff(
+            session_factory,
+            name="Первый",
+            role=StaffRole.admin,
+            zalo_user_id="zalo-dup",
+        )
+        with pytest.raises(Exception):
+            await _insert_staff(
+                session_factory,
+                name="Второй",
+                role=StaffRole.admin,
+                zalo_user_id="zalo-dup",
+            )
 
     async def test_inactive_staff_not_returned(
         self,

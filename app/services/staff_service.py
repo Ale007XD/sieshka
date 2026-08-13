@@ -3,8 +3,9 @@
 Bare service, same non-goal class as CustomerService.find_or_create_by_phone
 (app/services/customer_service.py): a routing lookup, not a governed
 transition — there is no FSM/state here for a nano-vm Program to own. The
-MAX/Telegram channel adapter's role_gate() calls find_by_max_user_id()/
-find_by_telegram_user_id() to resolve a role BEFORE dispatching into the
+MAX/Telegram/Zalo channel adapters' role_gate() calls find_by_max_user_id()/
+find_by_telegram_user_id()/find_by_zalo_user_id() to resolve a role BEFORE
+dispatching into the
 actually-governed KitchenService/OrderService transitions; this service never
 calls either of those itself and never mutates order/kitchen state.
 
@@ -35,20 +36,28 @@ from app.domains.staff.models import Staff, StaffRole
 logger = logging.getLogger(__name__)
 
 _SELECT_COLUMNS = (
-    "id, name, role, max_user_id, telegram_user_id, active, created_at"
+    "id, name, role, max_user_id, telegram_user_id, zalo_user_id, active, created_at"
 )
 
 # Fields update() is allowed to touch — an explicit allowlist, not
 # **payload passthrough, so a stray key in an admin form can never reach the
 # SQL SET clause.
-_UPDATABLE_FIELDS = ("name", "role", "max_user_id", "telegram_user_id", "active")
+_UPDATABLE_FIELDS = (
+    "name",
+    "role",
+    "max_user_id",
+    "telegram_user_id",
+    "zalo_user_id",
+    "active",
+)
 
 
 class StaffConflictError(Exception):
-    """A max_user_id/telegram_user_id is already assigned to another staff
-    row (partial UNIQUE index violation, migrations/017_staff.sql). Raised
-    instead of letting asyncpg's IntegrityError leak past this service, so
-    the admin route can turn it into a clean 409, not a raw 500."""
+    """A max_user_id/telegram_user_id/zalo_user_id is already assigned to
+    another staff row (partial UNIQUE index violation, migrations/
+    017_staff.sql + 021_staff_zalo_user_id.sql). Raised instead of letting
+    asyncpg's IntegrityError leak past this service, so the admin route can
+    turn it into a clean 409, not a raw 500."""
 
 
 def _row_to_staff(row: object) -> Staff:
@@ -59,6 +68,7 @@ def _row_to_staff(row: object) -> Staff:
         role=StaffRole(mapping["role"]),
         max_user_id=mapping["max_user_id"],
         telegram_user_id=mapping["telegram_user_id"],
+        zalo_user_id=mapping["zalo_user_id"],
         active=mapping["active"],
         created_at=mapping["created_at"],
     )
@@ -83,6 +93,12 @@ class StaffService:
         async with self._session_factory() as session:
             return await self._find_one(
                 session, "telegram_user_id = :value", telegram_user_id
+            )
+
+    async def find_by_zalo_user_id(self, zalo_user_id: str) -> Staff | None:
+        async with self._session_factory() as session:
+            return await self._find_one(
+                session, "zalo_user_id = :value", zalo_user_id
             )
 
     async def list_active_by_role(self, role: StaffRole) -> list[Staff]:
@@ -122,6 +138,7 @@ class StaffService:
         role: StaffRole,
         max_user_id: int | None = None,
         telegram_user_id: int | None = None,
+        zalo_user_id: str | None = None,
     ) -> Staff:
         staff_id = uuid4()
         async with self._session_factory() as session:
@@ -129,8 +146,10 @@ class StaffService:
                 await session.execute(
                     text(
                         "INSERT INTO staff "
-                        "(id, name, role, max_user_id, telegram_user_id, active) "
-                        "VALUES (:id, :name, :role, :max_user_id, :telegram_user_id, true)"
+                        "(id, name, role, max_user_id, telegram_user_id, "
+                        "zalo_user_id, active) "
+                        "VALUES (:id, :name, :role, :max_user_id, "
+                        ":telegram_user_id, :zalo_user_id, true)"
                     ),
                     {
                         "id": staff_id,
@@ -138,6 +157,7 @@ class StaffService:
                         "role": role.value,
                         "max_user_id": max_user_id,
                         "telegram_user_id": telegram_user_id,
+                        "zalo_user_id": zalo_user_id,
                     },
                 )
                 await session.commit()
@@ -145,7 +165,8 @@ class StaffService:
                 await session.rollback()
                 logger.warning("StaffService.create: conflict for name=%r: %s", name, e)
                 raise StaffConflictError(
-                    "max_user_id or telegram_user_id already assigned to another staff row"
+                    "max_user_id, telegram_user_id or zalo_user_id already "
+                    "assigned to another staff row"
                 ) from e
 
         created = await self.get_by_id(staff_id)
@@ -159,7 +180,7 @@ class StaffService:
         (needed here — unlike every other COALESCE-partial-update entity in
         this codebase, unlinking a messenger id, i.e. setting max_user_id
         back to NULL, is a real, intended operation, not a client mistake to
-        guard against).
+        guard against — same applies to zalo_user_id).
 
         Returns the updated row, or None if staff_id doesn't exist.
         """
@@ -187,7 +208,8 @@ class StaffService:
                     "StaffService.update: conflict for staff_id=%s: %s", staff_id, e
                 )
                 raise StaffConflictError(
-                    "max_user_id or telegram_user_id already assigned to another staff row"
+                    "max_user_id, telegram_user_id or zalo_user_id already "
+                    "assigned to another staff row"
                 ) from e
 
             if result.rowcount == 0:
@@ -196,7 +218,7 @@ class StaffService:
         return await self.get_by_id(staff_id)
 
     async def _find_one(
-        self, session: AsyncSession, where_clause: str, value: int
+        self, session: AsyncSession, where_clause: str, value: int | str
     ) -> Staff | None:
         result = await session.execute(
             text(
