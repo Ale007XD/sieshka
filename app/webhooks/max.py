@@ -41,8 +41,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.domains.kitchen.fsm import KitchenEvent, KitchenState
-from app.domains.orders.models import OrderEvent, OrderState
+from app.domains.kitchen.fsm import KitchenState
+from app.domains.orders.models import OrderState
 from app.domains.staff.models import StaffRole
 from app.fsm.core.base import TransitionResult
 from app.services.kitchen_service import KitchenService
@@ -55,32 +55,14 @@ from app.services.max_staff_notify import (
     notify_staff_card,
 )
 from app.services.order_service import OrderService
+from app.services.staff_dispatch import DENIED_MESSAGE, dispatch_kitchen, dispatch_order
 from app.services.staff_service import StaffService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-_KITCHEN_ROLE_EVENTS: dict[StaffRole, frozenset[KitchenEvent]] = {
-    StaffRole.kitchen: frozenset(KitchenEvent),
-    StaffRole.staff: frozenset(KitchenEvent),
-}
-_ORDER_ROLE_EVENTS: dict[StaffRole, frozenset[OrderEvent]] = {
-    StaffRole.courier: frozenset(
-        {OrderEvent.ASSIGN_COURIER, OrderEvent.PICKUP, OrderEvent.DELIVER}
-    ),
-    StaffRole.admin: frozenset({OrderEvent.CANCEL}),
-    StaffRole.staff: frozenset(
-        {
-            OrderEvent.ASSIGN_COURIER,
-            OrderEvent.PICKUP,
-            OrderEvent.DELIVER,
-            OrderEvent.CANCEL,
-        }
-    ),
-}
-
-_DENIED = "Недопустимое действие для вашей роли"
+_DENIED = DENIED_MESSAGE
 
 
 def get_staff_service() -> StaffService:
@@ -97,32 +79,6 @@ def get_order_service() -> OrderService:
 
 def get_max_client() -> MaxClient:
     return max_client
-
-
-async def _dispatch_kitchen(
-    kitchen: KitchenService, role: StaffRole, ticket_id: str, event_str: str
-) -> TransitionResult | None:
-    """None means "not permitted" (unknown event or role lacks it) —
-    distinct from a governed rejection (TransitionResult(success=False))."""
-    try:
-        event = KitchenEvent(event_str)
-    except ValueError:
-        return None
-    if event not in _KITCHEN_ROLE_EVENTS.get(role, frozenset()):
-        return None
-    return await kitchen.transition_ticket(ticket_id, event)
-
-
-async def _dispatch_order(
-    orders: OrderService, role: StaffRole, order_id: str, event_str: str
-) -> TransitionResult | None:
-    try:
-        event = OrderEvent(event_str)
-    except ValueError:
-        return None
-    if event not in _ORDER_ROLE_EVENTS.get(role, frozenset()):
-        return None
-    return await orders.transition_order(order_id, event)
 
 
 def _result_notification(result: TransitionResult, fallback_label: str) -> str:
@@ -209,11 +165,11 @@ async def max_webhook(
         return JSONResponse({"ok": True})
 
     if kind == "kitchen":
-        result = await _dispatch_kitchen(
+        result = await dispatch_kitchen(
             kitchen, staff_member.role, str(entity_id), str(event_str)
         )
     else:
-        result = await _dispatch_order(
+        result = await dispatch_order(
             orders, staff_member.role, str(entity_id), str(event_str)
         )
 

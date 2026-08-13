@@ -21,6 +21,7 @@ from app.api.routes.delivery import router as delivery_router
 from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.menu import router as menu_router
 from app.api.routes.orders import router as orders_router
+from app.api.routes.zalo_miniapp import router as zalo_miniapp_router
 from app.config import settings
 from app.startup import validate_all_programs
 from app.telemetry import configure_otel
@@ -63,6 +64,7 @@ app.include_router(web_router, dependencies=[Depends(get_current_username)])
 app.include_router(customer_router)
 app.include_router(yookassa_router)
 app.include_router(max_router)
+app.include_router(zalo_miniapp_router)
 
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")

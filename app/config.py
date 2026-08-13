@@ -61,7 +61,13 @@ class Settings(BaseSettings):
     ZALO_MINI_APP_ID: str = ""
     ZALO_OA_ID: str = ""
     ZALO_API_KEY: str = ""
-    ZALO_WEBHOOK_SECRET: str = ""
+    # Webhook signature (future sprint_zalo_app_events — app review-status +
+    # user consent-revocation events, the only two Mini App Webhook URL
+    # event types per official docs, verified 2026-08-13): NOT HMAC, and NOT
+    # a separate secret. Per mini.zalo.me/zmp-docs/.../verifysignature —
+    # sha256(sorted-keys-content + ZALO_API_KEY) using this same API_KEY
+    # above. No separate ZALO_WEBHOOK_SECRET setting — an earlier draft of
+    # this config had one based on an unverified HMAC assumption; removed.
     ZALO_API_BASE_URL: str = "https://graph.zalo.me/v2.0"
     ZALO_MINIAPP_API_BASE: str = "https://openapi.mini.zalo.me"
     # Outbound proxy for server-to-server Zalo API calls (get_user_profile,
