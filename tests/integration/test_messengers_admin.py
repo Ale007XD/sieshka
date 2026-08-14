@@ -41,6 +41,8 @@ async def session_factory(
     schema_paths = [
         Path(__file__).resolve().parents[2] / "migrations" / "001_initial_schema.sql",
         Path(__file__).resolve().parents[2] / "migrations" / "017_staff.sql",
+        Path(__file__).resolve().parents[2] / "migrations" / "020_staff_role_staff.sql",
+        Path(__file__).resolve().parents[2] / "migrations" / "021_staff_zalo_user_id.sql",
     ]
     raw_dsn = postgres_dsn.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(raw_dsn)
@@ -84,12 +86,15 @@ async def _seed_staff(
     role: str = "kitchen",
     max_user_id: int | None = 111,
     telegram_user_id: int | None = None,
+    zalo_user_id: str | None = None,
 ) -> str:
     async with session_factory() as session:
         result = await session.execute(
             text(
-                "INSERT INTO staff (name, role, max_user_id, telegram_user_id, active) "
-                "VALUES (:name, :role, :max_user_id, :telegram_user_id, true) "
+                "INSERT INTO staff (name, role, max_user_id, telegram_user_id, "
+                "zalo_user_id, active) "
+                "VALUES (:name, :role, :max_user_id, :telegram_user_id, "
+                ":zalo_user_id, true) "
                 "RETURNING id"
             ),
             {
@@ -97,6 +102,7 @@ async def _seed_staff(
                 "role": role,
                 "max_user_id": max_user_id,
                 "telegram_user_id": telegram_user_id,
+                "zalo_user_id": zalo_user_id,
             },
         )
         row = result.fetchone()
@@ -125,6 +131,7 @@ class TestMessengersAdminUi:
         assert b"Messengers" in resp.content
         assert b"MAX" in resp.content
         assert b"Telegram" in resp.content
+        assert b"Zalo" in resp.content
 
     async def test_ui_shows_seeded_staff(
         self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
@@ -205,6 +212,41 @@ class TestStaffApply:
         data = resp.json()
         assert data["ok"] is False
 
+    async def test_create_zalo_account(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        resp = await client.post(
+            "/admin/staff/apply",
+            json={"name": "Курьер Зало", "role": "courier", "zalo_user_id": "zalo-uid-1"},
+            auth=("admin", DASHBOARD_PASSWORD),
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["ok"] is True
+        assert any(s["zalo_user_id"] == "zalo-uid-1" for s in data["staff"])
+
+        async with session_factory() as s:
+            res = await s.execute(
+                text("SELECT name, role FROM staff WHERE zalo_user_id='zalo-uid-1'")
+            )
+            row = res.fetchone()
+            assert row is not None
+            assert row._mapping["name"] == "Курьер Зало"
+
+    async def test_create_duplicate_zalo_user_id_rejected(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        await _seed_staff(session_factory, max_user_id=None, zalo_user_id="zalo-uid-1")
+        resp = await client.post(
+            "/admin/staff/apply",
+            json={"name": "Second", "role": "courier", "zalo_user_id": "zalo-uid-1"},
+            auth=("admin", DASHBOARD_PASSWORD),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert "already assigned" in data["error"]
+
 
 class TestStaffUpdate:
     async def test_update_name_and_role(
@@ -251,6 +293,23 @@ class TestStaffUpdate:
         assert data["ok"] is True
         updated = next(s for s in data["staff"] if s["id"] == staff_id)
         assert updated["max_user_id"] is None
+
+    async def test_unlink_zalo_user_id_via_explicit_null(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        staff_id = await _seed_staff(
+            session_factory, max_user_id=None, zalo_user_id="zalo-uid-1"
+        )
+        resp = await client.patch(
+            f"/admin/staff/{staff_id}/apply",
+            json={"zalo_user_id": None},
+            auth=("admin", DASHBOARD_PASSWORD),
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["ok"] is True
+        updated = next(s for s in data["staff"] if s["id"] == staff_id)
+        assert updated["zalo_user_id"] is None
 
     async def test_absent_field_leaves_value_unchanged(
         self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]

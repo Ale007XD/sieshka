@@ -587,6 +587,7 @@ def _staff_view(staff: list[Staff]) -> list[dict[str, Any]]:
             "role": s.role.value,
             "max_user_id": s.max_user_id,
             "telegram_user_id": s.telegram_user_id,
+            "zalo_user_id": s.zalo_user_id,
             "active": s.active,
             "created_at": s.created_at.isoformat() if s.created_at else None,
         }
@@ -651,6 +652,10 @@ async def staff_apply(
 
     max_user_id = payload.get("max_user_id")
     telegram_user_id = payload.get("telegram_user_id")
+    zalo_user_id_raw = payload.get("zalo_user_id")
+    zalo_user_id = (
+        str(zalo_user_id_raw).strip() if zalo_user_id_raw not in (None, "") else None
+    )
     try:
         created = await service.create(
             name=name,
@@ -659,6 +664,7 @@ async def staff_apply(
             telegram_user_id=(
                 int(telegram_user_id) if telegram_user_id not in (None, "") else None
             ),
+            zalo_user_id=zalo_user_id,
         )
     except StaffConflictError as e:
         staff = await service.list_all()
@@ -687,10 +693,10 @@ async def staff_update(
     service: StaffService = Depends(get_staff_service),
 ) -> dict[str, Any]:
     """Update one staff account — name/role/active, or link/unlink a
-    messenger id (max_user_id/telegram_user_id, explicitly settable to null
-    to unlink; see StaffService.update's docstring on why this entity uses
-    key-presence PATCH semantics instead of this codebase's usual
-    COALESCE(new, old) partial-update convention)."""
+    messenger id (max_user_id/telegram_user_id/zalo_user_id, explicitly
+    settable to null to unlink; see StaffService.update's docstring on why
+    this entity uses key-presence PATCH semantics instead of this
+    codebase's usual COALESCE(new, old) partial-update convention)."""
     fields: dict[str, Any] = {}
     for key in ("name", "active"):
         if key in payload:
@@ -720,6 +726,9 @@ async def staff_update(
                         "error": f"{key} must be an integer",
                         "staff": _staff_view(staff),
                     }
+    if "zalo_user_id" in payload:
+        raw = payload["zalo_user_id"]
+        fields["zalo_user_id"] = str(raw).strip() if raw not in (None, "") else None
 
     try:
         updated = await service.update(staff_id, fields)
