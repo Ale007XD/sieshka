@@ -31,6 +31,7 @@ from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
 from app.webhooks.max import router as max_router
 from app.webhooks.yookassa import router as yookassa_router
+from app.webhooks.zalo_events import router as zalo_events_router
 
 logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ app.include_router(customer_router)
 app.include_router(yookassa_router)
 app.include_router(max_router)
 app.include_router(zalo_miniapp_router)
+app.include_router(zalo_events_router)
 
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")

@@ -5,14 +5,14 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
 from nano_vm.models import Program, Trace, TraceStatus
 from nano_vm.validator import ProgramValidator
 from nano_vm_mcp.handlers import GovernedToolExecutor
 from opentelemetry import trace as otel_trace
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
@@ -340,6 +340,27 @@ class OrderService:
         """
         kitchen_repo = KitchenRepository(session)
         await kitchen_repo.create(order_id)
+
+    async def clear_client_zalo_uid(self, zalo_user_id: str) -> int:
+        """Consent-revocation anonymization (sprint_zalo_app_events): clears
+        the client_zalo_uid attribution column on every order carrying it.
+        NOT a governed FSM transition — client_zalo_uid is metadata (which
+        Zalo user placed the order), not order state, same category as
+        StaffService.update()'s zalo_user_id unlink. Returns rows affected.
+        """
+        async with self._session_factory() as session:
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    text(
+                        "UPDATE orders SET client_zalo_uid = NULL "
+                        "WHERE client_zalo_uid = :zalo_user_id"
+                    ),
+                    {"zalo_user_id": zalo_user_id},
+                ),
+            )
+            await session.commit()
+            return result.rowcount
 
     async def get_order(self, order_id: str) -> OrderRead | None:
         async with self._session_factory() as session:
