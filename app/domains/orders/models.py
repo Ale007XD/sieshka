@@ -190,4 +190,8 @@ class CheckoutRequest(BaseModel):
     # verified the same way (sprint_zalo_storefront_auth) — checkout.py
     # overrides this with a ZaloClient.get_user_profile()-verified value or
     # None, same non-trust posture as client_max_uid above.
+    client_telegram_uid: int | None = None  # Telegram Mini App user id;
+    # server-verified the same way as client_max_uid (sprint_telegram_
+    # miniapp_auth) — checkout.py overrides this with a validate_init_data()
+    # result (same function MAX uses, TELEGRAM_BOT_TOKEN instead) or None.
     promo_code: str | None = None  # separate from `comment` — see checkout.html

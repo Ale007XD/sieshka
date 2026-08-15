@@ -165,6 +165,21 @@ async def checkout(
             logger.warning("checkout: X-Zalo-Access-Token present but failed validation")
     body.client_zalo_uid = verified_zalo_uid
 
+    # sprint_telegram_miniapp_auth: same non-trust posture as client_max_uid
+    # above — validate_init_data() is the exact same function MAX uses, just
+    # keyed with TELEGRAM_BOT_TOKEN. Telegram Mini Apps' initData signing is
+    # byte-identical to MAX's WebAppData (see max_webapp_auth.py docstring),
+    # so no new validation module is needed, only a second call site.
+    telegram_web_app_data = request.headers.get("X-Telegram-Init-Data")
+    verified_telegram_uid: int | None = None
+    if telegram_web_app_data:
+        verified_telegram_uid = validate_init_data(
+            telegram_web_app_data, settings.TELEGRAM_BOT_TOKEN
+        )
+        if verified_telegram_uid is None:
+            logger.warning("checkout: X-Telegram-Init-Data present but failed validation")
+    body.client_telegram_uid = verified_telegram_uid
+
     # Idempotency: key supplied by the client, wired into the existing service.
     idem_key = f"{_IDEMPOTENCY_PREFIX}{body.idempotency_key}"
     inserted = await idempotency.check_and_record(
