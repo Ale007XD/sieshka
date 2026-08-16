@@ -43,8 +43,14 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "https://example.com/payment/return"
 
-    # Telegram (M2+)
+    # Telegram (M2+; webhook+Mini App fields added sprint_telegram_bot_entrypoint)
     TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+    # URL of the Mini App frontend (sprint_telegram_miniapp_frontend, not yet
+    # built) — the "Open App" inline keyboard button below needs a real https
+    # URL to be usable; empty string degrades to a plain text /start reply,
+    # not a broken button (see app/webhooks/telegram.py::telegram_webhook).
+    TELEGRAM_MINIAPP_URL: str = ""
 
     # MAX messenger (sprint_max_client)
     # platform-api2.max.ru per Mintsifry TLS migration notice (deadline
