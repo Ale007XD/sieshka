@@ -11,12 +11,24 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramClient:
-    """Raw Telegram Bot API client via httpx."""
+    """Raw Telegram Bot API client via httpx.
+
+    IP / outbound proxy (2026-08-16): this project's VPS (RF-hosted) cannot
+    reach api.telegram.org at all — confirmed via curl -v (IPv6 unreachable,
+    IPv4 connect timeout after 10s), reproduced on a bare RF-hosted test box
+    to rule out a local firewall rule. settings.TELEGRAM_API_PROXY_URL is
+    None-safe: empty string (the default) means "call directly, no proxy" —
+    same config-not-client-logic pattern as ZALO_API_PROXY_URL
+    (app/services/zalo_client.py) — set only if/when the proxy is actually
+    provisioned.
+    """
 
     BASE_URL = "https://api.telegram.org/bot"
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, proxy_url: str | None = None) -> None:
         self._token = token
+        proxy = proxy_url if proxy_url is not None else settings.TELEGRAM_API_PROXY_URL
+        self._proxy = proxy or None  # "" (default) -> None, no proxy
 
     async def send_message(
         self,
@@ -32,7 +44,7 @@ class TelegramClient:
         payload: dict[str, object] = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(proxy=self._proxy) as client:
             resp = await client.post(
                 f"{self.BASE_URL}{self._token}/sendMessage",
                 json=payload,

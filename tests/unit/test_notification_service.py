@@ -11,6 +11,28 @@ from app.services.notification_service import NotificationService, TelegramClien
 from app.tools import notification_tools
 
 
+class TestTelegramClientProxyConfig:
+    """sprint_telegram_api_proxy (2026-08-16): this VPS cannot reach
+    api.telegram.org directly (confirmed RF-hosting IP block, not a local
+    firewall rule — curl -v reproduced IPv6-unreachable + IPv4 connect
+    timeout on a bare RF-hosted test box). Mirrors
+    TestZaloClientProxyConfig (test_zalo_client.py) exactly."""
+
+    def test_empty_proxy_url_resolves_to_none(self) -> None:
+        client = TelegramClient(token="test-token", proxy_url="")
+        assert client._proxy is None
+
+    def test_none_proxy_url_falls_back_to_settings_default(self) -> None:
+        # settings.TELEGRAM_API_PROXY_URL defaults to "" in a clean test
+        # env, so omitting proxy_url entirely also resolves to None.
+        client = TelegramClient(token="test-token")
+        assert client._proxy is None
+
+    def test_explicit_proxy_url_is_kept(self) -> None:
+        client = TelegramClient(token="test-token", proxy_url="http://proxy.example:8080")
+        assert client._proxy == "http://proxy.example:8080"
+
+
 class TestTelegramClient:
     async def test_send_message_success(self) -> None:
         mock_response = MagicMock()
