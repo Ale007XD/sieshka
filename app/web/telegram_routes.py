@@ -11,13 +11,20 @@ action button it renders re-proves staff identity server-side on click.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
+
+from app.web.csp import csp_nonce
 
 router = APIRouter(prefix="/telegram", tags=["telegram-miniapp"])
 
 
 @router.get("/staff", response_class=Response)
-async def telegram_staff_panel(request: Request) -> Response:
+async def telegram_staff_panel(
+    request: Request,
+    nonce: str = Depends(csp_nonce),
+) -> Response:
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "telegram_staff.html")  # type: ignore[no-any-return]
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request, "telegram_staff.html", {"csp_nonce": nonce}
+    )

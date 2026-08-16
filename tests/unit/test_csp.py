@@ -41,6 +41,32 @@ class TestBuildCspHeader:
         )
         assert "st.max.ru" not in frame_src_directive
 
+    def test_allows_telegram_bridge_script_origin(self) -> None:
+        """sprint_telegram_miniapp_frontend: shop_base.html AND
+        telegram_staff.html load telegram-web-app.js from telegram.org as a
+        bare (non-nonce) <script src> — same shape as the MAX bridge above.
+        Found missing during a pre-deploy config check (2026-08-16): without
+        this, window.Telegram.WebApp silently never populates, no visible
+        error on the page itself — only the browser console shows the CSP
+        violation. No prior test caught this because none of ruff/mypy/
+        pytest exercise real browser CSP enforcement."""
+        csp = _build_csp_header("n")
+        assert "https://telegram.org" in csp
+
+    def test_telegram_bridge_origin_in_script_src_directive_specifically(self) -> None:
+        csp = _build_csp_header("n")
+        script_src_directive = next(
+            part for part in csp.split(";") if part.strip().startswith("script-src")
+        )
+        assert "https://telegram.org" in script_src_directive
+
+    def test_frame_src_unaffected_by_telegram_bridge_addition(self) -> None:
+        csp = _build_csp_header("n")
+        frame_src_directive = next(
+            part for part in csp.split(";") if part.strip().startswith("frame-src")
+        )
+        assert "telegram.org" not in frame_src_directive
+
 
 class TestMakeNonce:
     def test_returns_nonempty_string(self) -> None:

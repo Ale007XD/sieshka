@@ -17,6 +17,10 @@ The policy explicitly allows:
                         CDN script can't carry our per-request nonce, so it
                         needs its own origin exception, same shape as the
                         YooKassa one above.
+  - https://telegram.org : shop_base.html AND telegram_staff.html load the
+                        Telegram Mini App Bridge SDK (telegram-web-app.js,
+                        sprint_telegram_miniapp_frontend) from here, same
+                        bare-<script src> reasoning as the MAX entry above.
 """
 from __future__ import annotations
 
@@ -39,6 +43,18 @@ _YOOKASSA_ORIGIN = "https://yookassa.ru"
 # MAX Bridge SDK (https://dev.max.ru/docs/webapps/bridge) — populates
 # window.WebApp for the mini-app storefront (sprint_max_storefront).
 _MAX_BRIDGE_ORIGIN = "https://st.max.ru"
+
+# Telegram Mini App Bridge SDK — populates window.Telegram.WebApp for both
+# the storefront (shop_base.html) and the staff panel (telegram_staff.html),
+# sprint_telegram_miniapp_frontend. Without this, the bridge <script src>
+# tag is silently blocked by the browser (no console-visible error on the
+# page itself) — window.Telegram simply never appears, initData is always
+# null, and every Telegram-specific code path degrades to "not running
+# inside Telegram" even when it actually is. Found during a pre-deploy
+# config check (2026-08-16), not caught by any earlier gate: neither ruff/
+# mypy/pytest exercise a real browser CSP enforcement, so this class of bug
+# has no automated test coverage in this repo yet.
+_TELEGRAM_BRIDGE_ORIGIN = "https://telegram.org"
 
 
 def make_nonce() -> str:
@@ -65,7 +81,8 @@ def _build_csp_header(nonce: str) -> str:
     return (
         "default-src 'self'; "
         "img-src 'self' data:; "
-        f"script-src 'nonce-{nonce}' 'self' {_YOOKASSA_ORIGIN} {_MAX_BRIDGE_ORIGIN}; "
+        f"script-src 'nonce-{nonce}' 'self' {_YOOKASSA_ORIGIN} {_MAX_BRIDGE_ORIGIN} "
+        f"{_TELEGRAM_BRIDGE_ORIGIN}; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
         "frame-src 'self' https://yookassa.ru; "

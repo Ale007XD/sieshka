@@ -27,7 +27,7 @@
   <div id="toast" class="position-fixed bottom-0 start-50 translate-middle-x mb-3 alert d-none" style="z-index:1050;"></div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // sprint_telegram_miniapp_frontend: deliberately minimal — a manual order_id
 // input instead of a live order list, since no public GET /api/orders list
 // endpoint exists yet (unlike GET /kitchen/tickets, which does). Adding one
