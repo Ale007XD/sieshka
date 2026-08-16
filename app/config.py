@@ -51,16 +51,6 @@ class Settings(BaseSettings):
     # URL to be usable; empty string degrades to a plain text /start reply,
     # not a broken button (see app/webhooks/telegram.py::telegram_webhook).
     TELEGRAM_MINIAPP_URL: str = ""
-    # Outbound proxy for api.telegram.org (2026-08-16): confirmed this VPS's
-    # IP (RF-hosted, host1884433-1) cannot reach api.telegram.org at all —
-    # IPv6 unreachable, IPv4 connect timeout, verified via curl -v on a bare
-    # RF-hosted test box (not a firewall rule on this host — a network-level
-    # block upstream of it, same class of issue as ZALO_API_PROXY_URL's
-    # doc-check finding, though that one is field-withholding, not a full
-    # connect timeout). settings.TELEGRAM_API_PROXY_URL is None-safe: empty
-    # string (default) means "call directly, no proxy" — same pattern as
-    # ZALO_API_PROXY_URL, config not client logic.
-    TELEGRAM_API_PROXY_URL: str = ""
 
     # MAX messenger (sprint_max_client)
     # platform-api2.max.ru per Mintsifry TLS migration notice (deadline
