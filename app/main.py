@@ -21,6 +21,7 @@ from app.api.routes.delivery import router as delivery_router
 from app.api.routes.kitchen import router as kitchen_router
 from app.api.routes.menu import router as menu_router
 from app.api.routes.orders import router as orders_router
+from app.api.routes.telegram_miniapp import router as telegram_miniapp_router
 from app.api.routes.zalo_miniapp import router as zalo_miniapp_router
 from app.config import settings
 from app.startup import validate_all_programs
@@ -29,7 +30,9 @@ from app.web.auth import get_current_username
 from app.web.csp import CSPMiddleware
 from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
+from app.web.telegram_routes import router as telegram_page_router
 from app.webhooks.max import router as max_router
+from app.webhooks.telegram import router as telegram_webhook_router
 from app.webhooks.yookassa import router as yookassa_router
 from app.webhooks.zalo_events import router as zalo_events_router
 
@@ -63,10 +66,13 @@ app.include_router(delivery_router)
 app.include_router(menu_router)
 app.include_router(web_router, dependencies=[Depends(get_current_username)])
 app.include_router(customer_router)
+app.include_router(telegram_page_router)
 app.include_router(yookassa_router)
 app.include_router(max_router)
 app.include_router(zalo_miniapp_router)
+app.include_router(telegram_miniapp_router)
 app.include_router(zalo_events_router)
+app.include_router(telegram_webhook_router)
 
 static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")

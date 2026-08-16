@@ -1599,13 +1599,23 @@ const errorDiv = document.getElementById('checkout-error');
     // server-side, same as before this sprint.
     const maxInitData = (window.WebApp && window.WebApp.initData) || null;
 
+    // Telegram Mini App: window.Telegram.WebApp.initData, same role as
+    // maxInitData above (sprint_telegram_miniapp_frontend) — present only
+    // inside Telegram's client via telegram-web-app.js (shop_base.html).
+    // client_telegram_uid intentionally NOT set in formData for the same
+    // reason as client_max_uid above — checkout.py derives it itself from
+    // this header via validate_init_data(), never trusts a client value.
+    const telegramInitData =
+      (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || null;
+
     try {
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          ...(maxInitData ? { 'X-Max-Init-Data': maxInitData } : {})
+          ...(maxInitData ? { 'X-Max-Init-Data': maxInitData } : {}),
+          ...(telegramInitData ? { 'X-Telegram-Init-Data': telegramInitData } : {})
         },
         body: JSON.stringify(formData)
       });

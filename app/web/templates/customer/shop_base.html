@@ -170,6 +170,19 @@
      patching every /checkout link on every page. initData needs no such
      propagation: MAX injects it fresh on every page the mini-app loads. -->
 <script src="https://st.max.ru/js/max-web-app.js"></script>
+<!-- Telegram Mini App Bridge (sprint_telegram_miniapp_frontend):
+     https://core.telegram.org/bots/webapps#initializing-mini-apps
+     Populates window.Telegram.WebApp on every page load when running
+     inside Telegram's client — no-op script outside Telegram (window.
+     Telegram simply stays undefined). Same wrap-the-existing-shopfront
+     approach as MAX's bridge above: no separate Mini App build needed
+     (unlike Zalo, whose Mini App requires a genuinely separate ZMP-
+     framework app — see sprint_zalo_miniapp_frontend, blocked on sandbox
+     creds). cart.js reads window.Telegram.WebApp.initData at checkout
+     submit time and sends it as X-Telegram-Init-Data, validated the same
+     way MAX's header is (app/services/max_webapp_auth.py — byte-identical
+     algorithm, see that module's docstring). -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/static/js/cart.js" nonce="{{ csp_nonce }}"></script>
 <script src="/static/js/lightbox.js" nonce="{{ csp_nonce }}"></script>
 
