@@ -3,7 +3,6 @@ import logging
 import sys
 
 from app.db.session import async_session_factory
-
 from app.services.menu_import_service import MenuImportService
 
 logging.basicConfig(level=logging.DEBUG)

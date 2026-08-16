@@ -62,5 +62,18 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.isort]
+# Explicit first-party marker — without this, ruff's isort first-party
+# auto-detection is heuristic and has been observed to disagree between
+# ruff versions (CONSTRAINTS.md: ruff>=0.4.0 unpinned in [dev] extras,
+# CI installs latest at run time). Root cause of the
+# test_telegram_routes.py I001 CI failure (2026-08-16): local sandbox ruff
+# and CI's ruff reached opposite conclusions on whether `app.*` imports
+# belong in their own trailing block (pre-existing codebase convention,
+# see tests/unit/test_dashboard_auth.py) or merged into the third-party
+# block. This pins the convention explicitly so it stops depending on
+# which ruff version happens to run.
+known-first-party = ["app"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
