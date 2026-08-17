@@ -32,6 +32,21 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sieshka
+          POSTGRES_PASSWORD: sieshka
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +54,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
+
+      # psycopg (non-binary, pyproject.toml) loads libpq.so via ctypes at
+      # import time — needs the system lib present, not guaranteed on the
+      # runner image by default.
+      - name: Install libpq
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
 
       - name: Install dev deps
         run: pip install -e ".[dev]" --upgrade
@@ -49,6 +70,14 @@ jobs:
       # M3 migration gate: zero direct status mutations outside terminal tools
       - name: check no direct mutations
         run: bash scripts/check_no_direct_mutation.sh
+
+      # tests/integration/conftest.py::postgres_dsn creates its own
+      # throwaway sieshka_test_db on this service (via psycopg admin
+      # connection to POSTGRES_USER/POSTGRES_PASSWORD above, matching
+      # app/config.py's Settings defaults) and applies the full alembic
+      # chain itself — no DATABASE_URL override needed here.
+      - name: pytest integration
+        run: pytest tests/integration/ -v --tb=short
 
   validate-programs:
     runs-on: ubuntu-latest

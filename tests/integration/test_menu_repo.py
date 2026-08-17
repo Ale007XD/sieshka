@@ -59,13 +59,20 @@ async def seed_categories(
         for cat in categories:
             await session.execute(
                 text(
-                    "INSERT INTO categories (external_id, name, menu_period, sort, is_active) "
-                    "VALUES (:external_id, :name, :menu_period, :sort, :is_active)"
+                    "INSERT INTO categories "
+                    "(external_id, name, time_period, fulfillment_scope, sort, is_active) "
+                    "VALUES (:external_id, :name, :time_period, :fulfillment_scope, :sort, "
+                    ":is_active)"
                 ),
                 {
                     "external_id": str(cat["id"]),
                     "name": cat["name"],
-                    "menu_period": cat["menu_period"],
+                    # data/categories.json's "menu_period" key predates the
+                    # 014_menu_period_split.sql column split — every value in
+                    # that file is "both", so mapping it onto both new
+                    # columns is exact, not a lossy guess.
+                    "time_period": cat["menu_period"],
+                    "fulfillment_scope": cat["menu_period"],
                     "sort": cat["sort"],
                     "is_active": cat["is_active"],
                 },

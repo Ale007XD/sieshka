@@ -94,8 +94,9 @@ async def _seed_category(session: AsyncSession) -> None:
 
     await session.execute(
         text(
-            "INSERT INTO categories (external_id, name, menu_period, sort, is_active) "
-            "VALUES ('1', 'Бургеры', 'both', 10, TRUE)"
+            "INSERT INTO categories "
+            "(external_id, name, time_period, fulfillment_scope, sort, is_active) "
+            "VALUES ('1', 'Бургеры', 'both', 'both', 10, TRUE)"
         )
     )
     await session.commit()

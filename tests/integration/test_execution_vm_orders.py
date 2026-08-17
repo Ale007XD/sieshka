@@ -88,6 +88,7 @@ async def nano_vm(repo: OrderRepository) -> AsyncGenerator[ExecutionVM, None]:
     from nano_vm.vm import ExecutionVM
 
     from app.services.order_service import _SESSION_TOOLS
+    from app.tools.notification_tools import notify_staff_new_kitchen_ticket
     from app.tools.order_tools import (
         create_kitchen_ticket,
         log_validation_failure,
@@ -125,6 +126,7 @@ async def nano_vm(repo: OrderRepository) -> AsyncGenerator[ExecutionVM, None]:
             log_validation_failure,
             notify_inventory_insufficient,
             transition_order_state,
+            notify_staff_new_kitchen_ticket,
         ):
             if fn.__name__ in _SESSION_TOOLS:
                 vm.register_tool(fn.__name__, functools.partial(fn, session=repo._session))

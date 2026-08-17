@@ -76,8 +76,9 @@ async def _seed_category(
 ) -> UUID:
     await session.execute(
         text(
-            "INSERT INTO categories (name, parent_category_id, menu_period, sort, is_active) "
-            "VALUES (:name, :parent_id, 'both', 10, TRUE)"
+            "INSERT INTO categories "
+            "(name, parent_category_id, time_period, fulfillment_scope, sort, is_active) "
+            "VALUES (:name, :parent_id, 'both', 'both', 10, TRUE)"
         ),
         {"name": name, "parent_id": parent_id},
     )
@@ -179,8 +180,9 @@ class TestMenuAgentUpdateCategoryPhase:
             # Simulate a concurrent second agent that already claimed this name.
             await session.execute(
                 text(
-                    "INSERT INTO categories (name, menu_period, sort, is_active) "
-                    "VALUES ('Напитки', 'both', 5, TRUE)"
+                    "INSERT INTO categories "
+                    "(name, time_period, fulfillment_scope, sort, is_active) "
+                    "VALUES ('Напитки', 'both', 'both', 5, TRUE)"
                 )
             )
             return await real_apply(session=session, command=command, **kwargs)
@@ -272,7 +274,7 @@ class TestMenuAgentUpdateCategoryPhase:
             "category_id": str(cat_id),
             "name": "Бургеры Премиум",
             "parent_category": "Еда",
-            "menu_period": "delivery",
+            "fulfillment_scope": "delivery",
             "sort": 3,
             "is_active": False,
         }
@@ -290,7 +292,7 @@ class TestMenuAgentUpdateCategoryPhase:
 
         res = await session.execute(
             text(
-                "SELECT name, parent_category_id, menu_period, sort, is_active "
+                "SELECT name, parent_category_id, fulfillment_scope, sort, is_active "
                 "FROM categories WHERE id = :id"
             ),
             {"id": cat_id},
@@ -298,15 +300,16 @@ class TestMenuAgentUpdateCategoryPhase:
         row = res.one()
         assert row._mapping["name"] == "Бургеры Премиум"
         assert row._mapping["parent_category_id"] == parent_id
-        assert row._mapping["menu_period"] == "delivery"
+        assert row._mapping["fulfillment_scope"] == "delivery"
         assert row._mapping["sort"] == 3
         assert row._mapping["is_active"] is False
 
     async def test_partial_update_leaves_absent_fields_unchanged(
         self, session: AsyncSession, nano_store_path: str,
     ) -> None:
-        """Only name provided → menu_period/sort/is_active stay as seeded
-        (COALESCE semantics — absent fields are None, not a reset to default)."""
+        """Only name provided → time_period/fulfillment_scope/sort/is_active
+        stay as seeded (COALESCE semantics — absent fields are None, not a
+        reset to default)."""
         cat_id = await _seed_category(session, "Бургеры")
         command = {"category_id": str(cat_id), "name": "Бургеры V2"}
 
@@ -320,14 +323,15 @@ class TestMenuAgentUpdateCategoryPhase:
         await session.commit()
         res = await session.execute(
             text(
-                "SELECT name, menu_period, sort, is_active "
+                "SELECT name, time_period, fulfillment_scope, sort, is_active "
                 "FROM categories WHERE id = :id"
             ),
             {"id": cat_id},
         )
         row = res.one()
         assert row._mapping["name"] == "Бургеры V2"
-        assert row._mapping["menu_period"] == "both"  # unchanged from seed
+        assert row._mapping["time_period"] == "both"  # unchanged from seed
+        assert row._mapping["fulfillment_scope"] == "both"  # unchanged from seed
         assert row._mapping["sort"] == 10  # unchanged from seed
         assert row._mapping["is_active"] is True  # unchanged from seed
 

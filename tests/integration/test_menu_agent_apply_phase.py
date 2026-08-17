@@ -73,8 +73,8 @@ async def session(postgres_dsn: str) -> AsyncGenerator[AsyncSession, None]:
 async def _seed_category(session: AsyncSession, name: str) -> UUID:
     await session.execute(
         text(
-            "INSERT INTO categories (name, menu_period, sort, is_active) "
-            "VALUES (:name, 'both', 10, TRUE)"
+            "INSERT INTO categories (name, time_period, fulfillment_scope, sort, is_active) "
+            "VALUES (:name, 'both', 'both', 10, TRUE)"
         ),
         {"name": name},
     )

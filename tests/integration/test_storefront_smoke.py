@@ -39,6 +39,7 @@ from app.services.idempotency import IdempotencyService
 from app.services.menu_service import MenuService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService
+from app.services.zone_service import ZoneService
 
 
 @pytest.fixture
@@ -90,8 +91,8 @@ async def seeded(
             )
         await session.execute(
             text(
-                "INSERT INTO categories (id, name, menu_period, is_active) "
-                "VALUES (:id, 'Smoke Category', 'both', TRUE)"
+                "INSERT INTO categories (id, name, time_period, fulfillment_scope, is_active) "
+                "VALUES (:id, 'Smoke Category', 'both', 'both', TRUE)"
             ),
             {"id": cat_id},
         )
@@ -133,11 +134,15 @@ async def client(
     async def _payment_svc() -> PaymentService:
         return PaymentService(session_factory=session_factory)
 
+    async def _zone_svc() -> ZoneService:
+        return ZoneService(session_factory=session_factory)
+
     from app.api.routes.checkout import (
         get_customer_service,
         get_idempotency_service,
         get_order_service,
         get_payment_service,
+        get_zone_service,
     )
     from app.api.routes.checkout import (
         get_menu_service as checkout_get_menu_service,
@@ -152,6 +157,7 @@ async def client(
     main_app.dependency_overrides[menu_get_menu_service] = _menu_svc
     main_app.dependency_overrides[get_idempotency_service] = _idempotency_svc
     main_app.dependency_overrides[get_payment_service] = _payment_svc
+    main_app.dependency_overrides[get_zone_service] = _zone_svc
     main_app.dependency_overrides[cust_get_order_service] = _order_svc
     main_app.dependency_overrides[get_schedule_service] = AsyncMock()
 
