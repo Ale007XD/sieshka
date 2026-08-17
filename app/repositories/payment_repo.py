@@ -77,37 +77,3 @@ class PaymentRepository:
         )
         row = result.scalar_one()
         return str(row)
-
-    async def get_by_order_id(self, order_id: str) -> dict[str, object] | None:
-        result = await self._session.execute(
-            text(
-                "SELECT id, provider_id, state FROM payments WHERE order_id = :order_id LIMIT 1"
-            ),
-            {"order_id": UUID(order_id)},
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return None
-        return {
-            "id": str(row._mapping["id"]),
-            "provider_id": str(row._mapping["provider_id"]),
-            "state": str(row._mapping["state"]),
-        }
-
-    async def try_set_idempotency_key(self, key: str, payload: dict[str, object]) -> bool:
-        result = await self._session.execute(
-            text(
-                "INSERT INTO idempotency_keys (key, payload) "
-                "VALUES (:key, CAST(:payload AS jsonb)) "
-                "ON CONFLICT DO NOTHING RETURNING key"
-            ),
-            {"key": key, "payload": json.dumps(payload)},
-        )
-        return result.scalar_one_or_none() is not None
-
-    async def idempotency_key_exists(self, key: str) -> bool:
-        result = await self._session.execute(
-            text("SELECT 1 FROM idempotency_keys WHERE key = :key"),
-            {"key": key},
-        )
-        return result.scalar_one_or_none() is not None
