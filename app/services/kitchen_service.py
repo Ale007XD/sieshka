@@ -1,18 +1,43 @@
 from __future__ import annotations
 
+import functools
 import logging
+from collections.abc import Callable
+from typing import Any, Protocol
 from uuid import UUID
 
+from nano_vm.models import Program, Trace, TraceStatus
+from nano_vm.validator import ProgramValidator
+from nano_vm_mcp.handlers import GovernedToolExecutor
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db import async_session_factory
-from app.domains.kitchen.fsm import KitchenEvent, KitchenFSM, KitchenState
+from app.domains.kitchen.fsm import KITCHEN_TRANSITIONS, KitchenEvent, KitchenState
 from app.fsm.core.base import TransitionResult
+from app.policy.policy_snapshot import KITCHEN_POLICY_SNAPSHOT
+from app.programs.kitchen_programs import EVENT_PROGRAM_MAP
 from app.repositories.kitchen_repo import KitchenRepository
+from app.tools.kitchen_tools import (
+    write_kitchen_state_handed_off,
+    write_kitchen_state_preparing,
+    write_kitchen_state_queued,
+    write_kitchen_state_ready,
+)
 
 logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("sieshka")
+
+
+class _VMProtocol(Protocol):
+    """Minimal protocol for ExecutionVM duck-typing — same shape as
+    OrderService's (app/services/order_service.py)."""
+
+    async def run(self, program: Program, context: dict[str, Any] | None = None) -> Trace: ...
+
+    def register_tool(self, name: str, fn: Callable[..., Any]) -> None: ...
 
 
 class KitchenTicketRead(BaseModel):
@@ -27,8 +52,20 @@ class KitchenService:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession] = async_session_factory,
+        vm: _VMProtocol | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._vm = vm
+
+    def _transition_vm(self, session: AsyncSession) -> _VMProtocol:
+        """Return a VM per-transition, bound to the given session.
+
+        If a test VM was injected via constructor, return it as-is — same
+        DI shape as OrderService._transition_vm.
+        """
+        if self._vm is not None:
+            return self._vm
+        return _build_vm(session)
 
     async def create_ticket(self, order_id: str) -> KitchenTicketRead:
         async with self._session_factory() as session:
@@ -46,20 +83,87 @@ class KitchenService:
         ticket_id: str,
         event: KitchenEvent,
     ) -> TransitionResult:
+        """Governed transition (sprint_kitchen_governance_migration,
+        2026-08-16): routes through ExecutionVM/GovernedToolExecutor via
+        app.programs.kitchen_programs, same shape as
+        OrderService.transition_order. Replaces the old direct
+        KitchenFSM + KitchenRepository.write_state path — both retained
+        in place (not deleted) for rollback safety, same convention as
+        OrderFSM (see app/domains/orders/fsm.py + OrderService's own
+        docstring: "OrderFSM retained (deprecated) ... for rollback
+        safety").
+        """
         async with self._session_factory() as session:
             repo = KitchenRepository(session)
-            fsm = KitchenFSM(
-                state_reader=repo.get_state,
-                state_writer=repo.write_state,
+            current_state = await repo.get_state(ticket_id)
+
+            allowed = KITCHEN_TRANSITIONS.get(current_state, {})
+            if event not in allowed:
+                logger.warning(
+                    "KitchenService: rejected ticket=%s event=%s from state=%s",
+                    ticket_id, event, current_state,
+                )
+                return TransitionResult(
+                    success=False,
+                    new_state=None,
+                    rejected_event=event,
+                    reason=f"Event {event!r} not allowed from state {current_state!r}",
+                )
+
+            new_state = allowed[event]
+            program = EVENT_PROGRAM_MAP[event.value]
+            context = {"ticket_id": ticket_id}
+
+            _report = ProgramValidator(program).validate()
+            if not _report.is_valid():
+                raise RuntimeError(
+                    f"Program '{program.name}' validation failed: {_report.summary()}"
+                )
+
+            with _tracer.start_as_current_span(
+                "sieshka.kitchen_transition",
+                attributes={
+                    "ticket_id": ticket_id,
+                    "event_type": event.value,
+                    "program_name": program.name,
+                },
+            ):
+                trace = await self._transition_vm(session).run(program, context=context)
+
+            # Persist trace to SQLite store so receipt viewer works — same
+            # shape as OrderService.transition_order.
+            if trace.trace_id:
+                from app.db_nano import get_store
+
+                get_store().save_trace(
+                    trace_id=trace.trace_id,
+                    program_id=trace.program_name,
+                    status=trace.status.value,
+                    steps_count=len(trace.steps),
+                    total_cost=trace.total_cost_usd() or 0.0,
+                    trace=trace.model_dump(mode="json"),
+                )
+
+            if trace.status != TraceStatus.SUCCESS:
+                return TransitionResult(
+                    success=False,
+                    new_state=None,
+                    rejected_event=event,
+                    reason=trace.error or "Execution failed",
+                )
+
+            result = TransitionResult(
+                success=True,
+                new_state=new_state,
+                rejected_event=None,
+                reason=None,
             )
-            result = await fsm.handle_event(ticket_id, event)
-            if result.success:
-                await session.commit()
-            else:
-                return result
+            await session.commit()
 
         # Cross-domain: HANDED_OFF → advance order to PACKING, then
-        # auto-close pickup orders (delivery_mode='pickup').
+        # auto-close pickup orders (delivery_mode='pickup'). Unchanged from
+        # the pre-migration implementation — runs after commit, outside the
+        # governed transition's own session/transaction, same as before.
         if event == KitchenEvent.HAND_OFF and result.success:
             try:
                 from app.domains.orders.models import OrderEvent
@@ -160,3 +264,51 @@ class KitchenService:
                 )
                 for row in rows
             ]
+
+
+_SESSION_TOOLS = frozenset({
+    "write_kitchen_state_queued",
+    "write_kitchen_state_preparing",
+    "write_kitchen_state_ready",
+    "write_kitchen_state_handed_off",
+})
+
+
+def _build_vm(session: AsyncSession) -> _VMProtocol:
+    from nano_vm.adapters import MockLLMAdapter
+    from nano_vm.vm import ExecutionVM
+
+    from app.db_nano import StoreCursorRepository, get_store
+
+    cursor = StoreCursorRepository(get_store())
+    vm = ExecutionVM(
+        llm=MockLLMAdapter(""),
+        cursor_repository=cursor,
+    )
+    executor = GovernedToolExecutor(policy=KITCHEN_POLICY_SNAPSHOT)
+    for name, fn in _KITCHEN_TOOLS.items():
+        governed = _governed_tool(fn, name, executor)
+        if name in _SESSION_TOOLS:
+            vm.register_tool(name, functools.partial(governed, session=session))
+        else:
+            vm.register_tool(name, governed)
+    return vm
+
+
+def _governed_tool(
+    fn: Callable[..., Any],
+    tool_name: str,
+    executor: GovernedToolExecutor,
+) -> Callable[..., Any]:
+    async def wrapper(**kwargs: object) -> Any:
+        executor.check(tool_name)
+        return await fn(**kwargs)
+    return wrapper
+
+
+_KITCHEN_TOOLS: dict[str, Callable[..., Any]] = {
+    "write_kitchen_state_queued": write_kitchen_state_queued,
+    "write_kitchen_state_preparing": write_kitchen_state_preparing,
+    "write_kitchen_state_ready": write_kitchen_state_ready,
+    "write_kitchen_state_handed_off": write_kitchen_state_handed_off,
+}
