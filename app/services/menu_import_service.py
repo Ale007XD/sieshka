@@ -92,6 +92,7 @@ class ProductAdminRow(BaseModel):
     image_url: str | None = None
     is_active: bool
     sku: str | None = None
+    sort: int = 0
 
 
 class IncompleteCounts(BaseModel):
@@ -572,7 +573,8 @@ class MenuImportService:
             text(
                 "SELECT p.id AS id, p.name AS name, c.name AS category_name, "
                 "p.price_rub AS price_rub, p.description AS description, "
-                "p.image_url AS image_url, p.is_active AS is_active, p.sku AS sku "
+                "p.image_url AS image_url, p.is_active AS is_active, p.sku AS sku, "
+                "p.sort AS sort "
                 "FROM products p "
                 "LEFT JOIN categories c ON p.category_id = c.id "
                 "ORDER BY p.name"
@@ -589,6 +591,7 @@ class MenuImportService:
                 image_url=row._mapping["image_url"],
                 is_active=row._mapping["is_active"],
                 sku=row._mapping["sku"],
+                sort=row._mapping["sort"],
             )
             for row in rows
         ]

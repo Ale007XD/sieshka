@@ -101,7 +101,7 @@ class MenuService:
                 "LEFT JOIN inventory inv ON inv.sku = p.sku "
                 "WHERE p.category_id = :category_id "
                 "AND p.price_rub IS NOT NULL "
-                "ORDER BY p.name"
+                "ORDER BY p.sort, p.name"
             ),
             {"category_id": category_id},
         )

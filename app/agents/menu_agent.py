@@ -356,7 +356,7 @@ class MenuAgent:
 
         Command schema: {product_id: str (UUID), name?: str, category?: str,
                          price_rub?: int, description?: str, image_url?: str,
-                         is_active?: bool}
+                         is_active?: bool, sku?: str, sort?: int}
         Only non-None fields are written; absent fields are left unchanged.
         Commit/rollback at-caller convention, same as apply_menu/apply_category.
         """

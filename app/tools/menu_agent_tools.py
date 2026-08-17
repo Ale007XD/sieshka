@@ -453,10 +453,11 @@ async def report_invalid_category_command(reason: str, **kwargs: object) -> str:
 def _required_update_product_fields(
     command: Any,
 ) -> tuple[
-    str, str | None, str | None, int | None, str | None, str | None, bool | None, str | None
+    str, str | None, str | None, int | None, str | None, str | None, bool | None, str | None,
+    int | None,
 ] | None:
     """Extract (product_id, name, category, price_rub, description, image_url,
-    is_active, sku).
+    is_active, sku, sort).
 
     product_id is required (UUID string). All other fields are optional —
     None means "leave unchanged" (COALESCE pattern at write time).
@@ -466,6 +467,13 @@ def _required_update_product_fields(
     skus (2026-08) — non-empty string if provided, uniqueness checked
     separately (validate_update_product_command pre-check + apply-time
     TOCTOU re-check), same two-layer discipline as category resolution.
+
+    sort: display order within a category (sprint_menu_product_reorder,
+    2026-08-17) — same int|None + COALESCE convention as
+    _required_update_category_fields's sort field. No range/uniqueness
+    constraint: the admin reorder UI renormalizes a whole category's rows to
+    0/10/20/... on every move, ties are expected and harmless (falls back to
+    name ordering, same as categories).
     """
     if not isinstance(command, dict):
         return None
@@ -522,6 +530,10 @@ def _required_update_product_fields(
     if sku is not None and (not isinstance(sku, str) or not sku.strip()):
         return None
 
+    sort = command.get("sort")
+    if sort is not None and (isinstance(sort, bool) or not isinstance(sort, int)):
+        return None
+
     return (
         product_id.strip(),
         name.strip() if name else None,
@@ -531,6 +543,7 @@ def _required_update_product_fields(
         image_url,
         is_active,
         sku.strip() if sku else None,
+        sort,
     )
 
 
@@ -557,7 +570,7 @@ async def validate_update_product_command(
     parsed = _required_update_product_fields(command)
     if parsed is None:
         return _reject("malformed command")
-    product_id, _name, category, _price, _desc, _img, _active, sku = parsed
+    product_id, _name, category, _price, _desc, _img, _active, sku, _sort = parsed
 
     existing = await session.execute(
         text("SELECT id FROM products WHERE id = :id"),
@@ -605,7 +618,7 @@ async def apply_update_product_command(
     parsed = _required_update_product_fields(command)
     if parsed is None:
         raise ValueError("apply_update_product_command: malformed command")
-    product_id, name, category, price_rub, description, image_url, is_active, sku = parsed
+    product_id, name, category, price_rub, description, image_url, is_active, sku, sort = parsed
 
     existing = await session.execute(
         text("SELECT id FROM products WHERE id = :id FOR UPDATE"),
@@ -659,7 +672,8 @@ async def apply_update_product_command(
             "description = COALESCE(:description, description), "
             "image_url   = COALESCE(:image_url,   image_url), "
             "is_active   = COALESCE(:is_active,   is_active), "
-            "sku         = COALESCE(:sku,         sku) "
+            "sku         = COALESCE(:sku,         sku), "
+            "sort        = COALESCE(:sort,        sort) "
             "WHERE id = :product_id"
         ),
         {
@@ -671,6 +685,7 @@ async def apply_update_product_command(
             "image_url": image_url,
             "is_active": is_active,
             "sku": sku,
+            "sort": sort,
         },
     )
     logger.info("apply_update_product_command: updated product id=%s", product_id)

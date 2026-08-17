@@ -182,6 +182,7 @@ def _product_view(products: list[Any]) -> list[dict[str, Any]]:
             "image_url": p.image_url,
             "is_active": p.is_active,
             "sku": p.sku,
+            "sort": p.sort,
         }
         for p in products
     ]
