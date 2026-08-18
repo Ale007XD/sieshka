@@ -38,6 +38,20 @@ _CSP_NONCE_STATE_KEY = "csp_nonce"
 # YooKassa injects its checkout widget script from this origin. Required for
 # the embedded payment flow to load — flagged as an explicit allow because the
 # default strict policy would otherwise block it.
+# 3-D Secure 2 challenge (creqbrw): YooKassa's checkout-widget-contract.js
+# bridge renders the issuing bank's ACS challenge frame directly into this
+# page's DOM (not nested inside the yookassa.ru widget iframe — it is a
+# sibling <iframe>, subject to THIS document's CSP). The ACS origin is
+# chosen by the customer's card-issuing bank at payment time (any RU bank —
+# observed: pay.mtsbank.ru) and cannot be enumerated in advance, so
+# frame-src must allow any https origin for the challenge to load at all.
+# Hypothesis, not confirmed by a captured CSP violation report (2026-08-18):
+# "frame-src 'self' https://yookassa.ru" is narrower than any documented
+# YooKassa embedded-widget CSP guidance and does not cover arbitrary bank
+# ACS origins by construction — consistent with, but not proven the sole
+# cause of, the observed "page unavailable" failure inside the widget for
+# pay.mtsbank.ru's challenge frame. Widening is safe regardless (frame-src
+# scoped to https: only, no additional script/exec surface).
 _YOOKASSA_ORIGIN = "https://yookassa.ru"
 
 # MAX Bridge SDK (https://dev.max.ru/docs/webapps/bridge) — populates
@@ -85,7 +99,7 @@ def _build_csp_header(nonce: str) -> str:
         f"{_TELEGRAM_BRIDGE_ORIGIN}; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
-        "frame-src 'self' https://yookassa.ru; "
+        "frame-src 'self' https://yookassa.ru https:; "
         "base-uri 'self'; "
         "form-action 'self'"
     )

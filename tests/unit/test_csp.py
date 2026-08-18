@@ -68,6 +68,26 @@ class TestBuildCspHeader:
         assert "telegram.org" not in frame_src_directive
 
 
+    def test_frame_src_allows_yookassa(self) -> None:
+        csp = _build_csp_header("n")
+        frame_src_directive = next(
+            part for part in csp.split(";") if part.strip().startswith("frame-src")
+        )
+        assert "https://yookassa.ru" in frame_src_directive
+
+    def test_frame_src_allows_arbitrary_https_for_3ds_challenge(self) -> None:
+        """sprint_csp_3ds_frame_src: the 3-D Secure 2 challenge (ACS) origin
+        is chosen by the customer's card-issuing bank at payment time and
+        cannot be enumerated in advance (observed: pay.mtsbank.ru) — a
+        yookassa.ru-only allowlist blocks the challenge frame for any bank
+        not explicitly listed, i.e. effectively all of them."""
+        csp = _build_csp_header("n")
+        frame_src_directive = next(
+            part for part in csp.split(";") if part.strip().startswith("frame-src")
+        )
+        assert "https:" in frame_src_directive.split()
+
+
 class TestMakeNonce:
     def test_returns_nonempty_string(self) -> None:
         assert isinstance(make_nonce(), str)
