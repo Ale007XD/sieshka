@@ -15,7 +15,36 @@ from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.services.idempotency import IdempotencyService
-from app.services.payment_service import PaymentService, YooKassaClient
+from app.services.payment_service import (
+    PaymentService,
+    YooKassaClient,
+    build_yookassa_receipt,
+)
+
+
+class TestBuildYookassaReceipt:
+    def test_single_line_matches_amount_exactly(self) -> None:
+        receipt = build_yookassa_receipt(
+            phone="+79991234567",
+            amount=decimal.Decimal("2350.50"),
+            description="Order abc-123",
+        )
+        assert receipt["customer"] == {"phone": "+79991234567"}
+        assert len(receipt["items"]) == 1
+        item = receipt["items"][0]
+        assert item["amount"] == {"value": "2350.50", "currency": "RUB"}
+        assert item["quantity"] == "1"
+        assert item["vat_code"] == 1
+        assert item["payment_mode"] == "full_prepayment"
+        assert item["payment_subject"] == "commodity"
+
+    def test_description_truncated_to_128_chars(self) -> None:
+        receipt = build_yookassa_receipt(
+            phone="+79991234567",
+            amount=decimal.Decimal("100.00"),
+            description="x" * 200,
+        )
+        assert len(receipt["items"][0]["description"]) == 128
 
 
 @asynccontextmanager
@@ -84,6 +113,63 @@ class TestPaymentService:
         assert result["confirmation_url"] == confirmation_url
         assert result["payment_id"] == provider_id
         assert result["trace_id"] == trace_id_val
+        # No customer_phone passed → no receipt attached (legacy/back-compat
+        # call sites keep working exactly as before this patch).
+        assert yookassa_mock.create_payment.call_args.kwargs["receipt"] is None
+
+    async def test_create_payment_attaches_receipt_when_phone_given(self) -> None:
+        """sprint_yookassa_receipt_54fz: live YooKassa shops with an
+        online-kassa/54-FZ connection reject create_payment without a
+        receipt object (confirmed root cause of the 502s, see
+        SieshKa-Site's app/payments.py::_build_receipt for the working
+        reference implementation this mirrors)."""
+        order_id = str(uuid4())
+        amount = decimal.Decimal("1500.00")
+        provider_id = str(uuid4())
+
+        session = AsyncMock()
+        mock_insert_result = MagicMock()
+        mock_insert_result.one.return_value = MagicMock(_mapping={"id": uuid4()})
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.CONFIRMED.value
+        session.execute = AsyncMock(
+            side_effect=[mock_insert_result, mock_tool_select, MagicMock()]
+        )
+
+        yookassa_mock = MagicMock(spec=YooKassaClient)
+        yookassa_mock.create_payment = AsyncMock(
+            return_value={
+                "id": provider_id,
+                "status": "pending",
+                "confirmation": {"confirmation_token": "tok"},
+            }
+        )
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=yookassa_mock,
+        )
+
+        with (
+            patch("app.services.payment_service.trace.record", return_value="trace-id"),
+            patch.object(PaymentRepository, "create", AsyncMock(return_value=str(uuid4()))),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.CONFIRMED),
+        ):
+            await svc.create_payment(
+                order_id=order_id,
+                amount=amount,
+                currency="RUB",
+                description="Order test",
+                customer_phone="+79991234567",
+            )
+
+        receipt = yookassa_mock.create_payment.call_args.kwargs["receipt"]
+        assert receipt is not None
+        assert receipt["customer"]["phone"] == "+79991234567"
+        assert receipt["items"][0]["amount"]["value"] == "1500.00"
+        # Sum of receipt items must exactly equal the payment amount — this
+        # is a hard YooKassa API constraint, single-line construction
+        # guarantees it by design regardless of promo/delivery-fee splits.
+        assert receipt["items"][0]["vat_code"] == 1
 
     async def test_confirm_payment_success(self) -> None:
         order_id = str(uuid4())

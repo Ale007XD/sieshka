@@ -72,6 +72,7 @@ async def pay_order(
         amount=body.amount,
         currency=body.currency,
         return_url=body.return_url,
+        customer_phone=order.customer_phone,
     )
     return PaymentInitResponse(
         confirmation_url=result["confirmation_url"],

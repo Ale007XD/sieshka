@@ -246,6 +246,7 @@ async def checkout(
                 amount=Decimal(total_rub),
                 currency="RUB",
                 description=f"Order {order.id}",
+                customer_phone=customer.phone,
             )
         except httpx.HTTPStatusError as exc:
             # YooKassa rejected the request (4xx/5xx) — .response.text is

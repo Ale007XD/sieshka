@@ -61,14 +61,17 @@ class YooKassaClient:
         description: str,
         return_url: str,
         metadata: dict[str, str],
+        receipt: dict[str, Any] | None = None,
     ) -> dict[str, object]:
-        payload = {
+        payload: dict[str, Any] = {
             "amount": {"value": f"{amount:.2f}", "currency": currency},
             "confirmation": {"type": "embedded"},
             "capture": True,
             "description": description,
             "metadata": metadata,
         }
+        if receipt is not None:
+            payload["receipt"] = receipt
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.BASE_URL}/payments",
@@ -78,6 +81,47 @@ class YooKassaClient:
             )
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
+
+
+def build_yookassa_receipt(
+    phone: str,
+    amount: decimal.Decimal,
+    description: str,
+) -> dict[str, Any]:
+    """Build a minimal 54-FZ receipt object for YooKassa.create_payment.
+
+    Single aggregated line item (amount == payment amount by construction)
+    rather than a per-item decomposition of the cart: goods_total in this
+    codebase can differ from the charged total_rub after promo discount
+    and per-zone delivery fee are folded in (see
+    app.services.order_service.compute_checkout_total), and YooKassa
+    requires receipt item amounts to sum to exactly the payment amount.
+    A per-item receipt would need to re-derive that split (and stay in
+    sync with compute_checkout_total's formula) for no compliance benefit
+    over a single line — 54-FZ does not require line-level cart detail,
+    only that the receipt total match what was actually charged.
+
+    Reference: SieshKa-Site (working prod sibling repo) confirmed the root
+    cause — YooKassa's live (non-test) shops with an online-kassa/54-FZ
+    connection reject create_payment without a receipt object; the test
+    shop used during earlier development did not enforce this.
+    """
+    return {
+        "customer": {"phone": phone},
+        "items": [
+            {
+                "description": description[:128],
+                "quantity": "1",
+                "amount": {
+                    "value": f"{amount:.2f}",
+                    "currency": "RUB",
+                },
+                "vat_code": 1,  # без НДС
+                "payment_mode": "full_prepayment",
+                "payment_subject": "commodity",
+            }
+        ],
+    }
 
 
 class PaymentService:
@@ -164,6 +208,7 @@ class PaymentService:
         currency: str = "RUB",
         description: str | None = None,
         return_url: str | None = None,
+        customer_phone: str | None = None,
     ) -> PaymentInitResult:
         trace_id = trace.record(
             entity_id=order_id,
@@ -176,6 +221,11 @@ class PaymentService:
 
         return_url = return_url or settings.YOOKASSA_RETURN_URL
         desc = description or f"Order {order_id}"
+        receipt = (
+            build_yookassa_receipt(customer_phone, amount, desc)
+            if customer_phone
+            else None
+        )
 
         data = await self._yookassa.create_payment(
             amount=amount,
@@ -187,6 +237,7 @@ class PaymentService:
                 "order_id": order_id,
                 "program_name": "payment_confirmation",
             },
+            receipt=receipt,
         )
 
         raw_data: dict[str, object] = data

@@ -55,12 +55,6 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # psycopg (non-binary, pyproject.toml) loads libpq.so via ctypes at
-      # import time — needs the system lib present, not guaranteed on the
-      # runner image by default.
-      - name: Install libpq
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev
-
       - name: Install dev deps
         run: pip install -e ".[dev]" --upgrade
 
