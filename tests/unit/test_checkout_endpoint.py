@@ -167,6 +167,84 @@ async def test_card_path_returns_confirmation_token() -> None:
     assert data["confirmation_token"] == "tok_abc123"
 
 
+async def test_card_path_from_telegram_webview_requests_redirect_not_embedded() -> None:
+    """sprint_telegram_3ds_webview_redirect: Telegram Mini App WebView blocks
+    third-party cookies in embedded iframes, breaking the bank's 3DS ACS
+    challenge (confirmed root cause, 2026-08-18 — not a CSP or YooKassa/bank
+    issue, SBP unaffected since it has no iframe). A request carrying
+    X-Telegram-Init-Data must get YooKassa's "redirect" confirmation flow
+    (confirmation_url), not "embedded" (confirmation_token)."""
+    app, svc = _build_app()
+    svc["idem"].check_and_record = AsyncMock(return_value=True)
+    svc["customer"].find_or_create_by_phone = AsyncMock(
+        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
+    )
+    created = OrderRead(
+        id=uuid4(),
+        customer_id=uuid4(),
+        state=OrderState.DRAFT,
+        items=[],
+        delivery_address="Moscow",
+    )
+    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
+    svc["payment"].create_payment = AsyncMock(
+        return_value={
+            "confirmation_url": "https://yookassa.ru/payments/external/confirmation?...",
+            "confirmation_token": "",
+            "payment_id": "pay_1",
+            "trace_id": "tr_1",
+        }
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/api/orders",
+            json=_body("yookassa_card"),
+            headers={"X-Telegram-Init-Data": "unused-in-this-mocked-test"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["confirmation_url"]
+    assert not data.get("confirmation_token")
+    call_kwargs = svc["payment"].create_payment.call_args.kwargs
+    assert call_kwargs["confirmation_type"] == "redirect"
+
+
+async def test_card_path_plain_browser_still_uses_embedded() -> None:
+    """No X-Telegram-Init-Data header -> confirmation_type stays 'embedded'
+    (default), i.e. this fix does not change desktop/plain-browser behaviour."""
+    app, svc = _build_app()
+    svc["idem"].check_and_record = AsyncMock(return_value=True)
+    svc["customer"].find_or_create_by_phone = AsyncMock(
+        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
+    )
+    created = OrderRead(
+        id=uuid4(),
+        customer_id=uuid4(),
+        state=OrderState.DRAFT,
+        items=[],
+        delivery_address="Moscow",
+    )
+    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
+    svc["payment"].create_payment = AsyncMock(
+        return_value={
+            "confirmation_url": "",
+            "confirmation_token": "tok_abc123",
+            "payment_id": "pay_1",
+            "trace_id": "tr_1",
+        }
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+
+    assert resp.status_code == 200
+    call_kwargs = svc["payment"].create_payment.call_args.kwargs
+    assert call_kwargs["confirmation_type"] == "embedded"
+
+
 async def test_card_path_yookassa_rejection_returns_502_json_not_plain_500() -> None:
     """sprint_yookassa_live_error_surfacing (2026-08-17): a YooKassa 4xx/5xx
     rejection (e.g. live-mode moderation/receipt/auth issues) must not

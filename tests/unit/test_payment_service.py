@@ -171,6 +171,51 @@ class TestPaymentService:
         # guarantees it by design regardless of promo/delivery-fee splits.
         assert receipt["items"][0]["vat_code"] == 1
 
+    async def test_create_payment_forwards_confirmation_type(self) -> None:
+        """sprint_telegram_3ds_webview_redirect: confirmation_type must reach
+        YooKassaClient.create_payment unchanged — checkout.py decides
+        embedded-vs-redirect based on X-Telegram-Init-Data presence,
+        PaymentService is a pure pass-through here, not a policy layer."""
+        order_id = str(uuid4())
+        amount = decimal.Decimal("1500.00")
+
+        session = AsyncMock()
+        mock_insert_result = MagicMock()
+        mock_insert_result.one.return_value = MagicMock(_mapping={"id": uuid4()})
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.CONFIRMED.value
+        session.execute = AsyncMock(
+            side_effect=[mock_insert_result, mock_tool_select, MagicMock()]
+        )
+
+        yookassa_mock = MagicMock(spec=YooKassaClient)
+        yookassa_mock.create_payment = AsyncMock(
+            return_value={
+                "id": str(uuid4()),
+                "status": "pending",
+                "confirmation": {"confirmation_url": "https://yookassa.ru/redirect"},
+            }
+        )
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=yookassa_mock,
+        )
+
+        with (
+            patch("app.services.payment_service.trace.record", return_value="trace-id"),
+            patch.object(PaymentRepository, "create", AsyncMock(return_value=str(uuid4()))),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.CONFIRMED),
+        ):
+            await svc.create_payment(
+                order_id=order_id,
+                amount=amount,
+                currency="RUB",
+                description="Order test",
+                confirmation_type="redirect",
+            )
+
+        assert yookassa_mock.create_payment.call_args.kwargs["confirmation_type"] == "redirect"
+
     async def test_confirm_payment_success(self) -> None:
         order_id = str(uuid4())
         payment_id = str(uuid4())

@@ -51,6 +51,7 @@ class CheckoutResponse(BaseModel):
     ok: bool
     order_id: str
     confirmation_token: str | None = None
+    confirmation_url: str | None = None
 
 
 class PromoCheckRequest(BaseModel):
@@ -108,10 +109,12 @@ async def _recover_idempotent_result(
     if not isinstance(order_id, str):
         return None
     token = payload.get("confirmation_token")
+    url = payload.get("confirmation_url")
     return CheckoutResponse(
         ok=True,
         order_id=order_id,
         confirmation_token=token if isinstance(token, str) and token else None,
+        confirmation_url=url if isinstance(url, str) and url else None,
     )
 
 
@@ -247,6 +250,28 @@ async def checkout(
                 currency="RUB",
                 description=f"Order {order.id}",
                 customer_phone=customer.phone,
+                # sprint_telegram_3ds_webview_redirect (2026-08-18): the
+                # embedded widget renders the issuing bank's 3-D Secure
+                # challenge as an iframe on THIS page. Telegram's Mini App
+                # WebView blocks third-party cookies inside embedded
+                # iframes (same restriction VK/Instagram in-app browsers
+                # apply), which breaks the ACS challenge session — observed
+                # as "page unavailable" for pay.mtsbank.ru's challenge
+                # frame even after widening CSP frame-src to any https
+                # origin (ruled CSP out as the cause). SBP (redirect/deep-
+                # link based, no iframe) is unaffected — confirms the
+                # failure is iframe-specific, not YooKassa/bank-side.
+                # Fix: when the request came from inside Telegram's WebView
+                # (X-Telegram-Init-Data present), request YooKassa's
+                # "redirect" confirmation flow instead of "embedded" — the
+                # ACS challenge then loads as the top-level document via
+                # Telegram.WebApp.openLink() (system browser, no WebView
+                # cookie restriction), not as a nested iframe on this page.
+                # MAX/Zalo/plain-browser checkout are untouched (embedded
+                # remains default) — MAX's WebView has not been confirmed
+                # to have the same restriction, and plain-browser embedded
+                # 3DS has no reported failures.
+                confirmation_type="redirect" if telegram_web_app_data else "embedded",
             )
         except httpx.HTTPStatusError as exc:
             # YooKassa rejected the request (4xx/5xx) — .response.text is
@@ -275,6 +300,7 @@ async def checkout(
                 detail="Payment provider is unreachable. Please try again shortly.",
             ) from exc
         confirmation_token = payment.get("confirmation_token", "")
+        confirmation_url = payment.get("confirmation_url", "")
         await idempotency.update_payload(
             idem_key,
             {
@@ -283,12 +309,14 @@ async def checkout(
                 "item_count": len(body.items),
                 "order_id": str(order.id),
                 "confirmation_token": confirmation_token,
+                "confirmation_url": confirmation_url,
             },
         )
         return CheckoutResponse(
             ok=True,
             order_id=str(order.id),
             confirmation_token=confirmation_token or None,
+            confirmation_url=confirmation_url or None,
         )
 
     # Cash: no external payment — confirm the order so the kitchen can proceed.

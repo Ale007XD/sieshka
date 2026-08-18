@@ -1629,6 +1629,21 @@ const errorDiv = document.getElementById('checkout-error');
           submitBtn.disabled = false;
           submitBtn.innerHTML = originalText;
           showYooKassaWidget(data.confirmation_token, data.order_id);
+        } else if (data.confirmation_url) {
+          // sprint_telegram_3ds_webview_redirect: server chose YooKassa's
+          // "redirect" flow (Telegram WebView request) instead of
+          // "embedded" — the 3DS challenge must NOT be rendered as an
+          // iframe on this page (Telegram's WebView blocks the
+          // third-party cookies the bank ACS challenge needs). Open the
+          // system browser via the Telegram Bridge instead; return_url
+          // brings the customer back to /thanks/{order_id} on success.
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = originalText;
+          if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
+            window.Telegram.WebApp.openLink(data.confirmation_url);
+          } else {
+            window.location.href = data.confirmation_url;
+          }
         } else {
           window.location.href = `/thanks/${data.order_id}`;
         }

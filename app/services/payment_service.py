@@ -62,10 +62,14 @@ class YooKassaClient:
         return_url: str,
         metadata: dict[str, str],
         receipt: dict[str, Any] | None = None,
+        confirmation_type: str = "embedded",
     ) -> dict[str, object]:
+        confirmation: dict[str, str] = {"type": confirmation_type}
+        if confirmation_type == "redirect":
+            confirmation["return_url"] = return_url
         payload: dict[str, Any] = {
             "amount": {"value": f"{amount:.2f}", "currency": currency},
-            "confirmation": {"type": "embedded"},
+            "confirmation": confirmation,
             "capture": True,
             "description": description,
             "metadata": metadata,
@@ -209,6 +213,7 @@ class PaymentService:
         description: str | None = None,
         return_url: str | None = None,
         customer_phone: str | None = None,
+        confirmation_type: str = "embedded",
     ) -> PaymentInitResult:
         trace_id = trace.record(
             entity_id=order_id,
@@ -238,6 +243,7 @@ class PaymentService:
                 "program_name": "payment_confirmation",
             },
             receipt=receipt,
+            confirmation_type=confirmation_type,
         )
 
         raw_data: dict[str, object] = data
