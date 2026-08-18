@@ -167,6 +167,77 @@ async def test_card_path_returns_confirmation_token() -> None:
     assert data["confirmation_token"] == "tok_abc123"
 
 
+async def test_card_path_yookassa_rejection_returns_502_json_not_plain_500() -> None:
+    """sprint_yookassa_live_error_surfacing (2026-08-17): a YooKassa 4xx/5xx
+    rejection (e.g. live-mode moderation/receipt/auth issues) must not
+    propagate as an unhandled exception — FastAPI's default handler returns
+    plain-text "Internal Server Error" for that, which crashes cart.js's
+    `await response.json()` with a SyntaxError before the user ever sees a
+    real message. Must come back as valid JSON with an HTTPException-shaped
+    body instead."""
+    import httpx
+
+    app, svc = _build_app()
+    svc["idem"].check_and_record = AsyncMock(return_value=True)
+    svc["customer"].find_or_create_by_phone = AsyncMock(
+        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
+    )
+    created = OrderRead(
+        id=uuid4(),
+        customer_id=uuid4(),
+        state=OrderState.DRAFT,
+        items=[],
+        delivery_address="Moscow",
+    )
+    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
+
+    fake_response = httpx.Response(
+        status_code=400,
+        json={"type": "error", "code": "invalid_request", "description": "bad request"},
+        request=httpx.Request("POST", "https://api.yookassa.ru/v3/payments"),
+    )
+    svc["payment"].create_payment = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "400 Bad Request", request=fake_response.request, response=fake_response,
+        )
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+
+    assert resp.status_code == 502
+    data = resp.json()  # must not raise — this is the whole point of the fix
+    assert "detail" in data
+
+
+async def test_card_path_yookassa_network_error_returns_502_json() -> None:
+    import httpx
+
+    app, svc = _build_app()
+    svc["idem"].check_and_record = AsyncMock(return_value=True)
+    svc["customer"].find_or_create_by_phone = AsyncMock(
+        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
+    )
+    created = OrderRead(
+        id=uuid4(),
+        customer_id=uuid4(),
+        state=OrderState.DRAFT,
+        items=[],
+        delivery_address="Moscow",
+    )
+    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
+    svc["payment"].create_payment = AsyncMock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+
+    assert resp.status_code == 502
+    data = resp.json()
+    assert "detail" in data
+
+
 async def test_idempotency_reuse_does_not_create_second_order() -> None:
     app, svc = _build_app()
     # First call inserts, second is a duplicate (returns False).

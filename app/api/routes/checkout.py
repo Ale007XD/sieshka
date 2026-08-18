@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -239,12 +240,39 @@ async def checkout(
         await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
         await notify_admin_order_state(str(order.id), OrderState.PAYMENT_PENDING)
         await notify_staff_card(str(order.id), order_state=OrderState.PAYMENT_PENDING)
-        payment = await payment_service.create_payment(
-            order_id=str(order.id),
-            amount=Decimal(total_rub),
-            currency="RUB",
-            description=f"Order {order.id}",
-        )
+        try:
+            payment = await payment_service.create_payment(
+                order_id=str(order.id),
+                amount=Decimal(total_rub),
+                currency="RUB",
+                description=f"Order {order.id}",
+            )
+        except httpx.HTTPStatusError as exc:
+            # YooKassa rejected the request (4xx/5xx) — .response.text is
+            # YooKassa's own error JSON (usually {"type", "id", "code",
+            # "description", "parameter"}), the actual diagnostic signal.
+            # Logged in full here since this is the only place that ever
+            # sees it — payment_service/YooKassaClient just propagate.
+            logger.error(
+                "checkout: YooKassa rejected create_payment for order %s — "
+                "status=%s body=%s",
+                order.id, exc.response.status_code, exc.response.text,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Payment provider rejected the request. Please try again "
+                "or contact support.",
+            ) from exc
+        except httpx.HTTPError as exc:
+            # Network-level failure (timeout, connection error, DNS, ...) —
+            # no .response to log, just the exception itself.
+            logger.error(
+                "checkout: YooKassa request failed for order %s: %s", order.id, exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Payment provider is unreachable. Please try again shortly.",
+            ) from exc
         confirmation_token = payment.get("confirmation_token", "")
         await idempotency.update_payload(
             idem_key,
