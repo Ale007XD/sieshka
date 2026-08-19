@@ -1699,27 +1699,80 @@ function showYooKassaWidget(confirmationToken, orderId) {
       inner.style.cssText = 'background:#fff;border-radius:12px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow:auto;';
       container.appendChild(inner);
     }
+    inner.innerHTML = '';
 
-    const checkout = new window.YooMoneyCheckoutWidget({
-      confirmation_token: confirmationToken,
-      return_url: `${window.location.origin}/thanks/${orderId}`,
-      error_callback(error) {
-        console.error('YooKassa widget error:', error);
-        CartManager.showToast('Ошибка платёжного виджета. Попробуйте позже.', 'error');
+    // sprint_yookassa_sbp_sberbank_only (2026-08-19): confirmed against
+    // YooKassa's own docs (additional-settings/separate-payment-methods) —
+    // the backend's payment_method_types (create_payment) does NOT filter
+    // what the widget displays; that's a completely separate mechanism.
+    // "По умолчанию на платёжной форме отображаются все способы оплаты,
+    // которые доступны магазину и есть в виджете." Filtering the widget's
+    // own picker requires customization.payment_methods PER INSTANCE, and
+    // a single instance can't combine sbp+sberbank (only bank_card+mir_pay
+    // is an allowed combination — anything else throws
+    // invalid_combination_of_payment_methods). Two widget instances
+    // sharing the same confirmation_token is the documented supported
+    // pattern for showing more than one unrelated method on one page.
+    const rails = [
+      { method: 'sbp', label: 'СБП' },
+      { method: 'sberbank', label: 'SberPay' },
+    ];
+    const widgets = [];
+    let settled = false;
+
+    function finishOnce(redirect) {
+      if (settled) return;
+      settled = true;
+      widgets.forEach((w) => {
+        try { w.destroy(); } catch (e) { /* already torn down by the widget itself */ }
+      });
+      document.getElementById('yookassa-widget')?.remove();
+      if (redirect) window.location.href = `/thanks/${orderId}`;
+    }
+
+    function dropRail(section) {
+      section.remove();
+      if (!inner.querySelector('[data-yk-rail]')) {
+        CartManager.showToast('Не удалось загрузить способы оплаты. Попробуйте позже.', 'error');
+        finishOnce(false);
       }
-    });
+    }
 
-    checkout.render('payment-form').then(() => {
-checkout.on('success', () => {
-         checkout.destroy();
-         document.getElementById('yookassa-widget')?.remove();
-         window.location.href = `/thanks/${orderId}`;
-       });
+    rails.forEach(({ method, label }) => {
+      const section = document.createElement('div');
+      section.dataset.ykRail = method;
+      section.style.cssText = 'margin-bottom:16px;';
+      const heading = document.createElement('div');
+      heading.className = 'small fw-semibold text-muted mb-2';
+      heading.textContent = label;
+      const mount = document.createElement('div');
+      mount.id = `payment-form-${method}`;
+      section.appendChild(heading);
+      section.appendChild(mount);
+      inner.appendChild(section);
 
-      checkout.on('fail', () => {
-        checkout.destroy();
-        document.getElementById('yookassa-widget-container')?.remove();
-        CartManager.showToast('Оплата не прошла. Попробуйте ещё раз.', 'error');
+      const checkout = new window.YooMoneyCheckoutWidget({
+        confirmation_token: confirmationToken,
+        return_url: `${window.location.origin}/thanks/${orderId}`,
+        customization: { payment_methods: [method] },
+        error_callback(error) {
+          console.error(`YooKassa widget error (${method}):`, error);
+          dropRail(section);
+        }
+      });
+      widgets.push(checkout);
+
+      checkout.render(mount.id).then(() => {
+        checkout.on('success', () => finishOnce(true));
+        checkout.on('fail', () => {
+          CartManager.showToast(`Оплата через ${label} не прошла. Попробуйте другой способ.`, 'error');
+        });
+      }).catch((error) => {
+        // e.g. no_payment_methods_to_display for a two-stage (capture:false)
+        // payment — not our case (capture is always true), but fail closed
+        // per-rail rather than breaking the whole overlay either way.
+        console.error(`YooKassa widget render failed (${method}):`, error);
+        dropRail(section);
       });
     });
   }

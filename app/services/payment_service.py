@@ -34,17 +34,33 @@ logger = logging.getLogger(__name__)
 # with a captured CSP violation report or server-side header trace — the
 # confirmation_type="redirect" Telegram-WebView branch in this file is left
 # in place (inert while bank_card is unavailable) rather than removed.
+#
+# IMPORTANT — this list does NOT control what the embedded widget shows to
+# the customer. Confirmed against YooKassa's own docs (2026-08-19,
+# additional-settings/separate-payment-methods): "По умолчанию на
+# платёжной форме отображаются все способы оплаты, которые доступны
+# магазину и есть в виджете" — payment_method_types on create_payment only
+# restricts the payment OBJECT server-side; it is a completely separate
+# mechanism from the widget's OWN customization.payment_methods, which is
+# set per widget instance in cart.js (see showYooKassaWidget). Kept here
+# anyway as defense-in-depth at the API layer (rejects the payment outright
+# if somehow initiated with a method outside this list), not as the fix for
+# what the customer sees — that fix lives in cart.js.
 DEFAULT_PAYMENT_METHOD_TYPES: list[str] = ["sbp", "sberbank"]
 
 
 class PaymentInitResult(TypedDict):
     """Typed result of PaymentService.create_payment (YooKassa payload).
 
-    sprint_m7_checkout_wiring: embedded widget mode. The real cart.js renders
-    the YooMoneyCheckoutWidget from ``confirmation_token`` in-page — it never
-    uses ``confirmation_url``. ``confirmation_url`` is retained (empty string
-    in embedded mode) only so legacy callers/tests importing the key don't
-    break; the checkout endpoint reads ``confirmation_token`` exclusively.
+    sprint_m7_checkout_wiring: embedded widget mode by default. The real
+    cart.js renders the YooMoneyCheckoutWidget from ``confirmation_token``
+    in-page. sprint_telegram_3ds_webview_redirect (2026-08-18) added a
+    second path: for requests from Telegram's Mini App WebView,
+    PaymentService requests confirmation_type="redirect" instead, and
+    ``confirmation_url`` is populated (``confirmation_token`` empty) —
+    cart.js branches on which one is non-empty. Both fields are always
+    present so callers/tests importing the TypedDict don't break regardless
+    of which mode a given payment used.
     """
 
     confirmation_url: str
