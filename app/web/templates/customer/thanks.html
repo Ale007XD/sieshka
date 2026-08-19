@@ -41,3 +41,17 @@
   <a href="/" class="btn btn-primary">Вернуться в меню</a>
 </section>
 {% endblock %}
+{% block scripts %}
+{% if order and order.state.value not in ("DRAFT", "CONFIRMED", "PAYMENT_PENDING", "CANCELLED") %}
+<script nonce="{{ csp_nonce }}">
+  // sprint_fix_online_payment_funnel (2026-08-19): cart is cleared here,
+  // not at payment-link-creation time (see cart.js) — this page only
+  // renders the clear when order.state has actually progressed past
+  // PAYMENT_PENDING, i.e. the payment genuinely succeeded (or it's the
+  // cash path, confirmed synchronously). An abandoned/failed online
+  // payment leaves the order stuck at PAYMENT_PENDING, the cart is left
+  // untouched, and the customer can retry checkout with the same items.
+  localStorage.setItem('cart', '[]');
+</script>
+{% endif %}
+{% endblock %}

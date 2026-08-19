@@ -259,14 +259,13 @@ async def checkout(
         # payment attempt was ever made.
         await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
         await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
-        await notify_admin_order_state(str(order.id), OrderState.PAYMENT_PENDING)
-        await notify_staff_card(str(order.id), order_state=OrderState.PAYMENT_PENDING)
         try:
             payment = await payment_service.create_payment(
                 order_id=str(order.id),
                 amount=Decimal(total_rub),
                 currency="RUB",
                 description=f"Order {order.id}",
+                return_url=f"{settings.YOOKASSA_RETURN_URL}?order_id={order.id}",
                 customer_phone=customer.phone,
                 confirmation_type="redirect",
                 payment_method_data={

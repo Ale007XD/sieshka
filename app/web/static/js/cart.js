@@ -1623,8 +1623,6 @@ const errorDiv = document.getElementById('checkout-error');
       const data = await response.json();
 
       if (response.ok && data.ok) {
-        localStorage.setItem('cart', '[]');
-
         if (data.confirmation_url) {
           // sprint_yookassa_manual_integration (2026-08-19): every online
           // payment now goes through YooKassa's manual-integration
@@ -1632,16 +1630,30 @@ const errorDiv = document.getElementById('checkout-error');
           // redirect) — no embedded widget, no iframe, ever. Inside
           // Telegram's Mini App WebView, open the system browser via the
           // Telegram Bridge (avoids the WebView's own third-party-cookie
-          // restrictions on top of not needing them here); return_url
-          // brings the customer back to /thanks/{order_id} on success.
+          // restrictions on top of not needing them here); inside MAX's
+          // Mini App WebView, use MAX's own bridge the same way (falling
+          // through to window.location.href would navigate the WebView
+          // itself to YooKassa instead of the system browser). return_url
+          // brings the customer back to /payment/return?order_id=...,
+          // which redirects to /thanks/{order_id}.
+          //
+          // Cart is intentionally NOT cleared here: the customer hasn't
+          // paid yet at this point, only received a payment link. Clearing
+          // it now meant an abandoned/incomplete payment left the customer
+          // with an empty cart and no order — /thanks/{order_id} clears it
+          // instead, gated on the order having actually reached a paid
+          // state (2026-08-19, reported as "Корзина пуста" on retry).
           submitBtn.disabled = false;
           submitBtn.innerHTML = originalText;
           if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
             window.Telegram.WebApp.openLink(data.confirmation_url);
+          } else if (window.WebApp && window.WebApp.openLink) {
+            window.WebApp.openLink(data.confirmation_url);
           } else {
             window.location.href = data.confirmation_url;
           }
         } else {
+          localStorage.setItem('cart', '[]');
           window.location.href = `/thanks/${data.order_id}`;
         }
       } else {

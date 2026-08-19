@@ -332,6 +332,67 @@ class TestPaymentService:
         assert result.success is True
         assert result.new_state == OrderState.PAID
 
+    async def test_confirm_payment_notifies_staff_with_paid_state(self) -> None:
+        """sprint_fix_online_payment_funnel (2026-08-19): staff notification
+        moved here from checkout.py (payment-link-creation time) — it must
+        fire only after the payment is genuinely confirmed, with the order's
+        REAL resulting state. OrderEvent.PAYMENT_CONFIRMED transitions to
+        OrderState.PAID (ORDER_TRANSITIONS), not to a same-named
+        OrderState.PAYMENT_CONFIRMED member — that enum value exists but the
+        order never actually lands on it here; asserting the exact state
+        catches that mixup directly."""
+        order_id = str(uuid4())
+        payment_id = str(uuid4())
+        trace_id_val = str(uuid4())
+
+        session = AsyncMock()
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.PAYMENT_PENDING.value
+        session.execute.return_value = mock_tool_select
+
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with (
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
+            patch.object(
+                PaymentRepository,
+                "get_by_provider_id",
+                return_value={
+                    "id": str(uuid4()),
+                    "order_id": order_id,
+                    "state": "PENDING",
+                    "amount": decimal.Decimal("1500.00"),
+                    "currency": "RUB",
+                },
+            ),
+            patch.object(PaymentRepository, "write_state", AsyncMock()),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.PAYMENT_PENDING),
+            patch(
+                "app.services.payment_service.notify_admin_order_state", AsyncMock(),
+            ) as mock_admin,
+            patch(
+                "app.services.payment_service.notify_staff_card", AsyncMock(),
+            ) as mock_staff,
+            patch(
+                "app.services.order_service.OrderService.transition_order",
+                AsyncMock(return_value=TransitionResult(
+                    success=True, new_state=OrderState.COOKING,
+                    rejected_event=None, reason=None,
+                )),
+            ),
+        ):
+            await svc.confirm_payment(
+                order_id=order_id,
+                provider_id=payment_id,
+                trace_id=trace_id_val,
+            )
+
+        mock_admin.assert_awaited_once_with(order_id, OrderState.PAID)
+        mock_staff.assert_awaited_once_with(order_id, order_state=OrderState.PAID)
+
     async def test_confirm_payment_duplicate(self) -> None:
         order_id = str(uuid4())
         payment_id = str(uuid4())

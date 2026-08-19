@@ -172,15 +172,11 @@ async def test_sbp_path_returns_confirmation_url() -> None:
     assert call_kwargs["payment_method_data"] == {"type": "sbp"}
 
 
-async def test_sberbank_path_sets_correct_payment_method_data() -> None:
-    """sprint_yookassa_manual_integration (2026-08-19): the embedded widget
-    is gone entirely — three sessions of failures traced to it (3DS-in-
-    WebView never loading, the widget ignoring backend payment_method_types,
-    and the documented per-instance customization.payment_methods fix
-    erroring customization_of_payment_methods_not_allowed — an account
-    feature gated behind a YooKassa manager, not fixable here). Manual
-    integration (payment_method_data + confirmation.type=redirect) needs no
-    widget script, no picker, no account feature at all."""
+async def test_sbp_path_return_url_carries_order_id() -> None:
+    """sprint_fix_online_payment_funnel (2026-08-19): return_url must embed
+    order_id so GET /payment/return can redirect the customer to their own
+    /thanks/{order_id} instead of a bare, order-less bounce. Previously
+    /payment/return didn't even exist (live 404)."""
     app, svc = _build_app()
     svc["idem"].check_and_record = AsyncMock(return_value=True)
     svc["customer"].find_or_create_by_phone = AsyncMock(
@@ -204,12 +200,62 @@ async def test_sberbank_path_sets_correct_payment_method_data() -> None:
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/orders", json=_body("yookassa_sberbank"))
+        resp = await client.post("/api/orders", json=_body("yookassa_sbp"))
 
     assert resp.status_code == 200
     call_kwargs = svc["payment"].create_payment.call_args.kwargs
-    assert call_kwargs["confirmation_type"] == "redirect"
-    assert call_kwargs["payment_method_data"] == {"type": "sberbank"}
+    assert call_kwargs["return_url"].endswith(f"?order_id={created.id}")
+
+
+async def test_sbp_path_does_not_notify_staff_before_payment_confirmed() -> None:
+    """sprint_fix_online_payment_funnel (2026-08-19): checkout.py must NOT
+    call notify_admin_order_state/notify_staff_card at payment-link-creation
+    time — the customer hasn't paid yet. Reported live: order card appeared
+    in MAX for a payment that was never completed, while the kitchen board
+    never showed the order (create_kitchen_ticket only runs on
+    START_COOKING, downstream of PaymentService.confirm_payment(), which
+    now owns this notification — see test_payment_service.py)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+    from unittest.mock import patch
+
+    app, svc = _build_app()
+    svc["idem"].check_and_record = AsyncMock(return_value=True)
+    svc["customer"].find_or_create_by_phone = AsyncMock(
+        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
+    )
+    created = OrderRead(
+        id=uuid4(),
+        customer_id=uuid4(),
+        state=OrderState.DRAFT,
+        items=[],
+        delivery_address="Moscow",
+    )
+    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
+    svc["payment"].create_payment = AsyncMock(
+        return_value={
+            "confirmation_url": "https://yookassa.ru/payments/external/confirmation?...",
+            "confirmation_token": "",
+            "payment_id": "pay_1",
+            "trace_id": "tr_1",
+        }
+    )
+
+    with (
+        patch(
+            "app.api.routes.checkout.notify_admin_order_state", _AsyncMock(),
+        ) as mock_admin,
+        patch(
+            "app.api.routes.checkout.notify_staff_card", _AsyncMock(),
+        ) as mock_staff,
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            resp = await client.post("/api/orders", json=_body("yookassa_sbp"))
+
+        assert resp.status_code == 200
+        mock_admin.assert_not_called()
+        mock_staff.assert_not_called()
 
 
 async def test_card_path_yookassa_rejection_returns_502_json_not_plain_500() -> None:

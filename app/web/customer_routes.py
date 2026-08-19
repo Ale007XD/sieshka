@@ -16,7 +16,7 @@ CSPMiddleware (installed in app/main.py).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from app.config import settings
 from app.domains.orders.models import ORDER_STATE_LABELS_RU
@@ -149,6 +149,33 @@ async def shop_closed(
             "evening_end": window["evening_end"],
         },
     )
+
+
+@router.get("/payment/return", response_class=Response)
+async def payment_return(order_id: str | None = None) -> Response:
+    """YooKassa redirects the customer's browser here after a hosted
+    (confirmation.type=redirect) payment attempt — this is
+    settings.YOOKASSA_RETURN_URL, e.g. ".../payment/return?order_id=...".
+    It previously had no route at all (live 404: {"detail":"Not Found"}),
+    stranding the customer with no way back into the app and no visible
+    order status after paying.
+
+    checkout.py appends "?order_id=<uuid>" onto settings.YOOKASSA_RETURN_URL
+    when it calls payment_service.create_payment() for the sbp/sberbank
+    manual-integration flow, so order_id is present on every real return
+    from this sprint onward. If it's ever missing (stale bookmark, manual
+    hit, older in-flight payment created before this fix) — fall back to
+    the storefront root rather than 404 or guessing an order.
+    """
+    if order_id:
+        import uuid
+
+        try:
+            uuid.UUID(order_id)
+        except ValueError:
+            return RedirectResponse(url="/", status_code=302)
+        return RedirectResponse(url=f"/thanks/{order_id}", status_code=302)
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/thanks/{order_id}", response_class=Response)

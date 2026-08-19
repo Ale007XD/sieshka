@@ -18,6 +18,7 @@ from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.services.idempotency import IdempotencyService
+from app.services.max_staff_notify import notify_admin_order_state, notify_staff_card
 from app.trace import trace
 
 logger = logging.getLogger(__name__)
@@ -381,6 +382,8 @@ class PaymentService:
 
         # Auto-advance to COOKING so the kitchen board picks up the order.
         if result.success:
+            await notify_admin_order_state(order_id, OrderState.PAID)
+            await notify_staff_card(order_id, order_state=OrderState.PAID)
             from app.services.order_service import OrderService
             svc = OrderService(session_factory=self._session_factory)
             cooking = await svc.transition_order(order_id, OrderEvent.START_COOKING)
