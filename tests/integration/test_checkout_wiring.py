@@ -194,9 +194,15 @@ async def test_cash_checkout_creates_order_no_token(
     assert row._mapping["total_rub"] == 300
 
 
-async def test_card_checkout_returns_confirmation_token(
+async def test_sbp_checkout_returns_confirmation_url(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
+    """sprint_yookassa_manual_integration (2026-08-19): renamed from
+    test_card_checkout_returns_confirmation_token — "yookassa_card" is no
+    longer a valid payment_method (embedded widget removed entirely, see
+    payment_service.py's DEFAULT_PAYMENT_METHOD_TYPES docstring); the real
+    contract is "yookassa_sbp"/"yookassa_sberbank" -> confirmation_url via
+    manual-integration redirect, not confirmation_token via a widget."""
     pid = await _seed_product(session_factory, 150)
     zid = await _seed_zone(session_factory)
     body = {
@@ -207,7 +213,7 @@ async def test_card_checkout_returns_confirmation_token(
         "delivery_mode": "delivery",
         "delivery_slot": None,
         "delivery_date": None,
-        "payment_method": "yookassa_card",
+        "payment_method": "yookassa_sbp",
         "zone_id": str(zid),  # BUGFIX (2026-07-19): was `1` (int) — zone_id
         # is UUID now, FK-enforced against a real delivery_zones row
         "items": [{"product_id": str(pid), "qty": 2}],
@@ -215,8 +221,8 @@ async def test_card_checkout_returns_confirmation_token(
         "client_max_uid": None,
     }
     fake_payment = {
-        "confirmation_url": "",
-        "confirmation_token": "tok_embedded_123",
+        "confirmation_url": "https://yookassa.ru/payments/external/confirmation?orderId=pay_1",
+        "confirmation_token": "",
         "payment_id": "pay_1",
         "trace_id": "tr_1",
     }
@@ -229,7 +235,8 @@ async def test_card_checkout_returns_confirmation_token(
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
-    assert data["confirmation_token"] == "tok_embedded_123"
+    assert data["confirmation_url"] == fake_payment["confirmation_url"]
+    assert not data.get("confirmation_token")
 
     order_id = uuid.UUID(data["order_id"])
     async with session_factory() as session:

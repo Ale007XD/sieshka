@@ -4,7 +4,7 @@ sprint_m7_static_assets_smoke deliverable #1: a full interactive order flow
 through the REAL nano-vm Program pipeline (not a mock):
 
     GET / (storefront shell) -> GET /api/menu (real 89-product data) ->
-    GET /api/delivery-zones -> POST /api/orders (cash AND yookassa_card) ->
+    GET /api/delivery-zones -> POST /api/orders (cash AND yookassa_sbp) ->
     GET /thanks/{order_id}
 
 Every step is the production wire: app.main.app (real customer_router,
@@ -13,7 +13,7 @@ services overridden onto a throwaway Postgres test DB. The order's FSM state is
 asserted to have advanced via the governed ExecutionVM programs:
 
     cash          -> DRAFT -CONFIRM-> CONFIRMED
-    yookassa_card -> DRAFT -CONFIRM-> CONFIRMED -REQUEST_PAYMENT-> PAYMENT_PENDING
+    yookassa_sbp  -> DRAFT -CONFIRM-> CONFIRMED -REQUEST_PAYMENT-> PAYMENT_PENDING
 
 The YooKassa client is mocked ONLY at PaymentService.create_payment (per
 sprint_m7_checkout_wiring's blocking question) — the nano-vm pipeline that
@@ -174,9 +174,9 @@ def _checkout_body(
     return {
         "name": "Ivan",
         "phone": "+79991234567",
-        "address": "Moscow" if method == "yookassa_card" else None,
+        "address": "Moscow" if method == "yookassa_sbp" else None,
         "comment": None,
-        "delivery_mode": "delivery" if method == "yookassa_card" else "pickup",
+        "delivery_mode": "delivery" if method == "yookassa_sbp" else "pickup",
         "delivery_slot": None,
         "delivery_date": None,
         "payment_method": method,
@@ -258,16 +258,21 @@ class TestStorefrontSmoke:
         assert thanks.status_code == 200
         assert str(order_id) in thanks.text
 
-    async def test_yookassa_card_checkout_end_to_end(
+    async def test_yookassa_sbp_checkout_end_to_end(
         self,
         client: AsyncClient,
         seeded: _Seed,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
-        body = _checkout_body(seeded.prod_id, "yookassa_card", seeded.zone_id)
+        """sprint_yookassa_manual_integration (2026-08-19): renamed from
+        test_yookassa_card_checkout_end_to_end — "yookassa_card" no longer
+        exists as a payment_method (embedded widget removed entirely). The
+        real contract now returns confirmation_url (manual-integration
+        redirect), not confirmation_token."""
+        body = _checkout_body(seeded.prod_id, "yookassa_sbp", seeded.zone_id)
         fake_payment = {
-            "confirmation_url": "",
-            "confirmation_token": "tok_embedded_smoke",
+            "confirmation_url": "https://yookassa.ru/payments/external/confirmation?orderId=pay_smoke",
+            "confirmation_token": "",
             "payment_id": "pay_smoke",
             "trace_id": "tr_smoke",
         }
@@ -280,10 +285,11 @@ class TestStorefrontSmoke:
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        assert data["confirmation_token"] == "tok_embedded_smoke"
+        assert data["confirmation_url"] == fake_payment["confirmation_url"]
+        assert not data.get("confirmation_token")
 
         order_id = uuid.UUID(data["order_id"])
-        # yookassa_card: real FSM advanced DRAFT -> CONFIRMED -> PAYMENT_PENDING
+        # yookassa_sbp: real FSM advanced DRAFT -> CONFIRMED -> PAYMENT_PENDING
         # via the governed nano-vm programs (YooKassa client mocked only).
         assert await _order_state(session_factory, order_id) == "PAYMENT_PENDING"
 
