@@ -22,31 +22,26 @@ from app.trace import trace
 
 logger = logging.getLogger(__name__)
 
-# sprint_yookassa_sbp_sberbank_only (2026-08-19): bank_card removed after
+# sprint_yookassa_manual_integration (2026-08-19): bank_card removed after
 # three sessions failing to get the embedded 3DS challenge working reliably
 # inside Telegram's Mini App WebView (pay.mtsbank.ru ACS iframe never
-# loaded even after CSP frame-src widening + redirect-flow fallback — see
-# DECISIONS.md). Neither SBP nor SberPay go through a card-issuer 3DS ACS
-# iframe (both are QR/deeplink-into-bank-app flows) — SBP already confirmed
-# working live in production (MTS SBP QR payment succeeded during this same
-# incident). Scope cut, not a permanent architectural decision: bank_card
-# can come back once the WebView/3DS root cause is actually nailed down
-# with a captured CSP violation report or server-side header trace — the
-# confirmation_type="redirect" Telegram-WebView branch in this file is left
-# in place (inert while bank_card is unavailable) rather than removed.
+# loaded even after CSP frame-src widening + a redirect-flow fallback — see
+# DECISIONS.md). The embedded widget itself was then also abandoned: its
+# payment-method picker ignores payment_method_types entirely (that field
+# restricts the payment OBJECT server-side, not what the widget displays —
+# confirmed against YooKassa's own docs, "по умолчанию отображаются все
+# способы, доступные магазину"), and the documented fix for that
+# (customization.payment_methods per widget instance) errored
+# customization_of_payment_methods_not_allowed — an account-level feature
+# gated behind a YooKassa account manager, not fixable in this codebase.
 #
-# IMPORTANT — this list does NOT control what the embedded widget shows to
-# the customer. Confirmed against YooKassa's own docs (2026-08-19,
-# additional-settings/separate-payment-methods): "По умолчанию на
-# платёжной форме отображаются все способы оплаты, которые доступны
-# магазину и есть в виджете" — payment_method_types on create_payment only
-# restricts the payment OBJECT server-side; it is a completely separate
-# mechanism from the widget's OWN customization.payment_methods, which is
-# set per widget instance in cart.js (see showYooKassaWidget). Kept here
-# anyway as defense-in-depth at the API layer (rejects the payment outright
-# if somehow initiated with a method outside this list), not as the fix for
-# what the customer sees — that fix lives in cart.js.
-DEFAULT_PAYMENT_METHOD_TYPES: list[str] = ["sbp", "sberbank"]
+# Replaced with manual integration: payment_method_data.type + a plain
+# confirmation.type=redirect. No widget, no iframe, no picker, no account
+# feature gate — YooKassa's own hosted page renders the QR/deeplink for
+# the exact method requested. See YooKassaClient.create_payment's
+# payment_method_data param and checkout.py's payment_method → type
+# mapping.
+DEFAULT_PAYMENT_METHOD_TYPES: tuple[str, ...] = ("sbp", "sberbank")
 
 
 class PaymentInitResult(TypedDict):
@@ -93,7 +88,7 @@ class YooKassaClient:
         metadata: dict[str, str],
         receipt: dict[str, Any] | None = None,
         confirmation_type: str = "embedded",
-        payment_method_types: list[str] | None = None,
+        payment_method_data: dict[str, str] | None = None,
     ) -> dict[str, object]:
         confirmation: dict[str, str] = {"type": confirmation_type}
         if confirmation_type == "redirect":
@@ -107,8 +102,8 @@ class YooKassaClient:
         }
         if receipt is not None:
             payload["receipt"] = receipt
-        if payment_method_types is not None:
-            payload["payment_method_types"] = payment_method_types
+        if payment_method_data is not None:
+            payload["payment_method_data"] = payment_method_data
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.BASE_URL}/payments",
@@ -247,7 +242,7 @@ class PaymentService:
         return_url: str | None = None,
         customer_phone: str | None = None,
         confirmation_type: str = "embedded",
-        payment_method_types: list[str] | None = None,
+        payment_method_data: dict[str, str] | None = None,
     ) -> PaymentInitResult:
         trace_id = trace.record(
             entity_id=order_id,
@@ -265,11 +260,17 @@ class PaymentService:
             if customer_phone
             else None
         )
-        methods = (
-            payment_method_types
-            if payment_method_types is not None
-            else DEFAULT_PAYMENT_METHOD_TYPES
-        )
+        if payment_method_data is not None and payment_method_data.get("type") not in (
+            DEFAULT_PAYMENT_METHOD_TYPES
+        ):
+            # Defense-in-depth: checkout.py is the only caller that sets
+            # this today and only ever sends "sbp"/"sberbank", but a wrong
+            # value here would otherwise silently hit YooKassa's API and
+            # come back as an opaque 400 from deep inside httpx.
+            raise ValueError(
+                f"payment_method_data type must be one of {DEFAULT_PAYMENT_METHOD_TYPES}, "
+                f"got {payment_method_data.get('type')!r}"
+            )
 
         data = await self._yookassa.create_payment(
             amount=amount,
@@ -283,7 +284,7 @@ class PaymentService:
             },
             receipt=receipt,
             confirmation_type=confirmation_type,
-            payment_method_types=methods,
+            payment_method_data=payment_method_data,
         )
 
         raw_data: dict[str, object] = data

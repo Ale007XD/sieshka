@@ -5,8 +5,9 @@ service mocked, so the full request/response + idempotency behaviour runs in
 CI unit tests (integration tests are skipped without Docker).
 
 Covers:
-  - cash path returns {ok, order_id} and NO confirmation_token;
-  - card path returns {ok, order_id, confirmation_token};
+  - cash path returns {ok, order_id} and NO confirmation_url;
+  - sbp/sberbank paths return {ok, order_id, confirmation_url} (manual
+    integration redirect flow — no embedded widget, see payment_service.py);
   - idempotency_key reuse (same key, same request) never creates a second order;
   - missing zone_id for non-pickup -> 400;
   - unsupported payment_method -> 400.
@@ -135,45 +136,7 @@ async def test_cash_path_no_confirmation_token() -> None:
     assert "confirmation_token" not in data or data["confirmation_token"] is None
 
 
-async def test_card_path_returns_confirmation_token() -> None:
-    app, svc = _build_app()
-    svc["idem"].check_and_record = AsyncMock(return_value=True)
-    svc["customer"].find_or_create_by_phone = AsyncMock(
-        return_value=Customer(id=uuid4(), name="Ivan", phone="+79991234567")
-    )
-    created = OrderRead(
-        id=uuid4(),
-        customer_id=uuid4(),
-        state=OrderState.DRAFT,
-        items=[],
-        delivery_address="Moscow",
-    )
-    svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
-    svc["payment"].create_payment = AsyncMock(
-        return_value={
-            "confirmation_url": "",
-            "confirmation_token": "tok_abc123",
-            "payment_id": "pay_1",
-            "trace_id": "tr_1",
-        }
-    )
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/orders", json=_body("yookassa_card"))
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["confirmation_token"] == "tok_abc123"
-
-
-async def test_card_path_from_telegram_webview_requests_redirect_not_embedded() -> None:
-    """sprint_telegram_3ds_webview_redirect: Telegram Mini App WebView blocks
-    third-party cookies in embedded iframes, breaking the bank's 3DS ACS
-    challenge (confirmed root cause, 2026-08-18 — not a CSP or YooKassa/bank
-    issue, SBP unaffected since it has no iframe). A request carrying
-    X-Telegram-Init-Data must get YooKassa's "redirect" confirmation flow
-    (confirmation_url), not "embedded" (confirmation_token)."""
+async def test_sbp_path_returns_confirmation_url() -> None:
     app, svc = _build_app()
     svc["idem"].check_and_record = AsyncMock(return_value=True)
     svc["customer"].find_or_create_by_phone = AsyncMock(
@@ -197,11 +160,7 @@ async def test_card_path_from_telegram_webview_requests_redirect_not_embedded() 
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post(
-            "/api/orders",
-            json=_body("yookassa_card"),
-            headers={"X-Telegram-Init-Data": "unused-in-this-mocked-test"},
-        )
+        resp = await client.post("/api/orders", json=_body("yookassa_sbp"))
 
     assert resp.status_code == 200
     data = resp.json()
@@ -210,11 +169,18 @@ async def test_card_path_from_telegram_webview_requests_redirect_not_embedded() 
     assert not data.get("confirmation_token")
     call_kwargs = svc["payment"].create_payment.call_args.kwargs
     assert call_kwargs["confirmation_type"] == "redirect"
+    assert call_kwargs["payment_method_data"] == {"type": "sbp"}
 
 
-async def test_card_path_plain_browser_still_uses_embedded() -> None:
-    """No X-Telegram-Init-Data header -> confirmation_type stays 'embedded'
-    (default), i.e. this fix does not change desktop/plain-browser behaviour."""
+async def test_sberbank_path_sets_correct_payment_method_data() -> None:
+    """sprint_yookassa_manual_integration (2026-08-19): the embedded widget
+    is gone entirely — three sessions of failures traced to it (3DS-in-
+    WebView never loading, the widget ignoring backend payment_method_types,
+    and the documented per-instance customization.payment_methods fix
+    erroring customization_of_payment_methods_not_allowed — an account
+    feature gated behind a YooKassa manager, not fixable here). Manual
+    integration (payment_method_data + confirmation.type=redirect) needs no
+    widget script, no picker, no account feature at all."""
     app, svc = _build_app()
     svc["idem"].check_and_record = AsyncMock(return_value=True)
     svc["customer"].find_or_create_by_phone = AsyncMock(
@@ -230,19 +196,20 @@ async def test_card_path_plain_browser_still_uses_embedded() -> None:
     svc["order"].create_order_from_checkout = AsyncMock(return_value=created)
     svc["payment"].create_payment = AsyncMock(
         return_value={
-            "confirmation_url": "",
-            "confirmation_token": "tok_abc123",
+            "confirmation_url": "https://yookassa.ru/payments/external/confirmation?...",
+            "confirmation_token": "",
             "payment_id": "pay_1",
             "trace_id": "tr_1",
         }
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+        resp = await client.post("/api/orders", json=_body("yookassa_sberbank"))
 
     assert resp.status_code == 200
     call_kwargs = svc["payment"].create_payment.call_args.kwargs
-    assert call_kwargs["confirmation_type"] == "embedded"
+    assert call_kwargs["confirmation_type"] == "redirect"
+    assert call_kwargs["payment_method_data"] == {"type": "sberbank"}
 
 
 async def test_card_path_yookassa_rejection_returns_502_json_not_plain_500() -> None:
@@ -281,7 +248,7 @@ async def test_card_path_yookassa_rejection_returns_502_json_not_plain_500() -> 
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+        resp = await client.post("/api/orders", json=_body("yookassa_sbp"))
 
     assert resp.status_code == 502
     data = resp.json()  # must not raise — this is the whole point of the fix
@@ -309,7 +276,7 @@ async def test_card_path_yookassa_network_error_returns_502_json() -> None:
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/orders", json=_body("yookassa_card"))
+        resp = await client.post("/api/orders", json=_body("yookassa_sbp"))
 
     assert resp.status_code == 502
     data = resp.json()

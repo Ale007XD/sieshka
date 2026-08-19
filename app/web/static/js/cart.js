@@ -1625,17 +1625,14 @@ const errorDiv = document.getElementById('checkout-error');
       if (response.ok && data.ok) {
         localStorage.setItem('cart', '[]');
 
-        if (data.confirmation_token) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = originalText;
-          showYooKassaWidget(data.confirmation_token, data.order_id);
-        } else if (data.confirmation_url) {
-          // sprint_telegram_3ds_webview_redirect: server chose YooKassa's
-          // "redirect" flow (Telegram WebView request) instead of
-          // "embedded" — the 3DS challenge must NOT be rendered as an
-          // iframe on this page (Telegram's WebView blocks the
-          // third-party cookies the bank ACS challenge needs). Open the
-          // system browser via the Telegram Bridge instead; return_url
+        if (data.confirmation_url) {
+          // sprint_yookassa_manual_integration (2026-08-19): every online
+          // payment now goes through YooKassa's manual-integration
+          // redirect flow (payment_method_data + confirmation.type=
+          // redirect) — no embedded widget, no iframe, ever. Inside
+          // Telegram's Mini App WebView, open the system browser via the
+          // Telegram Bridge (avoids the WebView's own third-party-cookie
+          // restrictions on top of not needing them here); return_url
           // brings the customer back to /thanks/{order_id} on success.
           submitBtn.disabled = false;
           submitBtn.innerHTML = originalText;
@@ -1677,116 +1674,6 @@ function showError(message) {
   }
 }
 
-function showYooKassaWidget(confirmationToken, orderId) {
-  function _renderWidget() {
-    let container = document.getElementById('yookassa-widget');
-    const overlayStyle = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'yookassa-widget';
-      document.body.appendChild(container);
-    }
-    // checkout.html provides this container pre-hidden (static markup) —
-    // un-hide it and (re)apply the overlay styling regardless of whether it
-    // was just created above or already existed.
-    container.hidden = false;
-    container.style.cssText = overlayStyle;
-
-    let inner = document.getElementById('payment-form');
-    if (!inner) {
-      inner = document.createElement('div');
-      inner.id = 'payment-form';
-      inner.style.cssText = 'background:#fff;border-radius:12px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow:auto;';
-      container.appendChild(inner);
-    }
-    inner.innerHTML = '';
-
-    // sprint_yookassa_sbp_sberbank_only (2026-08-19): confirmed against
-    // YooKassa's own docs (additional-settings/separate-payment-methods) —
-    // the backend's payment_method_types (create_payment) does NOT filter
-    // what the widget displays; that's a completely separate mechanism.
-    // "По умолчанию на платёжной форме отображаются все способы оплаты,
-    // которые доступны магазину и есть в виджете." Filtering the widget's
-    // own picker requires customization.payment_methods PER INSTANCE, and
-    // a single instance can't combine sbp+sberbank (only bank_card+mir_pay
-    // is an allowed combination — anything else throws
-    // invalid_combination_of_payment_methods). Two widget instances
-    // sharing the same confirmation_token is the documented supported
-    // pattern for showing more than one unrelated method on one page.
-    const rails = [
-      { method: 'sbp', label: 'СБП' },
-      { method: 'sberbank', label: 'SberPay' },
-    ];
-    const widgets = [];
-    let settled = false;
-
-    function finishOnce(redirect) {
-      if (settled) return;
-      settled = true;
-      widgets.forEach((w) => {
-        try { w.destroy(); } catch (e) { /* already torn down by the widget itself */ }
-      });
-      document.getElementById('yookassa-widget')?.remove();
-      if (redirect) window.location.href = `/thanks/${orderId}`;
-    }
-
-    function dropRail(section) {
-      section.remove();
-      if (!inner.querySelector('[data-yk-rail]')) {
-        CartManager.showToast('Не удалось загрузить способы оплаты. Попробуйте позже.', 'error');
-        finishOnce(false);
-      }
-    }
-
-    rails.forEach(({ method, label }) => {
-      const section = document.createElement('div');
-      section.dataset.ykRail = method;
-      section.style.cssText = 'margin-bottom:16px;';
-      const heading = document.createElement('div');
-      heading.className = 'small fw-semibold text-muted mb-2';
-      heading.textContent = label;
-      const mount = document.createElement('div');
-      mount.id = `payment-form-${method}`;
-      section.appendChild(heading);
-      section.appendChild(mount);
-      inner.appendChild(section);
-
-      const checkout = new window.YooMoneyCheckoutWidget({
-        confirmation_token: confirmationToken,
-        return_url: `${window.location.origin}/thanks/${orderId}`,
-        customization: { payment_methods: [method] },
-        error_callback(error) {
-          console.error(`YooKassa widget error (${method}):`, error);
-          dropRail(section);
-        }
-      });
-      widgets.push(checkout);
-
-      checkout.render(mount.id).then(() => {
-        checkout.on('success', () => finishOnce(true));
-        checkout.on('fail', () => {
-          CartManager.showToast(`Оплата через ${label} не прошла. Попробуйте другой способ.`, 'error');
-        });
-      }).catch((error) => {
-        // e.g. no_payment_methods_to_display for a two-stage (capture:false)
-        // payment — not our case (capture is always true), but fail closed
-        // per-rail rather than breaking the whole overlay either way.
-        console.error(`YooKassa widget render failed (${method}):`, error);
-        dropRail(section);
-      });
-    });
-  }
-
-  if (window.YooMoneyCheckoutWidget) {
-    _renderWidget();
-  } else {
-    const script = document.createElement('script');
-    script.src = 'https://yookassa.ru/checkout-widget/v1/checkout-widget.js';
-    script.onload = _renderWidget;
-    script.onerror = () => CartManager.showToast('Не удалось загрузить платёжный виджет.', 'error');
-    document.head.appendChild(script);
-  }
-}
 
 document.addEventListener('DOMContentLoaded', function () {
   CartManager.init();

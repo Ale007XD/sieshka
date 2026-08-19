@@ -116,15 +116,19 @@ class TestPaymentService:
         # No customer_phone passed → no receipt attached (legacy/back-compat
         # call sites keep working exactly as before this patch).
         assert yookassa_mock.create_payment.call_args.kwargs["receipt"] is None
-        # sprint_yookassa_sbp_sberbank_only: bank_card removed — see
-        # DEFAULT_PAYMENT_METHOD_TYPES docstring in payment_service.py for
-        # why (3DS-in-WebView root cause not resolved after 3 sessions).
-        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_types"] == [
-            "sbp",
-            "sberbank",
-        ]
+        # sprint_yookassa_manual_integration: no payment_method_data passed
+        # by the caller here -> passed through as None to YooKassaClient
+        # (the embedded/no-restriction confirmation.type="embedded" default
+        # path — still used by the legacy /orders/{id}/pay endpoint, not by
+        # checkout.py's cart.js contract anymore).
+        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_data"] is None
 
-    async def test_create_payment_override_payment_method_types(self) -> None:
+    async def test_create_payment_forwards_payment_method_data(self) -> None:
+        """sprint_yookassa_manual_integration (2026-08-19): checkout.py sets
+        payment_method_data={"type": "sbp"|"sberbank"} explicitly — this is
+        what actually reaches YooKassa's manual-integration API (unlike the
+        old payment_method_types field, which never controlled what the
+        now-removed embedded widget displayed to begin with)."""
         order_id = str(uuid4())
         amount = decimal.Decimal("500.00")
         session = AsyncMock()
@@ -141,7 +145,7 @@ class TestPaymentService:
             return_value={
                 "id": str(uuid4()),
                 "status": "pending",
-                "confirmation": {"confirmation_token": "tok"},
+                "confirmation": {"confirmation_url": "https://yookassa.ru/redirect"},
             }
         )
         svc = PaymentService(
@@ -157,12 +161,35 @@ class TestPaymentService:
             await svc.create_payment(
                 order_id=order_id,
                 amount=amount,
-                payment_method_types=["sbp"],
+                confirmation_type="redirect",
+                payment_method_data={"type": "sbp"},
             )
 
-        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_types"] == [
-            "sbp"
-        ]
+        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_data"] == {
+            "type": "sbp"
+        }
+
+    async def test_create_payment_rejects_unknown_payment_method_data_type(self) -> None:
+        """Defense-in-depth: a typo/unexpected method type here would
+        otherwise surface as an opaque YooKassa 400 deep inside httpx."""
+        order_id = str(uuid4())
+        amount = decimal.Decimal("500.00")
+        session = AsyncMock()
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with (
+            patch("app.services.payment_service.trace.record", return_value="trace-id"),
+            pytest.raises(ValueError, match="payment_method_data type must be one of"),
+        ):
+            await svc.create_payment(
+                order_id=order_id,
+                amount=amount,
+                confirmation_type="redirect",
+                payment_method_data={"type": "bank_card"},
+            )
 
     async def test_create_payment_attaches_receipt_when_phone_given(self) -> None:
         """sprint_yookassa_receipt_54fz: live YooKassa shops with an

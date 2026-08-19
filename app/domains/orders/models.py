@@ -168,7 +168,7 @@ class CheckoutRequest(BaseModel):
     delivery_mode: str  # "delivery" | "pickup" (others folded into delivery)
     delivery_slot: str | None = None
     delivery_date: str | None = None
-    payment_method: str  # "yookassa_card" | "cash"
+    payment_method: str  # "yookassa_sbp" | "yookassa_sberbank" | "cash"
     zone_id: UUID | None = None
     # BUGFIX (2026-07-19): was `int | None`. delivery_zones.id is UUID
     # (migrations/006_delivery_zones.sql) — int only ever "worked" because

@@ -445,7 +445,7 @@ class TestFetchOrderDetails:
                 "items": [],
                 "delivery_address": None,
                 "comment": None,
-                "payment_method": "yookassa_card",
+                "payment_method": "yookassa_sbp",
                 "order_state": "COOKING",
                 "customer_phone": None,
             }
@@ -454,6 +454,29 @@ class TestFetchOrderDetails:
 
         details = await _fetch_order_details("order-1")
 
+        assert "СБП" in details
+        assert "оплачено" in details
+
+    async def test_yookassa_sberbank_paid_state_shows_paid(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """sprint_yookassa_manual_integration (2026-08-19): payment_method
+        values changed from "yookassa_card" to "yookassa_sbp"/
+        "yookassa_sberbank" — both must still map to the paid/pending
+        display, just with the correct method label."""
+        row = _FakeRow(
+            {
+                "items": [],
+                "delivery_address": None,
+                "comment": None,
+                "payment_method": "yookassa_sberbank",
+                "order_state": "COOKING",
+                "customer_phone": None,
+            }
+        )
+        self._patch_factory(monkeypatch, row)
+
+        details = await _fetch_order_details("order-1")
+
+        assert "SberPay" in details
         assert "оплачено" in details
 
     async def test_yookassa_payment_pending_state_shows_pending(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -462,7 +485,7 @@ class TestFetchOrderDetails:
                 "items": [],
                 "delivery_address": None,
                 "comment": None,
-                "payment_method": "yookassa_card",
+                "payment_method": "yookassa_sbp",
                 "order_state": "PAYMENT_PENDING",
                 "customer_phone": None,
             }

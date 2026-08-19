@@ -7,9 +7,27 @@ POST /api/orders is the REAL cart.js contract (cart.js posts here, not
   2. snapshots item price/name once via menu_service,
   3. computes the server-authoritative total (never trusts a client total),
   4. persists the order with typed OrderItem rows,
-  5. for "yookassa_card": creates an embedded-widget YooKassa payment and
-     returns {ok, order_id, confirmation_token};
+  5. for "yookassa_sbp"/"yookassa_sberbank": creates a YooKassa payment via
+     manual integration (payment_method_data + confirmation.type=redirect)
+     and returns {ok, order_id, confirmation_url};
      for "cash": confirms the order immediately and returns {ok, order_id}.
+
+sprint_yookassa_manual_integration (2026-08-19): the embedded JS widget
+(confirmation.type=embedded + YooMoneyCheckoutWidget) is no longer used at
+all. Three sessions of failures traced to it: (1) bank_card's 3DS challenge
+never loaded reliably inside Telegram's Mini App WebView even after CSP
+frame-src widening and a redirect-flow fallback; (2) the widget's own
+payment-method picker ignores the backend's payment_method_types entirely
+(confirmed against YooKassa's docs — that field restricts the payment
+OBJECT server-side, not what the widget displays, which defaults to
+"every method enabled on the shop account"); (3) the documented fix for
+that — per-instance customization.payment_methods — errored
+customization_of_payment_methods_not_allowed, an account-level feature
+that needs enabling by a YooKassa account manager, not something fixable
+in this codebase. Manual integration (payment_method_data.type + a plain
+redirect to confirmation_url) sidesteps all three: no iframe, no picker,
+no account feature gate — YooKassa's own hosted page handles the specific
+method's QR/deeplink flow directly.
 
 Idempotency is wired into the EXISTING IdempotencyService using the
 client-generated idempotency_key — no second mechanism is introduced.
@@ -129,7 +147,7 @@ async def checkout(
     idempotency: IdempotencyService = Depends(get_idempotency_service),
     zone_service: ZoneService = Depends(get_zone_service),
 ) -> CheckoutResponse:
-    if body.payment_method not in ("yookassa_card", "cash"):
+    if body.payment_method not in ("yookassa_sbp", "yookassa_sberbank", "cash"):
         raise HTTPException(
             status_code=400,
             detail=f"unsupported payment_method: {body.payment_method!r}",
@@ -228,7 +246,7 @@ async def checkout(
         discount_rub=promo_effect.discount_rub if promo_effect else 0,
     )
 
-    if body.payment_method == "yookassa_card":
+    if body.payment_method in ("yookassa_sbp", "yookassa_sberbank"):
         # BUGFIX (2026-07-19): this branch created the order and requested a
         # YooKassa payment, but never advanced the order's own FSM state —
         # it stayed DRAFT forever, even on a fully successful payment
@@ -250,28 +268,10 @@ async def checkout(
                 currency="RUB",
                 description=f"Order {order.id}",
                 customer_phone=customer.phone,
-                # sprint_telegram_3ds_webview_redirect (2026-08-18): the
-                # embedded widget renders the issuing bank's 3-D Secure
-                # challenge as an iframe on THIS page. Telegram's Mini App
-                # WebView blocks third-party cookies inside embedded
-                # iframes (same restriction VK/Instagram in-app browsers
-                # apply), which breaks the ACS challenge session — observed
-                # as "page unavailable" for pay.mtsbank.ru's challenge
-                # frame even after widening CSP frame-src to any https
-                # origin (ruled CSP out as the cause). SBP (redirect/deep-
-                # link based, no iframe) is unaffected — confirms the
-                # failure is iframe-specific, not YooKassa/bank-side.
-                # Fix: when the request came from inside Telegram's WebView
-                # (X-Telegram-Init-Data present), request YooKassa's
-                # "redirect" confirmation flow instead of "embedded" — the
-                # ACS challenge then loads as the top-level document via
-                # Telegram.WebApp.openLink() (system browser, no WebView
-                # cookie restriction), not as a nested iframe on this page.
-                # MAX/Zalo/plain-browser checkout are untouched (embedded
-                # remains default) — MAX's WebView has not been confirmed
-                # to have the same restriction, and plain-browser embedded
-                # 3DS has no reported failures.
-                confirmation_type="redirect" if telegram_web_app_data else "embedded",
+                confirmation_type="redirect",
+                payment_method_data={
+                    "type": "sbp" if body.payment_method == "yookassa_sbp" else "sberbank",
+                },
             )
         except httpx.HTTPStatusError as exc:
             # YooKassa rejected the request (4xx/5xx) — .response.text is

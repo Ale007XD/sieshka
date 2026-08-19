@@ -85,7 +85,6 @@ def test_contract_ids_explicitly_present() -> None:
         "checkout-form",
         "checkout-submit",
         "checkout-error",
-        "yookassa-widget",
         "f-zone",
         "f-name",
         "f-phone",

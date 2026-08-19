@@ -249,7 +249,10 @@ async def _fetch_order_details(order_id: str) -> str:
 
     payment_method = row._mapping.get("payment_method")
     order_state_raw = row._mapping.get("order_state")
-    if payment_method == "yookassa_card":
+    # sprint_yookassa_manual_integration (2026-08-19): payment_method values
+    # changed from "yookassa_card" to "yookassa_sbp"/"yookassa_sberbank" —
+    # both are still non-cash YooKassa payments, same paid/pending display.
+    if payment_method in ("yookassa_sbp", "yookassa_sberbank"):
         try:
             paid = (
                 OrderState(order_state_raw) in _PAID_OR_LATER_STATES
@@ -258,7 +261,8 @@ async def _fetch_order_details(order_id: str) -> str:
             )
         except ValueError:
             paid = False
-        lines.append(f"💳 ЮKassa — {'оплачено' if paid else 'ожидает оплаты'}")
+        method_label = "СБП" if payment_method == "yookassa_sbp" else "SberPay"
+        lines.append(f"💳 {method_label} — {'оплачено' if paid else 'ожидает оплаты'}")
     elif payment_method == "cash":
         lines.append("💵 Наличные — при получении")
 
