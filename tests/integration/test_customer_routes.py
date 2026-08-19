@@ -27,15 +27,21 @@ from app.web.customer_routes import (
 from app.web.customer_routes import (
     router as customer_router,
 )
+from app.web.template_globals import register_template_globals
 
 
-def _templates_dir() -> str:
-    return str(Path(__file__).resolve().parents[2] / "app" / "web" / "templates")
+def _templates_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "app" / "web" / "templates"
+
+
+def _static_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "app" / "web" / "static"
 
 
 def _make_app() -> FastAPI:
     app = FastAPI()
-    app.state.templates = Jinja2Templates(directory=_templates_dir())
+    app.state.templates = Jinja2Templates(directory=str(_templates_dir()))
+    register_template_globals(app.state.templates, _static_dir())
     app.include_router(customer_router)
 
     fake_window: dict[str, Any] = {

@@ -116,12 +116,12 @@ class TestPaymentService:
         # No customer_phone passed → no receipt attached (legacy/back-compat
         # call sites keep working exactly as before this patch).
         assert yookassa_mock.create_payment.call_args.kwargs["receipt"] is None
-        # sprint_yookassa_payment_method_types: default matches SieshKa-Site
-        # (working prod sibling) — restricts the widget to exactly these two
-        # rails instead of every method enabled on the shop account.
+        # sprint_yookassa_sbp_sberbank_only: bank_card removed — see
+        # DEFAULT_PAYMENT_METHOD_TYPES docstring in payment_service.py for
+        # why (3DS-in-WebView root cause not resolved after 3 sessions).
         assert yookassa_mock.create_payment.call_args.kwargs["payment_method_types"] == [
-            "bank_card",
             "sbp",
+            "sberbank",
         ]
 
     async def test_create_payment_override_payment_method_types(self) -> None:

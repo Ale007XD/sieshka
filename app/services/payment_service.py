@@ -22,10 +22,19 @@ from app.trace import trace
 
 logger = logging.getLogger(__name__)
 
-# SieshKa-Site (working prod sibling repo) restricts the widget to exactly
-# these two rails instead of leaving payment_method_types unset (which
-# exposes every method enabled on the shop account, untested here).
-DEFAULT_PAYMENT_METHOD_TYPES: list[str] = ["bank_card", "sbp"]
+# sprint_yookassa_sbp_sberbank_only (2026-08-19): bank_card removed after
+# three sessions failing to get the embedded 3DS challenge working reliably
+# inside Telegram's Mini App WebView (pay.mtsbank.ru ACS iframe never
+# loaded even after CSP frame-src widening + redirect-flow fallback — see
+# DECISIONS.md). Neither SBP nor SberPay go through a card-issuer 3DS ACS
+# iframe (both are QR/deeplink-into-bank-app flows) — SBP already confirmed
+# working live in production (MTS SBP QR payment succeeded during this same
+# incident). Scope cut, not a permanent architectural decision: bank_card
+# can come back once the WebView/3DS root cause is actually nailed down
+# with a captured CSP violation report or server-side header trace — the
+# confirmation_type="redirect" Telegram-WebView branch in this file is left
+# in place (inert while bank_card is unavailable) rather than removed.
+DEFAULT_PAYMENT_METHOD_TYPES: list[str] = ["sbp", "sberbank"]
 
 
 class PaymentInitResult(TypedDict):

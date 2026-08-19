@@ -31,6 +31,7 @@ from app.web.csp import CSPMiddleware
 from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
 from app.web.telegram_routes import router as telegram_page_router
+from app.web.template_globals import register_template_globals
 from app.webhooks.max import router as max_router
 from app.webhooks.telegram import router as telegram_webhook_router
 from app.webhooks.yookassa import router as yookassa_router
@@ -57,6 +58,13 @@ app = FastAPI(
 templates_dir = Path(__file__).resolve().parent / "web" / "templates"
 app.state.templates = Jinja2Templates(directory=str(templates_dir))
 
+static_dir = Path(__file__).resolve().parent / "web" / "static"
+
+# sprint_static_cache_busting (2026-08-18): see app/web/template_globals.py
+# for the full incident writeup (Telegram WebView serving a stale cached
+# cart.js after a deploy — a shipped fix never actually ran client-side).
+register_template_globals(app.state.templates, static_dir)
+
 app.include_router(orders_router)
 app.include_router(checkout_router)
 app.include_router(checkout_module.promo_router)
@@ -74,7 +82,6 @@ app.include_router(telegram_miniapp_router)
 app.include_router(zalo_events_router)
 app.include_router(telegram_webhook_router)
 
-static_dir = Path(__file__).resolve().parent / "web" / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
 
 
