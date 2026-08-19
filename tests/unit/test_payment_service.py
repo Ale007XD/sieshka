@@ -116,6 +116,53 @@ class TestPaymentService:
         # No customer_phone passed → no receipt attached (legacy/back-compat
         # call sites keep working exactly as before this patch).
         assert yookassa_mock.create_payment.call_args.kwargs["receipt"] is None
+        # sprint_yookassa_payment_method_types: default matches SieshKa-Site
+        # (working prod sibling) — restricts the widget to exactly these two
+        # rails instead of every method enabled on the shop account.
+        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_types"] == [
+            "bank_card",
+            "sbp",
+        ]
+
+    async def test_create_payment_override_payment_method_types(self) -> None:
+        order_id = str(uuid4())
+        amount = decimal.Decimal("500.00")
+        session = AsyncMock()
+        mock_insert_result = MagicMock()
+        mock_insert_result.one.return_value = MagicMock(_mapping={"id": uuid4()})
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.CONFIRMED.value
+        session.execute = AsyncMock(
+            side_effect=[mock_insert_result, mock_tool_select, MagicMock()]
+        )
+
+        yookassa_mock = MagicMock(spec=YooKassaClient)
+        yookassa_mock.create_payment = AsyncMock(
+            return_value={
+                "id": str(uuid4()),
+                "status": "pending",
+                "confirmation": {"confirmation_token": "tok"},
+            }
+        )
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=yookassa_mock,
+        )
+
+        with (
+            patch("app.services.payment_service.trace.record", return_value="trace-id"),
+            patch.object(PaymentRepository, "create", AsyncMock(return_value=str(uuid4()))),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.CONFIRMED),
+        ):
+            await svc.create_payment(
+                order_id=order_id,
+                amount=amount,
+                payment_method_types=["sbp"],
+            )
+
+        assert yookassa_mock.create_payment.call_args.kwargs["payment_method_types"] == [
+            "sbp"
+        ]
 
     async def test_create_payment_attaches_receipt_when_phone_given(self) -> None:
         """sprint_yookassa_receipt_54fz: live YooKassa shops with an

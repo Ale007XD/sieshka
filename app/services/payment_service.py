@@ -22,6 +22,11 @@ from app.trace import trace
 
 logger = logging.getLogger(__name__)
 
+# SieshKa-Site (working prod sibling repo) restricts the widget to exactly
+# these two rails instead of leaving payment_method_types unset (which
+# exposes every method enabled on the shop account, untested here).
+DEFAULT_PAYMENT_METHOD_TYPES: list[str] = ["bank_card", "sbp"]
+
 
 class PaymentInitResult(TypedDict):
     """Typed result of PaymentService.create_payment (YooKassa payload).
@@ -63,6 +68,7 @@ class YooKassaClient:
         metadata: dict[str, str],
         receipt: dict[str, Any] | None = None,
         confirmation_type: str = "embedded",
+        payment_method_types: list[str] | None = None,
     ) -> dict[str, object]:
         confirmation: dict[str, str] = {"type": confirmation_type}
         if confirmation_type == "redirect":
@@ -76,6 +82,8 @@ class YooKassaClient:
         }
         if receipt is not None:
             payload["receipt"] = receipt
+        if payment_method_types is not None:
+            payload["payment_method_types"] = payment_method_types
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self.BASE_URL}/payments",
@@ -214,6 +222,7 @@ class PaymentService:
         return_url: str | None = None,
         customer_phone: str | None = None,
         confirmation_type: str = "embedded",
+        payment_method_types: list[str] | None = None,
     ) -> PaymentInitResult:
         trace_id = trace.record(
             entity_id=order_id,
@@ -231,6 +240,11 @@ class PaymentService:
             if customer_phone
             else None
         )
+        methods = (
+            payment_method_types
+            if payment_method_types is not None
+            else DEFAULT_PAYMENT_METHOD_TYPES
+        )
 
         data = await self._yookassa.create_payment(
             amount=amount,
@@ -244,6 +258,7 @@ class PaymentService:
             },
             receipt=receipt,
             confirmation_type=confirmation_type,
+            payment_method_types=methods,
         )
 
         raw_data: dict[str, object] = data
