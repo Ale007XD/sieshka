@@ -620,8 +620,7 @@ function renderProductControls(product, isAvailable, ctaType) {
     
     return `
         <button class="btn btn-brand btn-add-to-cart btn-sm w-100" 
-                id="add-btn-${productId}"
-                onclick="addToCartWithQty(${JSON.stringify(productId)}, ${JSON.stringify(priceRub)}, ${JSON.stringify(name)}, ${Number(product.lead_time_minutes || 0)})">
+                id="add-btn-${productId}">
             ${CTA_LABELS[ctaType] || 'Добавить'}
         </button>
         <div class="product-controls d-none justify-content-center align-items-center gap-2" 
