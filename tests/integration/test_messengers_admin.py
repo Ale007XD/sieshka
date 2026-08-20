@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.routes.admin import get_staff_service
 from app.api.routes.admin import router as admin_router
+from app.domains.staff.models import StaffRole
 from app.services.staff_service import StaffService
 from app.web.auth import get_current_username
 
@@ -164,6 +165,53 @@ class TestStaffApply:
             assert row is not None
             assert row._mapping["name"] == "Повар Иван"
             assert row._mapping["role"] == "kitchen"
+
+    async def test_create_two_telegram_accounts_same_role(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """Two staff rows, same role, same channel (Telegram), different
+        telegram_user_id — must both succeed. role has no UNIQUE constraint
+        (migrations/017_staff.sql); only max_user_id/telegram_user_id/
+        zalo_user_id are independently unique per-column. Regression guard:
+        the only existing dup-rejection tests (test_create_duplicate_
+        max_user_id_rejected, ..._zalo_user_id_rejected) exercise the SAME-id
+        conflict path — none previously asserted the SAME-role, DIFFERENT-id
+        path actually succeeds instead of silently being blocked by some
+        other constraint (e.g. a stray composite unique index)."""
+        resp1 = await client.post(
+            "/admin/staff/apply",
+            json={"name": "Повар Иван", "role": "kitchen", "telegram_user_id": 501},
+            auth=("admin", DASHBOARD_PASSWORD),
+        )
+        assert resp1.status_code == 200, resp1.text
+        data1 = resp1.json()
+        assert data1["ok"] is True, data1
+
+        resp2 = await client.post(
+            "/admin/staff/apply",
+            json={"name": "Повар Пётр", "role": "kitchen", "telegram_user_id": 502},
+            auth=("admin", DASHBOARD_PASSWORD),
+        )
+        assert resp2.status_code == 200, resp2.text
+        data2 = resp2.json()
+        assert data2["ok"] is True, data2
+
+        # Both rows present in the same list_all() snapshot the admin UI
+        # renders from — not just two independent 200 OKs.
+        kitchen_telegram_ids = {
+            s["telegram_user_id"]
+            for s in data2["staff"]
+            if s["role"] == "kitchen" and s["telegram_user_id"] is not None
+        }
+        assert {501, 502} <= kitchen_telegram_ids
+
+        # The actual consumer of this data (StaffService.list_active_by_role,
+        # called from app.services.max_staff_notify's broadcast loop) sees
+        # both — this is the assertion that matters for "notification goes
+        # to N accounts on one role", not just "the row exists".
+        service = StaffService(session_factory=session_factory)
+        recipients = await service.list_active_by_role(StaffRole.kitchen)
+        assert {r.telegram_user_id for r in recipients} == {501, 502}
 
     async def test_create_missing_name_rejected(self, client: AsyncClient) -> None:
         resp = await client.post(
