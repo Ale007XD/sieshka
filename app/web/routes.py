@@ -26,10 +26,10 @@ router = APIRouter(prefix="/admin/ui")
 
 _COLUMN_GROUPING: list[tuple[str, set[OrderState]]] = [
     ("Новые", {OrderState.DRAFT}),
-    ("Подтверждены", {OrderState.CONFIRMED, OrderState.PAYMENT_PENDING, OrderState.PAID}),
+    ("В очереди", {OrderState.CONFIRMED, OrderState.PAYMENT_PENDING, OrderState.PAID}),
     ("Готовятся", {OrderState.COOKING}),
-    ("Готовы", {OrderState.PACKING, OrderState.COURIER_ASSIGNED, OrderState.DELIVERING}),
-    ("Выданы", {OrderState.DELIVERED, OrderState.CLOSED}),
+    ("Готово", {OrderState.PACKING, OrderState.COURIER_ASSIGNED, OrderState.DELIVERING}),
+    ("Выдано", {OrderState.DELIVERED, OrderState.CLOSED}),
     ("Отменены", {OrderState.CANCELLED}),
 ]
 
@@ -88,9 +88,30 @@ def get_trace_analyzer() -> TraceAnalyzer:
 
 
 @router.get("/", response_class=Response)
-async def dashboard_home(request: Request) -> Response:
+async def dashboard_home(
+    request: Request,
+    order_service: OrderService = Depends(get_order_service),
+    kitchen_service: KitchenService = Depends(get_kitchen_service),
+) -> Response:
+    orders = await order_service.list_orders()
+    tickets = await kitchen_service.list_tickets()
+    order_columns = _group_orders(orders)
+    kitchen_columns = _group_kitchen_tickets(tickets)
+
+    active_orders = sum(
+        len(v) for k, v in order_columns.items() if k not in ("Выдано", "Отменены")
+    )
+
     templates = request.app.state.templates
-    return templates.TemplateResponse(request, "dashboard_home.html")  # type: ignore[no-any-return]
+    return templates.TemplateResponse(  # type: ignore[no-any-return]
+        request,
+        "dashboard_home.html",
+        {
+            "order_columns": order_columns,
+            "kitchen_columns": kitchen_columns,
+            "active_orders": active_orders,
+        },
+    )
 
 
 @router.get("/orders", response_class=Response)

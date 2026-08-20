@@ -125,7 +125,7 @@ class TestOrdersBoard:
     async def test_partial_contains_all_columns(self, client: AsyncClient) -> None:
         resp = await client.get("/admin/ui/orders/partial")
         html = resp.text
-        for col in ("Новые", "Подтверждены", "Готовятся", "Готовы", "Выданы", "Отменены"):
+        for col in ("Новые", "В очереди", "Готовятся", "Готово", "Выдано", "Отменены"):
             assert col in html
 
     async def test_partial_shows_created_order(self, client: AsyncClient) -> None:
@@ -166,6 +166,6 @@ class TestOrdersBoard:
         html = html_resp.text
 
         assert "Новые" in html
-        assert "Подтверждены" in html
+        assert "В очереди" in html
         assert draft_id[:7] in html
         assert confirmed_id[:7] in html

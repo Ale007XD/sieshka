@@ -9,9 +9,20 @@ from fastapi.templating import Jinja2Templates
 from httpx import ASGITransport, AsyncClient
 
 from app.web.auth import get_current_username
+from app.web.routes import get_kitchen_service, get_order_service
 from app.web.routes import router as web_router
 
 pytestmark: list[object] = []
+
+
+class _FakeOrderService:
+    async def list_orders(self, state_filter: object = None) -> list[object]:
+        return []
+
+
+class _FakeKitchenService:
+    async def list_tickets(self) -> list[object]:
+        return []
 
 
 def _templates_dir() -> str:
@@ -23,6 +34,12 @@ def app() -> FastAPI:
     _app = FastAPI()
     _app.state.templates = Jinja2Templates(directory=_templates_dir())
     _app.include_router(web_router, dependencies=[Depends(get_current_username)])
+    # dashboard_home() (GET /admin/ui/) now queries order/kitchen services
+    # for the stage-count widgets — override with no-DB fakes, same as
+    # test_dashboard_shell.py, so this auth-focused test file doesn't need
+    # a real Postgres connection.
+    _app.dependency_overrides[get_order_service] = lambda: _FakeOrderService()
+    _app.dependency_overrides[get_kitchen_service] = lambda: _FakeKitchenService()
     return _app
 
 

@@ -1,7 +1,40 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="bg-white rounded-lg shadow p-6">
-  <h1 class="text-2xl font-semibold text-gray-900">Dashboard</h1>
-  <p class="mt-2 text-gray-600">Welcome to the Sieshka admin dashboard.</p>
+<div class="space-y-6">
+  <div class="bg-white rounded-lg shadow p-6">
+    <h1 class="text-2xl font-semibold text-gray-900">Dashboard</h1>
+    <p class="mt-2 text-gray-600">
+      {% if active_orders > 0 %}
+        Сейчас в работе: <strong>{{ active_orders }}</strong>
+        {{ "заказ" if active_orders == 1 else "заказов" }}.
+      {% else %}
+        Активных заказов нет.
+      {% endif %}
+    </p>
+  </div>
+
+  <div>
+    <h2 class="text-sm font-medium text-gray-500 mb-2">Заказы</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      {% for name, col_orders in order_columns.items() %}
+      <a href="/admin/ui/orders" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow">
+        <div class="text-2xl font-bold text-gray-900">{{ col_orders|length }}</div>
+        <div class="text-xs text-gray-500 mt-1">{{ name }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <h2 class="text-sm font-medium text-gray-500 mb-2">Кухня</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      {% for name, col_tickets in kitchen_columns.items() %}
+      <a href="/admin/ui/kitchen" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow">
+        <div class="text-2xl font-bold text-gray-900">{{ col_tickets|length }}</div>
+        <div class="text-xs text-gray-500 mt-1">{{ name }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
 </div>
 {% endblock %}
