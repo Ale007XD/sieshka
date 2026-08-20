@@ -394,3 +394,83 @@ class PaymentService:
                 )
 
         return result
+
+    async def fail_payment(
+        self,
+        order_id: str,
+        provider_id: str,
+        trace_id: str,
+    ) -> TransitionResult:
+        """Mirror of confirm_payment for YooKassa's payment.canceled event.
+
+        Without this, an order that reaches PAYMENT_PENDING and whose
+        payment is then explicitly canceled on YooKassa's hosted page (or
+        expires) has no path out of PAYMENT_PENDING — the webhook handler
+        previously ignored every event_type except "payment.succeeded".
+        ORDER_TRANSITIONS already defines PAYMENT_PENDING + PAYMENT_FAILED
+        -> CONFIRMED (retry path); this was reachable in the state graph
+        but had zero callers before this method existed.
+
+        No staff notification here — the kitchen never saw this order
+        (it never reached PAID), so there is nothing to un-notify.
+        """
+        idem_key = f"{trace_id}:payment_failure"
+        inserted = await self._idempotency.check_and_record(
+            idem_key,
+            {"provider_id": provider_id, "order_id": order_id},
+        )
+        if not inserted:
+            logger.info(
+                "PaymentService: duplicate cancel webhook trace_id=%s — skipping", trace_id
+            )
+            return TransitionResult(
+                success=False,
+                new_state=None,
+                rejected_event=None,
+                reason="Duplicate webhook event",
+            )
+
+        async with self._session_factory() as session:
+            repo = PaymentRepository(session)
+
+            try:
+                payment = await repo.get_by_provider_id(provider_id)
+            except Exception:
+                logger.warning(
+                    "PaymentService: payment %s not found — skipping", provider_id
+                )
+                return TransitionResult(
+                    success=False,
+                    new_state=None,
+                    rejected_event=None,
+                    reason="Payment not found",
+                )
+            payment_id = str(payment["id"])
+            payment_state = str(payment["state"])
+            if payment_state in ("SUCCESS", "FAILED"):
+                logger.info(
+                    "PaymentService: payment %s already terminal (%s) — skipping",
+                    provider_id, payment_state,
+                )
+                return TransitionResult(
+                    success=False,
+                    new_state=None,
+                    rejected_event=None,
+                    reason=f"Payment already {payment_state}",
+                )
+
+            await repo.write_state(payment_id, "FAILED")
+
+            current_state = await OrderRepository(session).get_state(order_id)
+            result = await self._run_simple_transition(
+                session, order_id, OrderEvent.PAYMENT_FAILED, current_state,
+            )
+            await session.commit()
+
+        if not result.success:
+            logger.warning(
+                "PaymentService: order %s transition on PAYMENT_FAILED failed: %s",
+                order_id, result.reason,
+            )
+
+        return result

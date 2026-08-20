@@ -2,7 +2,13 @@
 {% block title %}Спасибо за заказ — Sieshka{% endblock %}
 {% block content %}
 <section class="thanks-page">
-  <h1>Спасибо за заказ!</h1>
+  {% if order and order.state.value == "PAYMENT_PENDING" %}
+    <h1>Ожидаем оплату</h1>
+  {% elif order and order.state.value == "CANCELLED" %}
+    <h1>Заказ не оформлен</h1>
+  {% else %}
+    <h1>Спасибо за заказ!</h1>
+  {% endif %}
   {% if order %}
     <p>Номер заказа: <strong>{{ order.id }}</strong></p>
     <p>Статус: {{ state_label or order.state.value }}</p>
@@ -34,7 +40,13 @@
       <p><strong>Итого: {{ order.total_rub }} ₽</strong></p>
     {% endif %}
 
-    <p class="muted">Мы свяжемся с вами для подтверждения.</p>
+    {% if order.state.value == "PAYMENT_PENDING" %}
+      <p class="muted">Платёж ещё не подтверждён. Если вы уже оплатили — обновите страницу через минуту.</p>
+    {% elif order.state.value == "CANCELLED" %}
+      <p class="muted">Оплата была отменена. Вы можете оформить заказ заново.</p>
+    {% else %}
+      <p class="muted">Мы свяжемся с вами для подтверждения.</p>
+    {% endif %}
   {% else %}
     <p class="muted">Заказ не найден.</p>
   {% endif %}

@@ -312,3 +312,61 @@ class TestYooKassaWebhook:
             state = result.scalar_one()
             # After webhook: PAYMENT_CONFIRMED → PAID → START_COOKING → COOKING
             assert state in (OrderState.PAID.value, OrderState.COOKING.value)
+
+    async def test_canceled_webhook_returns_order_to_confirmed(
+        self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Regression for the gap found 2026-08-20: payment.canceled was
+        never handled at all — order stayed at PAYMENT_PENDING forever
+        after a customer explicitly canceled on YooKassa's hosted page.
+        PAYMENT_PENDING + PAYMENT_FAILED -> CONFIRMED (ORDER_TRANSITIONS)
+        lets the customer retry checkout with the same order."""
+        payment_id = str(uuid.uuid4())
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(
+                text(
+                    "INSERT INTO payments "
+                "(order_id, provider, provider_id, amount, currency, state) "
+                    "VALUES (:order_id, 'yookassa', :provider_id, 1500.00, 'RUB', 'PENDING')"
+                ),
+                {"order_id": uuid.UUID(order_id), "provider_id": payment_id},
+            )
+            await session.commit()
+
+        payload = {
+            "id": str(uuid.uuid4()),
+            "event": "payment.canceled",
+            "object": {
+                "id": payment_id,
+                "metadata": {
+                    "trace_id": trace_event.trace_id,
+                    "order_id": order_id,
+                },
+            },
+        }
+
+        resp = await client.post("/webhooks/yookassa", json=payload)
+        assert resp.status_code == 200
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            order_state = (
+                await session.execute(
+                    text("SELECT state FROM orders WHERE id = :id"),
+                    {"id": uuid.UUID(order_id)},
+                )
+            ).scalar_one()
+            assert order_state == OrderState.CONFIRMED.value
+
+            payment_state = (
+                await session.execute(
+                    text("SELECT state FROM payments WHERE provider_id = :pid"),
+                    {"pid": payment_id},
+                )
+            ).scalar_one()
+            assert payment_state == "FAILED"

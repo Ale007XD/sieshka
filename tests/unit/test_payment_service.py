@@ -450,6 +450,162 @@ class TestPaymentService:
         assert result.success is False
         assert result.reason == "Payment already confirmed"
 
+    async def test_fail_payment_success(self) -> None:
+        """payment.canceled path: PAYMENT_PENDING -> CONFIRMED via
+        OrderEvent.PAYMENT_FAILED (ORDER_TRANSITIONS), payment row -> FAILED.
+        Regression for the webhook gap found 2026-08-20 (order stuck at
+        PAYMENT_PENDING forever — only payment.succeeded was handled)."""
+        order_id = str(uuid4())
+        payment_id = str(uuid4())
+        trace_id_val = str(uuid4())
+
+        session = AsyncMock()
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.PAYMENT_PENDING.value
+        session.execute.return_value = mock_tool_select
+
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with (
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
+            patch.object(
+                PaymentRepository,
+                "get_by_provider_id",
+                return_value={
+                    "id": str(uuid4()),
+                    "order_id": order_id,
+                    "state": "PENDING",
+                    "amount": decimal.Decimal("1500.00"),
+                    "currency": "RUB",
+                },
+            ) ,
+            patch.object(PaymentRepository, "write_state", AsyncMock()) as mock_write,
+            patch.object(OrderRepository, "get_state", return_value=OrderState.PAYMENT_PENDING),
+        ):
+            result = await svc.fail_payment(
+                order_id=order_id,
+                provider_id=payment_id,
+                trace_id=trace_id_val,
+            )
+
+        assert isinstance(result, TransitionResult)
+        assert result.success is True
+        assert result.new_state == OrderState.CONFIRMED
+        mock_write.assert_awaited_once()
+        assert mock_write.await_args.args[1] == "FAILED"
+
+    async def test_fail_payment_does_not_notify_staff(self) -> None:
+        """The kitchen never saw this order (never reached PAID) — a
+        canceled payment must not trigger notify_admin_order_state or
+        notify_staff_card."""
+        order_id = str(uuid4())
+        payment_id = str(uuid4())
+        trace_id_val = str(uuid4())
+
+        session = AsyncMock()
+        mock_tool_select = MagicMock()
+        mock_tool_select.scalar_one_or_none.return_value = OrderState.PAYMENT_PENDING.value
+        session.execute.return_value = mock_tool_select
+
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with (
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
+            patch.object(
+                PaymentRepository,
+                "get_by_provider_id",
+                return_value={
+                    "id": str(uuid4()),
+                    "order_id": order_id,
+                    "state": "PENDING",
+                    "amount": decimal.Decimal("1500.00"),
+                    "currency": "RUB",
+                },
+            ),
+            patch.object(PaymentRepository, "write_state", AsyncMock()),
+            patch.object(OrderRepository, "get_state", return_value=OrderState.PAYMENT_PENDING),
+            patch(
+                "app.services.payment_service.notify_admin_order_state", AsyncMock(),
+            ) as mock_admin,
+            patch(
+                "app.services.payment_service.notify_staff_card", AsyncMock(),
+            ) as mock_staff,
+        ):
+            await svc.fail_payment(
+                order_id=order_id,
+                provider_id=payment_id,
+                trace_id=trace_id_val,
+            )
+
+        mock_admin.assert_not_awaited()
+        mock_staff.assert_not_awaited()
+
+    async def test_fail_payment_duplicate(self) -> None:
+        order_id = str(uuid4())
+        payment_id = str(uuid4())
+        trace_id_val = str(uuid4())
+
+        session = AsyncMock()
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with patch.object(IdempotencyService, "check_and_record", return_value=False):
+            result = await svc.fail_payment(
+                order_id=order_id,
+                provider_id=payment_id,
+                trace_id=trace_id_val,
+            )
+
+        assert isinstance(result, TransitionResult)
+        assert result.success is False
+        assert result.reason == "Duplicate webhook event"
+
+    async def test_fail_payment_already_terminal(self) -> None:
+        """A payment already SUCCESS or FAILED must not be re-processed —
+        e.g. a late/duplicate payment.canceled arriving after
+        payment.succeeded already flipped the payment to SUCCESS."""
+        order_id = str(uuid4())
+        payment_id = str(uuid4())
+        trace_id_val = str(uuid4())
+
+        session = AsyncMock()
+        svc = PaymentService(
+            session_factory=lambda: _session_factory(session),  # type: ignore[arg-type]
+            yookassa=MagicMock(spec=YooKassaClient),
+        )
+
+        with (
+            patch.object(IdempotencyService, "check_and_record", return_value=True),
+            patch.object(
+                PaymentRepository,
+                "get_by_provider_id",
+                return_value={
+                    "id": str(uuid4()),
+                    "order_id": order_id,
+                    "state": "SUCCESS",
+                    "amount": decimal.Decimal("1500.00"),
+                    "currency": "RUB",
+                },
+            ),
+        ):
+            result = await svc.fail_payment(
+                order_id=order_id,
+                provider_id=payment_id,
+                trace_id=trace_id_val,
+            )
+
+        assert isinstance(result, TransitionResult)
+        assert result.success is False
+        assert result.reason == "Payment already SUCCESS"
+
     async def test_create_payment_yookassa_api_error(self) -> None:
         order_id = str(uuid4())
         amount = decimal.Decimal("500.00")

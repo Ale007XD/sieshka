@@ -59,7 +59,7 @@ async def yookassa_webhook(
         event_type, event_id, trace_id,
     )
 
-    if event_type != "payment.succeeded":
+    if event_type not in ("payment.succeeded", "payment.canceled"):
         return JSONResponse({"ok": True})
 
     if not trace_id or not payment_id:
@@ -72,21 +72,32 @@ async def yookassa_webhook(
         return JSONResponse({"ok": True})
 
     logger.info(
-        "YooKassa webhook: resuming program=%s trace_id=%s entity=%s",
+        "YooKassa webhook: resuming program=%s event=%s trace_id=%s entity=%s",
         program_name,
+        event_type,
         trace_id,
         event.entity_id,
     )
 
-    result = await payment_service.confirm_payment(
-        order_id=event.entity_id,
-        provider_id=str(payment_id),
-        trace_id=str(trace_id),
-    )
+    if event_type == "payment.succeeded":
+        result = await payment_service.confirm_payment(
+            order_id=event.entity_id,
+            provider_id=str(payment_id),
+            trace_id=str(trace_id),
+        )
+        skip_log_prefix = "confirm_payment"
+    else:
+        result = await payment_service.fail_payment(
+            order_id=event.entity_id,
+            provider_id=str(payment_id),
+            trace_id=str(trace_id),
+        )
+        skip_log_prefix = "fail_payment"
 
     if not result.success:
         logger.info(
-            "YooKassa webhook: confirm_payment skipped (%s) — 200 returned",
+            "YooKassa webhook: %s skipped (%s) — 200 returned",
+            skip_log_prefix,
             result.reason,
         )
 

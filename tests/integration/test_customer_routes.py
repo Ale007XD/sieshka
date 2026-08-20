@@ -78,6 +78,24 @@ async def _get(path: str) -> Any:
         return await client.get(path)
 
 
+async def _get_with_order(path: str, order: Any) -> Any:
+    """Like _get, but the order-service dependency returns the given order
+    instead of None — for thanks.html state-dependent copy tests."""
+    app = _make_app()
+    app.dependency_overrides[get_order_service] = lambda: _FakeOrderService(order)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.get(path)
+
+
+class _FakeOrderService:
+    def __init__(self, order: Any) -> None:
+        self._order = order
+
+    async def get_order(self, order_id: str) -> Any:
+        return self._order
+
+
 class TestCustomerRoutes:
     async def test_index_200(self) -> None:
         resp = await _get("/")
@@ -112,6 +130,71 @@ class TestCustomerRoutes:
 
     async def test_thanks_400_bad_uuid_still_renders(self) -> None:
         resp = await _get("/thanks/not-a-uuid")
+        assert resp.status_code == 200
+
+    async def test_thanks_payment_pending_does_not_say_thank_you(self) -> None:
+        """Regression (2026-08-20): thanks.html previously rendered
+        '<h1>Спасибо за заказ!</h1>' unconditionally, even for an order
+        still stuck at PAYMENT_PENDING — misleadingly implying the order
+        was accepted while the status line two lines below said 'Ожидает
+        оплаты'. Header must reflect the actual order state."""
+        from uuid import uuid4
+
+        from app.domains.orders.models import OrderItem, OrderRead, OrderState
+
+        order = OrderRead(
+            id=uuid4(),
+            customer_id=uuid4(),
+            state=OrderState.PAYMENT_PENDING,
+            items=[OrderItem(product_id=uuid4(), name="Бургер Фирменный", price_rub=1, qty=1)],
+            delivery_address="",
+            delivery_mode="pickup",
+            total_rub=1,
+            discount_rub=None,
+        )
+        resp = await _get_with_order(f"/thanks/{order.id}", order)
+        assert resp.status_code == 200
+        assert "Спасибо за заказ!" not in resp.text
+        assert "Ожидаем оплату" in resp.text
+
+    async def test_thanks_cancelled_does_not_say_thank_you(self) -> None:
+        from uuid import uuid4
+
+        from app.domains.orders.models import OrderItem, OrderRead, OrderState
+
+        order = OrderRead(
+            id=uuid4(),
+            customer_id=uuid4(),
+            state=OrderState.CANCELLED,
+            items=[OrderItem(product_id=uuid4(), name="Бургер Фирменный", price_rub=1, qty=1)],
+            delivery_address="",
+            delivery_mode="pickup",
+            total_rub=1,
+            discount_rub=None,
+        )
+        resp = await _get_with_order(f"/thanks/{order.id}", order)
+        assert resp.status_code == 200
+        assert "Спасибо за заказ!" not in resp.text
+        assert "Заказ не оформлен" in resp.text
+
+    async def test_thanks_paid_still_says_thank_you(self) -> None:
+        from uuid import uuid4
+
+        from app.domains.orders.models import OrderItem, OrderRead, OrderState
+
+        order = OrderRead(
+            id=uuid4(),
+            customer_id=uuid4(),
+            state=OrderState.PAID,
+            items=[OrderItem(product_id=uuid4(), name="Бургер Фирменный", price_rub=1, qty=1)],
+            delivery_address="",
+            delivery_mode="pickup",
+            total_rub=1,
+            discount_rub=None,
+        )
+        resp = await _get_with_order(f"/thanks/{order.id}", order)
+        assert resp.status_code == 200
+        assert "Спасибо за заказ!" in resp.text
         assert resp.status_code == 200
         assert "Спасибо" in resp.text
 
