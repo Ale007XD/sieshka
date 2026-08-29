@@ -334,6 +334,22 @@ function renderMenu(data) {
         }
     });
 
+    // Reorder category sections to match data.categories (already ORDER BY
+    // sort from menu_service.py). appendChild() on a node already attached
+    // to the DOM MOVES it, it does not duplicate it — cheap way to fix
+    // position without rebuilding. Without this pass, a category appearing
+    // for the first time under a newly selected method (e.g. a pickup-only
+    // category not present in the prior delivery load) always lands after
+    // every pre-existing section regardless of its `sort` value, since the
+    // create-path above does menuContainer.appendChild(categorySection)
+    // unconditionally (found live 2026-08-29: sort=0 category rendered last).
+    data.categories.forEach(category => {
+        const section = document.getElementById(`category-${category.category_id}`);
+        if (section) {
+            menuContainer.appendChild(section);
+        }
+    });
+
     // Обновляем upsell suggestions
     updateUpsellSuggestions(data);
 }
@@ -384,6 +400,22 @@ function populateCategoryButtons(categories) {
         const catId = btn.dataset.categoryId;
         if (catId === 'all') return;
         btn.style.display = menuIds.has(String(catId)) ? '' : 'none';
+    });
+
+    // Reorder buttons to match `categories` (already ORDER BY sort from
+    // menu_service.py) — same append-move technique as renderMenu. Without
+    // this, a button created for a category appearing for the first time
+    // on this method always lands after every pre-existing button instead
+    // of at its `sort` position (2026-08-29 live report). "Все меню" stays
+    // pinned first.
+    if (allBtn) {
+        container.appendChild(allBtn);
+    }
+    categories.forEach(cat => {
+        const btn = container.querySelector(`.category-btn[data-category-id="${cat.category_id}"]`);
+        if (btn) {
+            container.appendChild(btn);
+        }
     });
 }
 
