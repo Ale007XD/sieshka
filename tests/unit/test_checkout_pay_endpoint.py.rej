@@ -1,0 +1,75 @@
+--- tests/unit/test_checkout_pay_endpoint.py
++++ tests/unit/test_checkout_pay_endpoint.py
+@@ -93,3 +93,72 @@ async def test_pay_409_when_not_confirmed() -> None:
+         )
+ 
+     assert resp.status_code == 409
++
++
++# sprint_pay_endpoint_curation_fix (2026-08-27): regression coverage for the
++# confirmation_type=embedded / unrestricted payment_method_data gap this
++# legacy endpoint had — see app/api/routes/orders.py module docstring.
++
++
++async def test_pay_defaults_to_curated_sbp_redirect() -> None:
++    """No payment_method in the request body -> defaults to sbp, forced redirect."""
++    order = _make_order(OrderState.CONFIRMED)
++    payment_result = {
++        "confirmation_url": "https://yookassa.ru/confirm/abc",
++        "payment_id": "pay_123",
++        "trace_id": "trace_xyz",
++    }
++    app = _build_app(order, payment_result)
++    payment_svc = app.dependency_overrides[get_payment_service]()
++
++    async with AsyncClient(
++        transport=ASGITransport(app=app), base_url="http://test"
++    ) as client:
++        resp = await client.post(
++            f"/orders/{order.id}/pay", json={"amount": "199.00"}
++        )
++
++    assert resp.status_code == 200
++    _, kwargs = payment_svc.create_payment.call_args
++    assert kwargs["confirmation_type"] == "redirect"
++    assert kwargs["payment_method_data"] == {"type": "sbp"}
++
++
++async def test_pay_yookassa_sberbank_maps_to_sberbank_type() -> None:
++    order = _make_order(OrderState.CONFIRMED)
++    payment_result = {
++        "confirmation_url": "https://yookassa.ru/confirm/abc",
++        "payment_id": "pay_123",
++        "trace_id": "trace_xyz",
++    }
++    app = _build_app(order, payment_result)
++    payment_svc = app.dependency_overrides[get_payment_service]()
++
++    async with AsyncClient(
++        transport=ASGITransport(app=app), base_url="http://test"
++    ) as client:
++        resp = await client.post(
++            f"/orders/{order.id}/pay",
++            json={"amount": "199.00", "payment_method": "yookassa_sberbank"},
++        )
++
++    assert resp.status_code == 200
++    _, kwargs = payment_svc.create_payment.call_args
++    assert kwargs["confirmation_type"] == "redirect"
++    assert kwargs["payment_method_data"] == {"type": "sberbank"}
++
++
++async def test_pay_rejects_unknown_payment_method() -> None:
++    """bank_card (or anything else) must be rejected, not silently forwarded."""
++    order = _make_order(OrderState.CONFIRMED)
++    app = _build_app(order, {})
++
++    async with AsyncClient(
++        transport=ASGITransport(app=app), base_url="http://test"
++    ) as client:
++        resp = await client.post(
++            f"/orders/{order.id}/pay",
++            json={"amount": "199.00", "payment_method": "bank_card"},
++        )
++
++    assert resp.status_code == 400

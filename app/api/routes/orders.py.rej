@@ -1,0 +1,55 @@
+--- app/api/routes/orders.py
++++ app/api/routes/orders.py
+@@ -14,10 +14,29 @@ from app.services.payment_service import PaymentService
+ router = APIRouter(prefix="/orders", tags=["orders"])
+ 
+ 
++# sprint_pay_endpoint_curation_fix (2026-08-27): this endpoint used to call
++# PaymentService.create_payment() with neither confirmation_type nor
++# payment_method_data set, which meant it silently fell back to
++# YooKassaClient's own confirmation_type="embedded" default with no method
++# restriction — the exact combination (embedded widget + unrestricted
++# picker) that sprint_yookassa_manual_integration (2026-08-19) removed from
++# checkout.py specifically because it renders bank_card and reintroduces the
++# MTS Bank ACS 3DS failure inside Mini App WebViews. This endpoint has no
++# known live caller (0 references in app/web/static/js or templates), but it
++# is mounted with no auth (app/main.py::app.include_router(orders_router)) so
++# it is reachable by anyone who knows an order_id. payment_method is now
++# required and restricted to the same curated set checkout.py uses, and the
++# call is forced onto confirmation_type="redirect" — mirrors checkout.py's
++# payment_method → payment_method_data.type mapping instead of duplicating
++# YooKassaClient's raw default.
++_ALLOWED_PAY_METHODS = ("yookassa_sbp", "yookassa_sberbank")
++
++
+ class PaymentRequest(BaseModel):
+     amount: Decimal
+     currency: str = "RUB"
+     return_url: str | None = None
++    payment_method: str = "yookassa_sbp"
+ 
+ 
+ class PaymentInitResponse(BaseModel):
+@@ -67,12 +86,22 @@ async def pay_order(
+             status_code=409,
+             detail=f"Order must be CONFIRMED to pay; current state: {order.state.value}",
+         )
++    if body.payment_method not in _ALLOWED_PAY_METHODS:
++        raise HTTPException(
++            status_code=400,
++            detail=f"payment_method must be one of {_ALLOWED_PAY_METHODS}, "
++            f"got {body.payment_method!r}",
++        )
+     result = await payment.create_payment(
+         order_id=str(order_id),
+         amount=body.amount,
+         currency=body.currency,
+         return_url=body.return_url,
+         customer_phone=order.customer_phone,
++        confirmation_type="redirect",
++        payment_method_data={
++            "type": "sbp" if body.payment_method == "yookassa_sbp" else "sberbank",
++        },
+     )
+     return PaymentInitResponse(
+         confirmation_url=result["confirmation_url"],
