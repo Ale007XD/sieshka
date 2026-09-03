@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.domains.kitchen.fsm import KitchenState
 from app.services.kitchen_service import KitchenService
 from app.web.routes import router as web_router
+from app.web.template_globals import register_template_globals
 
 # Override conftest's pytestmark — this file has tests that don't need Docker
 pytestmark: list[object] = []
@@ -85,7 +86,15 @@ async def client(
 ) -> AsyncGenerator[AsyncClient, None]:
     app = FastAPI()
     templates_dir = Path(__file__).resolve().parents[2] / "app" / "web" / "templates"
+    static_dir = Path(__file__).resolve().parents[2] / "app" / "web" / "static"
     app.state.templates = Jinja2Templates(directory=str(templates_dir))
+    # sprint_board_created_at_and_trace_link (2026-08-31) regression, fixed
+    # 2026-09-03: see identical comment in tests/integration/test_orders_board.py
+    # — this fixture builds its own Jinja2Templates instance and needs the
+    # same register_template_globals() call app/main.py makes, or any
+    # filter/global registered there (local_dt, asset_version) is invisible
+    # here. Root cause of CI run #249.
+    register_template_globals(app.state.templates, static_dir)
 
     app.include_router(web_router)
 

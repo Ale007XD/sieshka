@@ -22,6 +22,7 @@ from app.api.routes.admin import router as admin_router
 from app.api.routes.orders import router as orders_router
 from app.services.order_service import OrderService, fetch_orders
 from app.web.routes import router as web_router
+from app.web.template_globals import register_template_globals
 
 # Override conftest's pytestmark — this file has tests that don't need Docker
 pytestmark: list[object] = []
@@ -94,7 +95,16 @@ async def client(
 ) -> AsyncGenerator[AsyncClient, None]:
     app = FastAPI()
     templates_dir = Path(__file__).resolve().parents[2] / "app" / "web" / "templates"
+    static_dir = Path(__file__).resolve().parents[2] / "app" / "web" / "static"
     app.state.templates = Jinja2Templates(directory=str(templates_dir))
+    # sprint_board_created_at_and_trace_link (2026-08-31) regression, fixed
+    # 2026-09-03: this fixture builds its own standalone Jinja2Templates
+    # instance instead of importing app.main's app.state.templates, so any
+    # filter/global registered via register_template_globals() (local_dt,
+    # asset_version) is invisible to it unless called here too. Root cause
+    # of CI run #249/#250 — templates rendering fine in a real running app
+    # (register_template_globals IS called in app/main.py) but failing here.
+    register_template_globals(app.state.templates, static_dir)
 
     app.include_router(orders_router)
     app.include_router(admin_router)
