@@ -27,8 +27,9 @@
       <div class="bg-white rounded-lg shadow p-4 border border-gray-100">
         <!-- Header -->
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-mono text-gray-400">{{ ticket.id|string|truncate(8, True, '') }}</span>
+          <span class="text-xs font-mono text-gray-400" title="тикет {{ ticket.id }}{% if order %} / заказ {{ order.id }}{% endif %}">{{ ticket.id|string|truncate(8, True, '') }}</span>
           {% if order %}
+          <span class="text-xs text-gray-400">{{ order.created_at|local_dt }}</span>
           <span class="text-xs px-2 py-0.5 rounded-full {% if order.delivery_mode == 'pickup' %}bg-blue-100 text-blue-700{% else %}bg-orange-100 text-orange-700{% endif %}">
             {% if order.delivery_mode == 'pickup' %}Самовывоз{% elif order.delivery_mode == 'delivery' %}Доставка{% else %}—{% endif %}
           </span>
@@ -62,6 +63,8 @@
           💬 {{ order.comment }}
         </div>
         {% endif %}
+        <a href="/admin/ui/orders/{{ order.id }}/receipt"
+           class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mb-2 inline-block">Трейс →</a>
         {% endif %}
         <!-- Action button -->
         <div class="mt-2">

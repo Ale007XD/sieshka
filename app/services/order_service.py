@@ -111,7 +111,8 @@ class OrderService:
                 text(
                     "INSERT INTO orders (customer_id, items, delivery_address, state) "
                     "VALUES (:customer_id, :items, :delivery_address, :state) "
-                    "RETURNING id, customer_id, state, items, delivery_address, trace_id"
+                    "RETURNING id, customer_id, state, items, delivery_address, trace_id, "
+                    "created_at"
                 ),
                 {
                     "customer_id": data.customer_id,
@@ -132,6 +133,7 @@ class OrderService:
                 ),
                 delivery_address=row._mapping["delivery_address"],
                 trace_id=row._mapping.get("trace_id"),
+                created_at=row._mapping.get("created_at"),
             )
 
     async def create_order_from_checkout(
@@ -169,7 +171,8 @@ class OrderService:
                     " :delivery_mode, :zone_id, :comment, :client_max_uid, "
                     " :client_zalo_uid, :client_telegram_uid, :total_rub, "
                     " :payment_method, :promo_code, :discount_rub) "
-                    "RETURNING id, customer_id, state, items, delivery_address, trace_id"
+                    "RETURNING id, customer_id, state, items, delivery_address, trace_id, "
+                    "created_at"
                 ),
                 {
                     "customer_id": customer_id,
@@ -205,6 +208,7 @@ class OrderService:
                 comment=data.comment,
                 total_rub=total_rub,
                 discount_rub=discount_rub,
+                created_at=row._mapping.get("created_at"),
             )
 
     async def transition_order(
@@ -370,7 +374,7 @@ class OrderService:
                 text(
                     "SELECT o.id, o.customer_id, o.state, o.items, o.delivery_address, "
                     "o.trace_id, o.total_rub, o.discount_rub, o.delivery_mode, "
-                    "o.payment_method, o.comment, "
+                    "o.payment_method, o.comment, o.created_at, "
                     "c.name AS customer_name, c.phone AS customer_phone "
                     "FROM orders o LEFT JOIN customers c ON c.id = o.customer_id "
                     "WHERE o.id = :id"
@@ -397,6 +401,7 @@ class OrderService:
                 comment=row._mapping.get("comment"),
                 customer_name=row._mapping.get("customer_name"),
                 customer_phone=row._mapping.get("customer_phone"),
+                created_at=row._mapping.get("created_at"),
             )
 
     async def list_orders(
@@ -481,7 +486,7 @@ async def fetch_orders(
     async with session_factory() as session:
         base_sql = (
             "SELECT o.id, o.customer_id, o.state, o.items, o.delivery_address, "
-            "o.delivery_mode, o.payment_method, o.comment, o.trace_id, "
+            "o.delivery_mode, o.payment_method, o.comment, o.trace_id, o.created_at, "
             "c.name AS customer_name, c.phone AS customer_phone "
             "FROM orders o "
             "LEFT JOIN customers c ON c.id = o.customer_id "
@@ -513,6 +518,7 @@ async def fetch_orders(
                 customer_name=row._mapping.get("customer_name"),
                 customer_phone=row._mapping.get("customer_phone"),
                 trace_id=row._mapping.get("trace_id"),
+                created_at=row._mapping.get("created_at"),
             )
             for row in rows
         ]

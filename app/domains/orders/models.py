@@ -4,6 +4,7 @@ Order domain — state enum, event enum, Pydantic models.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
@@ -106,6 +107,13 @@ class OrderRead(BaseModel):
     # (migration 018) — never recomputed from live promotions.discount at
     # read time, same non-goal as total_rub above: an edited/deactivated
     # promotion must not change what an already-placed order shows it saved.
+    created_at: datetime | None = None  # orders.created_at (migration 001) —
+    # column existed in DB since day one, never surfaced on OrderRead until
+    # gap-analysis-review-session (2026-08-31): admin kitchen/orders boards
+    # showed no placement time at all. asyncpg returns this tz-aware (UTC);
+    # display code must convert via MENU_TIMEZONE (template_globals.local_dt),
+    # never show raw UTC to staff — same invariant as the CURRENT_DATE ban
+    # for effective_date comparisons (CONSTRAINTS.md, 2026-07-20).
 
 
 # Customer-facing status labels for thanks.html / order-confirmation surfaces.

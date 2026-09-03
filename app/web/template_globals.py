@@ -13,9 +13,31 @@ avoids that drift recurring the next time a global is added.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
+
+from app.config import settings
+
+
+def local_dt(value: datetime | None, fmt: str = "%d.%m %H:%M") -> str:
+    """Render a tz-aware (or naive-UTC) datetime in MENU_TIMEZONE.
+
+    gap-analysis-review-session (2026-08-31): admin kitchen/orders boards had
+    no placement time at all. asyncpg returns TIMESTAMPTZ columns as
+    tz-aware UTC datetimes — showing that raw would silently be wrong by the
+    same ~7h VPS(UTC)-vs-business(Asia/Ho_Chi_Minh) gap already fixed once
+    for effective_date comparisons (CONSTRAINTS.md, 2026-07-20). Naive
+    datetimes (e.g. from a test fixture that didn't set tzinfo) are assumed
+    UTC rather than raising, matching asyncpg's actual behavior.
+    """
+    if value is None:
+        return "—"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(ZoneInfo(settings.MENU_TIMEZONE)).strftime(fmt)
 
 
 def asset_version(static_dir: Path, rel_path: str) -> int:
@@ -43,3 +65,4 @@ def register_template_globals(templates: Jinja2Templates, static_dir: Path) -> N
     templates.env.globals["asset_version"] = lambda rel_path: asset_version(
         static_dir, rel_path
     )
+    templates.env.filters["local_dt"] = local_dt
