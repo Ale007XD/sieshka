@@ -28,9 +28,7 @@ CREATE TABLE IF NOT EXISTS schedule_windows (
 CREATE INDEX IF NOT EXISTS idx_schedule_windows_active ON schedule_windows(is_active);
 
 INSERT INTO schedule_windows (period, start_time, end_time, is_active)
-VALUES ('morning', '00:00:00', '16:00:00', TRUE)
-ON CONFLICT (period) DO NOTHING;
+VALUES ('morning', '00:00:00', '16:00:00', TRUE);
 
 INSERT INTO schedule_windows (period, start_time, end_time, is_active)
-VALUES ('evening', '16:00:00', '23:59:59', TRUE)
-ON CONFLICT (period) DO NOTHING;
+VALUES ('evening', '16:00:00', '23:59:59', TRUE);

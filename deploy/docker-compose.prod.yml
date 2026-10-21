@@ -48,7 +48,7 @@ services:
     # would expose the app directly to the internet on 8001, bypassing nginx
     # (and its TLS termination) entirely.
     ports:
-      - "127.0.0.1:8001:8000"
+      - "172.17.0.1:8001:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
     # Cap resources so a runaway LLM call can't eat the whole VPS.
