@@ -5,6 +5,7 @@ via FastAPI dependency overrides, exercising the customer-facing outbound paymen
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -21,13 +22,14 @@ from app.api.routes.orders import (
 from app.domains.orders.models import OrderRead, OrderState
 
 
-def _make_order(state: OrderState) -> OrderRead:
+def _make_order(state: OrderState, total_rub: int | None = 199) -> OrderRead:
     return OrderRead(
         id=uuid4(),
         customer_id=uuid4(),
         state=state,
         items=[],
         delivery_address="Moscow, Red Square 1",
+        total_rub=total_rub,
     )
 
 
@@ -162,3 +164,69 @@ async def test_pay_rejects_unknown_payment_method() -> None:
         )
 
     assert resp.status_code == 400
+
+
+# security_fix_vuln03 (audit P3): the charged amount must come from the
+# server's order.total_rub, never from the request body; the post-payment
+# redirect must come from settings.YOOKASSA_RETURN_URL.
+
+
+async def test_pay_rejects_amount_below_order_total() -> None:
+    """The VULN-03 attack: pay 1 RUB for a 199 RUB order — must 409."""
+    order = _make_order(OrderState.CONFIRMED, total_rub=199)
+    app = _build_app(order, {})
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            f"/orders/{order.id}/pay", json={"amount": "1.00"}
+        )
+
+    assert resp.status_code == 409
+
+
+async def test_pay_rejects_order_without_recorded_total() -> None:
+    """Pre-migration orders with total_rub=None must not be priceable."""
+    order = _make_order(OrderState.CONFIRMED, total_rub=None)
+    app = _build_app(order, {})
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            f"/orders/{order.id}/pay", json={"amount": "199.00"}
+        )
+
+    assert resp.status_code == 409
+
+
+async def test_pay_ignores_client_return_url() -> None:
+    """A client-supplied return_url (open-redirect vector) must be ignored in
+    favor of settings.YOOKASSA_RETURN_URL + order_id, mirroring checkout.py."""
+    from app.config import settings
+
+    order = _make_order(OrderState.CONFIRMED, total_rub=199)
+    payment_result = {
+        "confirmation_url": "https://yookassa.ru/confirm/abc",
+        "payment_id": "pay_123",
+        "trace_id": "trace_xyz",
+    }
+    app = _build_app(order, payment_result)
+    payment_svc = app.dependency_overrides[get_payment_service]()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            f"/orders/{order.id}/pay",
+            json={
+                "amount": "199.00",
+                "return_url": "https://evil.example/post-payment",
+            },
+        )
+
+    assert resp.status_code == 200
+    _, kwargs = payment_svc.create_payment.call_args
+    assert kwargs["return_url"] == f"{settings.YOOKASSA_RETURN_URL}?order_id={order.id}"
+    assert kwargs["amount"] == Decimal(199)

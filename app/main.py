@@ -26,7 +26,7 @@ from app.api.routes.zalo_miniapp import router as zalo_miniapp_router
 from app.config import settings
 from app.startup import validate_all_programs
 from app.telemetry import configure_otel
-from app.web.auth import get_current_username
+from app.web.auth import get_current_username, require_same_origin
 from app.web.csp import CSPMiddleware
 from app.web.customer_routes import router as customer_router
 from app.web.routes import router as web_router
@@ -53,6 +53,12 @@ app = FastAPI(
     description="nano-vm governed food delivery platform",
     version="0.1.0",
     lifespan=lifespan,
+    # security_fix_vuln08 (2026-10-25, audit P6): the interactive docs and
+    # the OpenAPI schema hand outsiders a complete inventory of routes
+    # (including which ones lack auth) — dev-only now.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 templates_dir = Path(__file__).resolve().parent / "web" / "templates"
@@ -65,14 +71,25 @@ static_dir = Path(__file__).resolve().parent / "web" / "static"
 # cart.js after a deploy — a shipped fix never actually ran client-side).
 register_template_globals(app.state.templates, static_dir)
 
-app.include_router(orders_router)
+# security_fix_vuln01_04 (2026-10-25, audit P1): the internal JSON APIs for
+# orders/kitchen/delivery were previously mounted with no auth dependency —
+# anyone could fire any OrderEvent (including PAYMENT_CONFIRMED → a paid
+# order with no payment) and drive kitchen/delivery FSMs anonymously. The
+# customer storefront is NOT affected: its contract is checkout_router /
+# promo_router (/api/orders, /api/menu, /api/promo) below, which stay public.
+_internal_api_auth = [Depends(get_current_username)]
+# security_fix_vuln06 (audit P5): the browser-facing Basic-auth surfaces also
+# carry the CSRF guard — Basic credentials are auto-attached by browsers on
+# cross-site POSTs, so auth alone never covered them.
+_admin_auth = [Depends(get_current_username), Depends(require_same_origin)]
+app.include_router(orders_router, dependencies=_internal_api_auth)
 app.include_router(checkout_router)
 app.include_router(checkout_module.promo_router)
-app.include_router(admin_router, dependencies=[Depends(get_current_username)])
-app.include_router(kitchen_router)
-app.include_router(delivery_router)
+app.include_router(admin_router, dependencies=_admin_auth)
+app.include_router(kitchen_router, dependencies=_internal_api_auth)
+app.include_router(delivery_router, dependencies=_internal_api_auth)
 app.include_router(menu_router)
-app.include_router(web_router, dependencies=[Depends(get_current_username)])
+app.include_router(web_router, dependencies=_admin_auth)
 app.include_router(customer_router)
 app.include_router(telegram_page_router)
 app.include_router(yookassa_router)

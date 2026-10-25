@@ -31,12 +31,20 @@ def mocks() -> _Mocks:
 
 
 @pytest.fixture
-async def client(mocks: _Mocks):
+async def client(mocks: _Mocks, monkeypatch: pytest.MonkeyPatch):
+    # security_fix_vuln05 (audit P4): the webhook is fail-closed now — a
+    # configured secret plus a matching header is the default posture for
+    # every test here; secret-specific tests override either side.
+    monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", "test-secret")
     app = FastAPI()
     app.include_router(telegram_router)
     app.dependency_overrides[get_telegram_client] = lambda: mocks.telegram
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+    ) as ac:
         yield ac
 
 
@@ -63,19 +71,20 @@ class TestTelegramWebhookSecret:
         assert resp.status_code == 403
         mocks.telegram.send_message.assert_not_awaited()
 
-    async def test_no_secret_configured_skips_check(
+    async def test_no_secret_configured_rejects_fail_closed(
         self, client: AsyncClient, mocks: _Mocks
     ) -> None:
+        """security_fix_vuln05 (audit P4): an unset secret must disable the
+        WEBHOOK, not the check — 403, never 200-open."""
         with patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""):
             resp = await client.post("/webhooks/telegram", json=_update())
-        assert resp.status_code == 200
-        mocks.telegram.send_message.assert_awaited_once()
+        assert resp.status_code == 403
+        mocks.telegram.send_message.assert_not_awaited()
 
 
 class TestTelegramWebhookStart:
     async def test_start_sends_greeting(self, client: AsyncClient, mocks: _Mocks) -> None:
-        with patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""):
-            resp = await client.post("/webhooks/telegram", json=_update(chat_id=555))
+        resp = await client.post("/webhooks/telegram", json=_update(chat_id=555))
 
         assert resp.status_code == 200
         mocks.telegram.send_message.assert_awaited_once()
@@ -85,10 +94,7 @@ class TestTelegramWebhookStart:
     async def test_start_with_miniapp_url_attaches_web_app_button(
         self, client: AsyncClient, mocks: _Mocks
     ) -> None:
-        with (
-            patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""),
-            patch.object(settings, "TELEGRAM_MINIAPP_URL", "https://app.example.com"),
-        ):
+        with patch.object(settings, "TELEGRAM_MINIAPP_URL", "https://app.example.com"):
             resp = await client.post("/webhooks/telegram", json=_update())
 
         assert resp.status_code == 200
@@ -98,28 +104,21 @@ class TestTelegramWebhookStart:
     async def test_start_without_miniapp_url_sends_no_button(
         self, client: AsyncClient, mocks: _Mocks
     ) -> None:
-        with (
-            patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""),
-            patch.object(settings, "TELEGRAM_MINIAPP_URL", ""),
-        ):
+        with patch.object(settings, "TELEGRAM_MINIAPP_URL", ""):
             resp = await client.post("/webhooks/telegram", json=_update())
 
         assert resp.status_code == 200
         assert mocks.telegram.send_message.call_args.kwargs["reply_markup"] is None
 
     async def test_non_start_message_ignored(self, client: AsyncClient, mocks: _Mocks) -> None:
-        with patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""):
-            resp = await client.post(
-                "/webhooks/telegram", json=_update(text="hello there")
-            )
+        resp = await client.post("/webhooks/telegram", json=_update(text="hello there"))
         assert resp.status_code == 200
         mocks.telegram.send_message.assert_not_awaited()
 
     async def test_non_message_update_ignored(self, client: AsyncClient, mocks: _Mocks) -> None:
-        with patch.object(settings, "TELEGRAM_WEBHOOK_SECRET", ""):
-            resp = await client.post(
-                "/webhooks/telegram", json={"update_id": 2, "edited_message": {}}
-            )
+        resp = await client.post(
+            "/webhooks/telegram", json={"update_id": 2, "edited_message": {}}
+        )
         assert resp.status_code == 200
         mocks.telegram.send_message.assert_not_awaited()
 

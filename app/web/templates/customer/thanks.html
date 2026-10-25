@@ -12,10 +12,14 @@
   {% if order %}
     <p>Номер заказа: <strong>{{ order.id }}</strong></p>
     <p>Статус: {{ state_label or order.state.value }}</p>
+    {# security_fix_vuln07 (2026-10-25, audit P7): this page is reachable by
+       order UUID without auth; the phone is masked so a leaked UUID alone
+       doesn't hand out the customer's full number. The name stays — the
+       customer needs to see it's their order. #}
     {% if order.customer_name or order.customer_phone %}
       <p>
         {% if order.customer_name %}{{ order.customer_name }}{% endif %}
-        {% if order.customer_phone %}· {{ order.customer_phone }}{% endif %}
+        {% if order.customer_phone %}· {{ order.customer_phone[:2] }}···{{ order.customer_phone[-2:] }}{% endif %}
       </p>
     {% endif %}
 

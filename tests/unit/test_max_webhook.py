@@ -58,7 +58,13 @@ def mocks() -> _Mocks:
 
 
 @pytest.fixture
-async def client(mocks: _Mocks) -> AsyncGenerator[AsyncClient, None]:
+async def client(
+    mocks: _Mocks, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[AsyncClient, None]:
+    # security_fix_vuln05 (audit P4): the webhook is fail-closed now — a
+    # configured secret plus a matching header is the default posture for
+    # every test here; secret-specific tests override either side.
+    monkeypatch.setattr(settings, "MAX_WEBHOOK_SECRET", "test-secret")
     app = FastAPI()
     app.include_router(max_router)
     app.dependency_overrides[get_staff_service] = lambda: mocks.staff
@@ -67,7 +73,11 @@ async def client(mocks: _Mocks) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_max_client] = lambda: mocks.max_client
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-Max-Bot-Api-Secret": "test-secret"},
+    ) as ac:
         yield ac
 
 
@@ -110,12 +120,14 @@ class TestWebhookSecret:
         )
         assert resp.status_code == 200
 
-    async def test_no_secret_configured_skips_check(
+    async def test_no_secret_configured_rejects_fail_closed(
         self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """security_fix_vuln05 (audit P4): an unset secret must disable the
+        WEBHOOK, not the check — 403, never 200-open."""
         monkeypatch.setattr(settings, "MAX_WEBHOOK_SECRET", "")
         resp = await client.post("/webhooks/max", json={"update_type": "bot_started"})
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 class TestWebhookIgnoredUpdateTypes:

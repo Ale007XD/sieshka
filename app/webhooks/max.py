@@ -34,6 +34,7 @@ StaffService against the two real governed FSMs.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 
@@ -99,7 +100,18 @@ async def max_webhook(
     client: MaxClient = Depends(get_max_client),
 ) -> JSONResponse:
     secret = request.headers.get("X-Max-Bot-Api-Secret")
-    if settings.MAX_WEBHOOK_SECRET and secret != settings.MAX_WEBHOOK_SECRET:
+    # security_fix_vuln05 (2026-10-25, audit P4): fail-closed. An empty
+    # MAX_WEBHOOK_SECRET used to DISABLE this check entirely — a forged
+    # message_callback with any registered staff max_user_id could drive
+    # kitchen/order transitions. An unset secret now rejects every request:
+    # the webhook is dead until configured, never open.
+    if not settings.MAX_WEBHOOK_SECRET:
+        logger.error(
+            "MAX webhook: MAX_WEBHOOK_SECRET is not configured — rejecting "
+            "(fail-closed, security_fix_vuln05)"
+        )
+        return JSONResponse({"ok": False}, status_code=403)
+    if not hmac.compare_digest(secret or "", settings.MAX_WEBHOOK_SECRET):
         logger.warning("MAX webhook: invalid webhook secret")
         return JSONResponse({"ok": False}, status_code=403)
 

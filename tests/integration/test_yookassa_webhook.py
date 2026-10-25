@@ -77,6 +77,27 @@ async def client(
     app = FastAPI()
     app.include_router(yookassa_router)
 
+    # security_fix_vuln02 (audit P2): the webhook now re-reads the payment
+    # from YooKassa before transitioning state. Mock that re-read with a
+    # provider view consistent with the DB row by default; individual tests
+    # mutate `remote_overrides` (attached to the client) to simulate forged
+    # notifications / provider outages.
+    remote_overrides: dict[str, object] = {}
+
+    async def _fake_get_payment(payment_id: str) -> dict[str, object]:
+        if isinstance(remote_overrides.get("raise"), Exception):
+            raise remote_overrides["raise"]
+        status = str(remote_overrides.get("status", "succeeded"))
+        return {
+            "id": payment_id,
+            "status": status,
+            "paid": remote_overrides.get("paid", status == "succeeded"),
+            "amount": {
+                "value": str(remote_overrides.get("amount_value", "1500.00")),
+                "currency": str(remote_overrides.get("amount_currency", "RUB")),
+            },
+        }
+
     def _test_payment_service() -> PaymentService:
         yookassa = YooKassaClient(shop_id="test", secret_key="test")
         yookassa.create_payment = AsyncMock(  # type: ignore[method-assign]
@@ -86,6 +107,7 @@ async def client(
                 "confirmation": {"confirmation_url": "https://test.confirm"},
             }
         )
+        yookassa.get_payment = AsyncMock(side_effect=_fake_get_payment)  # type: ignore[method-assign]
         return PaymentService(
             session_factory=session_factory,
             yookassa=yookassa,
@@ -95,6 +117,7 @@ async def client(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac._remote_overrides = remote_overrides  # type: ignore[attr-defined]
         yield ac
 
 
@@ -322,6 +345,7 @@ class TestYooKassaWebhook:
         after a customer explicitly canceled on YooKassa's hosted page.
         PAYMENT_PENDING + PAYMENT_FAILED -> CONFIRMED (ORDER_TRANSITIONS)
         lets the customer retry checkout with the same order."""
+        client._remote_overrides["status"] = "canceled"  # type: ignore[attr-defined]
         payment_id = str(uuid.uuid4())
 
         async with session_factory() as session:
@@ -370,3 +394,143 @@ class TestYooKassaWebhook:
                 )
             ).scalar_one()
             assert payment_state == "FAILED"
+
+    # --- security_fix_vuln02 (audit P2) regression coverage ---------------
+
+    async def test_forged_succeeded_notification_does_not_transition(
+        self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """The exact VULN-02 attack: a notification claims payment.succeeded
+        with a valid leaked trace_id/payment_id, but YooKassa's API says the
+        payment is still pending. No state change may happen."""
+        client._remote_overrides["status"] = "pending"  # type: ignore[attr-defined]
+        payment_id = str(uuid.uuid4())
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(
+                text(
+                    "INSERT INTO payments "
+                    "(order_id, provider, provider_id, amount, currency, state) "
+                    "VALUES (:order_id, 'yookassa', :provider_id, 1500.00, 'RUB', 'PENDING')"
+                ),
+                {"order_id": uuid.UUID(order_id), "provider_id": payment_id},
+            )
+            await session.commit()
+
+        payload = {
+            "id": str(uuid.uuid4()),
+            "event": "payment.succeeded",
+            "object": {
+                "id": payment_id,
+                "metadata": {"trace_id": trace_event.trace_id, "order_id": order_id},
+            },
+        }
+        resp = await client.post("/webhooks/yookassa", json=payload)
+        assert resp.status_code == 200
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            state = (
+                await session.execute(
+                    text("SELECT state FROM orders WHERE id = :id"),
+                    {"id": uuid.UUID(order_id)},
+                )
+            ).scalar_one()
+            assert state == OrderState.PAYMENT_PENDING.value
+
+    async def test_amount_mismatch_does_not_transition(
+        self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Provider confirms 1.00 RUB (VULN-03 amount substitution) but the
+        server recorded 1500.00 — verification must refuse."""
+        client._remote_overrides["amount_value"] = "1.00"  # type: ignore[attr-defined]
+        payment_id = str(uuid.uuid4())
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(
+                text(
+                    "INSERT INTO payments "
+                    "(order_id, provider, provider_id, amount, currency, state) "
+                    "VALUES (:order_id, 'yookassa', :provider_id, 1500.00, 'RUB', 'PENDING')"
+                ),
+                {"order_id": uuid.UUID(order_id), "provider_id": payment_id},
+            )
+            await session.commit()
+
+        payload = {
+            "id": str(uuid.uuid4()),
+            "event": "payment.succeeded",
+            "object": {
+                "id": payment_id,
+                "metadata": {"trace_id": trace_event.trace_id, "order_id": order_id},
+            },
+        }
+        resp = await client.post("/webhooks/yookassa", json=payload)
+        assert resp.status_code == 200
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            state = (
+                await session.execute(
+                    text("SELECT state FROM orders WHERE id = :id"),
+                    {"id": uuid.UUID(order_id)},
+                )
+            ).scalar_one()
+            assert state == OrderState.PAYMENT_PENDING.value
+
+    async def test_provider_api_unavailable_returns_502(
+        self, client: AsyncClient, order_id: str, trace_event: TraceEvent,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """ADR-003 deviation (security_fix_vuln02): when YooKassa's API can't
+        be reached, return 502 so the provider retries — never fall back to
+        acting on the unverified notification body."""
+        import httpx
+
+        client._remote_overrides["raise"] = httpx.ConnectError(  # type: ignore[attr-defined]
+            "simulated outage"
+        )
+        payment_id = str(uuid.uuid4())
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            await session.execute(
+                text(
+                    "INSERT INTO payments "
+                    "(order_id, provider, provider_id, amount, currency, state) "
+                    "VALUES (:order_id, 'yookassa', :provider_id, 1500.00, 'RUB', 'PENDING')"
+                ),
+                {"order_id": uuid.UUID(order_id), "provider_id": payment_id},
+            )
+            await session.commit()
+
+        payload = {
+            "id": str(uuid.uuid4()),
+            "event": "payment.succeeded",
+            "object": {
+                "id": payment_id,
+                "metadata": {"trace_id": trace_event.trace_id, "order_id": order_id},
+            },
+        }
+        resp = await client.post("/webhooks/yookassa", json=payload)
+        assert resp.status_code == 502
+
+        async with session_factory() as session:
+            from sqlalchemy import text
+
+            state = (
+                await session.execute(
+                    text("SELECT state FROM orders WHERE id = :id"),
+                    {"id": uuid.UUID(order_id)},
+                )
+            ).scalar_one()
+            assert state == OrderState.PAYMENT_PENDING.value

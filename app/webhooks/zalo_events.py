@@ -41,6 +41,7 @@ here).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 
@@ -76,7 +77,9 @@ def verify_zalo_signature(payload: dict[str, object], signature: str, api_key: s
             value
         )
     expected = hashlib.sha256(f"{content}{api_key}".encode()).hexdigest()
-    return expected == signature
+    # security_fix (audit P9): constant-time comparison — a plain == leaks
+    # an early-exit timing signal on matching prefix length.
+    return hmac.compare_digest(expected, signature or "")
 
 
 @router.post("/zalo")

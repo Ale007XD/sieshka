@@ -19,6 +19,19 @@ from app.domains.inventory.models import InventoryState
 
 logger = logging.getLogger(__name__)
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> object:
+    """security_fix (audit P9): CSV formula-injection guard. A sku (free
+    text via admin forms / CSV import / the LLM menu agent) starting with
+    = + - @ would execute as a formula when the exported file opens in
+    Excel/LibreOffice. Prefixing with a single quote neutralizes it;
+    non-strings pass through unchanged."""
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
 
 class InventoryItemRead(BaseModel):
     sku: str
@@ -280,11 +293,11 @@ class InventoryService:
 
             writer.writerow(
                 [
-                    m["sku"],
+                    _csv_safe(m["sku"]),
                     m["delta"],
                     m["reason"],
-                    m["source_type"] or "",
-                    m["source_id"] or "",
+                    _csv_safe(m["source_type"] or ""),
+                    _csv_safe(m["source_id"] or ""),
                     m["below_zero"],
                     m["created_at"].isoformat(),
                     price_rub if price_rub is not None else "",

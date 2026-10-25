@@ -383,7 +383,10 @@ function populateCategoryButtons(categories) {
         btn.className = 'btn btn-sm rounded-pill category-btn';
         btn.dataset.categoryId = cat.category_id;
         btn.style.whiteSpace = 'nowrap';
-        btn.innerHTML = `<i class="bi bi-circle-fill me-1" style="font-size: 8px; color: var(--brand-primary);"></i>${cat.name}`;
+        // security_fix (audit P9): category names reach the DOM here — escape
+        // them like every other render in this file (CSP blocks scripts, but
+        // raw markup injection into the button remained possible).
+        btn.innerHTML = `<i class="bi bi-circle-fill me-1" style="font-size: 8px; color: var(--brand-primary);"></i>${escapeHtml(cat.name)}`;
         if (String(cat.category_id) === String(initialActiveId)) {
             btn.classList.add('active');
         }

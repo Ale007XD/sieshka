@@ -22,16 +22,20 @@ chat-based staff action path is actually requested).
 Webhook security: X-Telegram-Bot-Api-Secret-Token header, Telegram's own
 mechanism for verifying a webhook call actually came from Telegram (set via
 setWebhook's secret_token param) — same role as MAX's X-Max-Bot-Api-Secret
-(app/webhooks/max.py) / settings.MAX_WEBHOOK_SECRET, same fail-open-on-
-empty-config posture (an unset secret disables the check rather than
-rejecting every request, matching MAX's own settings.MAX_WEBHOOK_SECRET
-conditional).
+(app/webhooks/max.py) / settings.MAX_WEBHOOK_SECRET.
+
+security_fix_vuln05 (2026-10-25, audit P4): this used to fail OPEN on an
+unset secret (empty TELEGRAM_WEBHOOK_SECRET disabled the check). It now
+fails CLOSED, identical to max_webhook: no configured secret → every request
+is rejected 403 until the operator sets one. Comparison is constant-time via
+hmac.compare_digest.
 
 Never fails Telegram's delivery retry loop: every code path below returns
 200 {"ok": true}, same posture as max_webhook.
 """
 from __future__ import annotations
 
+import hmac
 import logging
 
 from fastapi import APIRouter, Depends, Request
@@ -70,7 +74,14 @@ async def telegram_webhook(
     client: TelegramClient = Depends(get_telegram_client),
 ) -> JSONResponse:
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if settings.TELEGRAM_WEBHOOK_SECRET and secret != settings.TELEGRAM_WEBHOOK_SECRET:
+    # security_fix_vuln05 (audit P4): fail-closed, mirrors max_webhook.
+    if not settings.TELEGRAM_WEBHOOK_SECRET:
+        logger.error(
+            "Telegram webhook: TELEGRAM_WEBHOOK_SECRET is not configured — "
+            "rejecting (fail-closed, security_fix_vuln05)"
+        )
+        return JSONResponse({"ok": False}, status_code=403)
+    if not hmac.compare_digest(secret or "", settings.TELEGRAM_WEBHOOK_SECRET):
         logger.warning("Telegram webhook: invalid webhook secret")
         return JSONResponse({"ok": False}, status_code=403)
 

@@ -115,6 +115,22 @@ class YooKassaClient:
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
 
+    async def get_payment(self, payment_id: str) -> dict[str, object]:
+        """Fetch the canonical payment object from YooKassa by its id.
+
+        security_fix_vuln02 (2026-10-25, audit P2): the webhook used to trust
+        the notification body alone; this is the server-side re-read that a
+        forged notification cannot fake. Raises httpx.HTTPError subclasses on
+        network/API failure — callers decide retry semantics.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.BASE_URL}/payments/{payment_id}",
+                auth=self._auth,
+            )
+            resp.raise_for_status()
+            return resp.json()  # type: ignore[no-any-return]
+
 
 def build_yookassa_receipt(
     phone: str,
@@ -327,6 +343,82 @@ class PaymentService:
             "payment_id": provider_id,
             "trace_id": trace_id,
         }
+
+    async def verify_provider_payment(
+        self, provider_id: str, expected_status: str
+    ) -> bool:
+        """security_fix_vuln02 (2026-10-25, audit P2): re-read the payment
+        from YooKassa's API and confirm the notification matches reality.
+
+        A notification body is client-controlled input — anyone can POST
+        {"event":"payment.succeeded", ...} with a leaked payment_id/trace_id.
+        This method is the trust boundary: the state transition may only run
+        if YooKassa's own API says the payment is in ``expected_status``
+        ("succeeded" requires paid=true as well) AND the amount/currency
+        charged match what this server recorded at creation time. Returns
+        False on any mismatch; propagates httpx errors to the caller (a
+        temporarily unreachable API must not degrade into "verified").
+        """
+        remote = await self._yookassa.get_payment(provider_id)
+        remote_amount = remote.get("amount")
+        remote_status = str(remote.get("status", ""))
+
+        async with self._session_factory() as session:
+            repo = PaymentRepository(session)
+            try:
+                local = await repo.get_by_provider_id(provider_id)
+            except Exception:
+                logger.warning(
+                    "PaymentService: verify_provider_payment: payment %s not found locally",
+                    provider_id,
+                )
+                return False
+
+        if remote_status != expected_status:
+            logger.warning(
+                "PaymentService: provider verification failed for %s: "
+                "remote status %r != expected %r",
+                provider_id, remote_status, expected_status,
+            )
+            return False
+        if expected_status == "succeeded" and remote.get("paid") is not True:
+            logger.warning(
+                "PaymentService: provider verification failed for %s: "
+                "status succeeded but paid is not true",
+                provider_id,
+            )
+            return False
+
+        if not isinstance(remote_amount, dict):
+            logger.warning(
+                "PaymentService: provider verification failed for %s: no amount object",
+                provider_id,
+            )
+            return False
+        try:
+            charged = decimal.Decimal(str(remote_amount.get("value", "")))
+        except decimal.InvalidOperation:
+            logger.warning(
+                "PaymentService: provider verification failed for %s: "
+                "unparseable amount value %r",
+                provider_id, remote_amount.get("value"),
+            )
+            return False
+        recorded = local["amount"]
+        recorded_decimal = (
+            recorded if isinstance(recorded, decimal.Decimal) else decimal.Decimal(str(recorded))
+        )
+        if charged != recorded_decimal or str(remote_amount.get("currency", "")) != str(
+            local["currency"]
+        ):
+            logger.warning(
+                "PaymentService: provider verification failed for %s: "
+                "charged %s %s != recorded %s %s",
+                provider_id, charged, remote_amount.get("currency"),
+                recorded_decimal, local["currency"],
+            )
+            return False
+        return True
 
     async def confirm_payment(
         self,

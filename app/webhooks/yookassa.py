@@ -7,11 +7,20 @@ SAFETY RULES (ADR-003):
   - Already SUCCESS -> 200 duplicate (no re-execute)
   - RUNNING -> 200 "in progress" (no concurrent resume)
   - trace_id not found -> 200 suspicious (never 4xx payment providers)
+
+security_fix_vuln02 (2026-10-25, audit P2): the notification body is
+unauthenticated client input — before any state transition runs, the payment
+is re-read from YooKassa's API (PaymentService.verify_provider_payment) and
+the event must match the provider's own status plus the recorded amount.
+Deliberate ADR-003 deviation: if YooKassa's API is temporarily unreachable we
+return 502 (NOT 200) so YooKassa retries the notification later — silently
+accepting an unverifiable event was the exact vulnerability class this fixes.
 """
 from __future__ import annotations
 
 import logging
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
@@ -78,6 +87,34 @@ async def yookassa_webhook(
         trace_id,
         event.entity_id,
     )
+
+    # security_fix_vuln02 (audit P2): never act on the notification body
+    # alone. Re-read the payment from YooKassa and require the provider's
+    # own status + amount to match before any transition is attempted.
+    expected_status = "succeeded" if event_type == "payment.succeeded" else "canceled"
+    try:
+        verified = await payment_service.verify_provider_payment(
+            str(payment_id), expected_status
+        )
+    except httpx.HTTPError as exc:
+        logger.error(
+            "YooKassa webhook: provider API unavailable for payment %s (%s) "
+            "— returning 502 so YooKassa retries (ADR-003 deviation, "
+            "security_fix_vuln02)",
+            payment_id, exc,
+        )
+        return JSONResponse(
+            {"ok": False, "error": "provider verification unavailable"},
+            status_code=502,
+        )
+    if not verified:
+        logger.warning(
+            "YooKassa webhook: provider verification FAILED for payment %s "
+            "(event=%s) — notification does not match YooKassa API, "
+            "no state change",
+            payment_id, event_type,
+        )
+        return JSONResponse({"ok": True})
 
     if event_type == "payment.succeeded":
         result = await payment_service.confirm_payment(

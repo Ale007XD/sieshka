@@ -129,3 +129,15 @@ class TestExpiry:
         data = _build_web_app_data(auth_date=five_min_ago)
         assert validate_init_data(data, _BOT_TOKEN, max_age_seconds=60) is None
         assert validate_init_data(data, _BOT_TOKEN, max_age_seconds=600) == 67890
+
+    def test_missing_auth_date_rejected(self) -> None:
+        """security_fix_vuln09 (audit P8): the VULN-09 replay — a leaked
+        initData string re-signed-free with auth_date stripped used to skip
+        the freshness check entirely. Absence must now reject."""
+        user_json = json.dumps({"id": 67890, "first_name": "Max"})
+        params = {"user": user_json}
+        launch_params = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
+        secret_key = hmac.new(b"WebAppData", _BOT_TOKEN.encode(), hashlib.sha256).digest()
+        signature = hmac.new(secret_key, launch_params.encode(), hashlib.sha256).hexdigest()
+        data = f"user={quote(user_json, safe='')}&hash={signature}"
+        assert validate_init_data(data, _BOT_TOKEN) is None

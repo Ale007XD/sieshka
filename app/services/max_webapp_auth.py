@@ -84,15 +84,22 @@ def validate_init_data(
     values = dict(decoded)
 
     auth_date_raw = values.get("auth_date")
-    if auth_date_raw is not None:
-        try:
-            auth_date = int(auth_date_raw)
-        except ValueError:
-            logger.warning("validate_init_data: malformed auth_date=%r", auth_date_raw)
-            return None
-        if time.time() - auth_date > max_age_seconds:
-            logger.warning("validate_init_data: expired auth_date=%s", auth_date)
-            return None
+    # security_fix_vuln09 (2026-10-25, audit P8): auth_date used to be
+    # optional — an attacker holding a leaked initData string could strip
+    # the field and skip the freshness check entirely (indefinite replay).
+    # auth_date is part of the signed content, so a legitimately signed
+    # launch always carries it; absence is now a rejection.
+    if auth_date_raw is None:
+        logger.warning("validate_init_data: auth_date missing — rejecting")
+        return None
+    try:
+        auth_date = int(auth_date_raw)
+    except ValueError:
+        logger.warning("validate_init_data: malformed auth_date=%r", auth_date_raw)
+        return None
+    if time.time() - auth_date > max_age_seconds:
+        logger.warning("validate_init_data: expired auth_date=%s", auth_date)
+        return None
 
     user_raw = values.get("user")
     if not user_raw:

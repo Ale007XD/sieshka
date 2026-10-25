@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.domains.orders.models import OrderCreate, OrderEvent, OrderRead, OrderState
 from app.fsm.core.base import TransitionResult
 from app.services.order_service import OrderService
@@ -86,6 +87,24 @@ async def pay_order(
             status_code=409,
             detail=f"Order must be CONFIRMED to pay; current state: {order.state.value}",
         )
+    # security_fix_vuln03 (2026-10-25, audit P3): amount and return_url used
+    # to be taken verbatim from the request body — a caller could pay 1 RUB
+    # for a 5000 RUB order (no amount reconciliation existed anywhere before
+    # the webhook fix) and point the post-payment redirect anywhere. The
+    # server's own order.total_rub is now the ONLY amount, body.amount must
+    # merely agree with it, and the redirect is always built from
+    # settings.YOOKASSA_RETURN_URL exactly like checkout.py does.
+    if order.total_rub is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Order has no recorded total_rub; refuse to price a payment",
+        )
+    if body.amount != Decimal(order.total_rub):
+        raise HTTPException(
+            status_code=409,
+            detail=f"amount must equal the order total ({order.total_rub}); "
+            f"got {body.amount}",
+        )
     if body.payment_method not in _ALLOWED_PAY_METHODS:
         raise HTTPException(
             status_code=400,
@@ -94,9 +113,9 @@ async def pay_order(
         )
     result = await payment.create_payment(
         order_id=str(order_id),
-        amount=body.amount,
-        currency=body.currency,
-        return_url=body.return_url,
+        amount=Decimal(order.total_rub),
+        currency="RUB",
+        return_url=f"{settings.YOOKASSA_RETURN_URL}?order_id={order_id}",
         customer_phone=order.customer_phone,
         confirmation_type="redirect",
         payment_method_data={
