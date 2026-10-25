@@ -29,6 +29,7 @@ from app.domains.kitchen.fsm import KitchenEvent
 from app.domains.orders.models import OrderEvent
 from app.domains.staff.models import StaffRole
 from app.fsm.core.base import TransitionResult
+from app.services.customer_notify import notify_customer_order_state
 from app.services.kitchen_service import KitchenService
 from app.services.order_service import OrderService
 
@@ -77,4 +78,11 @@ async def dispatch_order(
         return None
     if event not in _ORDER_ROLE_EVENTS.get(role, frozenset()):
         return None
-    return await orders.transition_order(order_id, event)
+    result = await orders.transition_order(order_id, event)
+    # sprint_customer_notify (2026-10-25): DELIVERING/DELIVERED/CANCELLED
+    # reached via any staff channel (MAX webhook, Zalo/Telegram Mini App)
+    # also push to the customer whose order is attributed to a Mini App.
+    # Fire-and-forget by contract — never raises, no-ops without attribution.
+    if result.success and result.new_state is not None:
+        await notify_customer_order_state(order_id, result.new_state)
+    return result

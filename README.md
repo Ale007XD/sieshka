@@ -91,19 +91,71 @@ pytest tests/integration/ -v -m integration
 Full deployment instructions, including the current-state gaps below that matter before
 exposing this outside localhost: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## Production deploy — the exact commands (2026-10-25, learned the hard way)
+
+Captured after a fresh-VPS deploy crash-looped on
+`password authentication failed for user "sieshka"`.
+
+```bash
+# THE deploy command — always with the prod overlay. Never bare
+# `docker compose up -d` on a server: the base file publishes 5432 to
+# 0.0.0.0 with the default password 'sieshka'.
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+```
+
+**The pgdata trap.** `POSTGRES_PASSWORD` only takes effect on the FIRST init
+of an empty `pgdata` volume. If the volume already exists (any previous
+`up` under the same project directory), changing `.env` does NOT change the
+actual role password — the app will crash-loop on exactly the error above.
+Fresh install, data disposable:
+
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml down -v
+# then the up command above; verify `docker compose ps` shows NO published 5432
+```
+
+Data must be kept? Align the role instead of wiping the volume:
+
+```bash
+docker compose exec postgres psql -U postgres \
+  -c "ALTER ROLE sieshka WITH PASSWORD '<new POSTGRES_PASSWORD>';"
+```
+
+**`.env` must be consistent before the first `up`:** `POSTGRES_PASSWORD` must
+equal the password inside `DATABASE_URL` (URL-encode specials there: `@`→`%40`,
+`#`→`%23`, `%`→`%25`; a literal `$` in any compose-interpolated value needs
+`$$`). A mismatch in either direction produces the same crash-loop.
+
+**Required by the 2026-10-25 security patch (fail-closed by design):**
+
+- `DASHBOARD_PASSWORD_HASH` — without it the admin UI **and** the internal
+  JSON APIs (`/orders`, `/kitchen`, `/delivery`) answer 401;
+- `MAX_WEBHOOK_SECRET`, `TELEGRAM_WEBHOOK_SECRET` — without them the MAX and
+  Telegram webhooks reject every request with 403;
+- `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — the payment webhook now
+  re-reads each payment via the YooKassa API before trusting a notification,
+  and returns 502 (provider retries) while the API is unreachable.
+
 ## Current limits
 
 - **No reverse proxy in `docker-compose.yml`.** The app container is the only thing
   between the internet and FastAPI — no nginx, no rate limiting, no TLS termination.
-  `/admin/*` and `/admin/ui/*` are auth-gated (argon2 via passlib, HTTP Basic —
-  `sprint_m6_auth_gate`, done and independently verified from source), but that auth
-  endpoint itself has no brute-force rate limiting yet — add a reverse proxy
-  (nginx/Caddy/managed LB) with `limit_req` (or equivalent) before any public
-  deployment; this project doesn't ship one.
-- **"Telegram" was never actually built as a channel**, despite `staff.telegram_user_id`
-  existing as a column — there's no `app/webhooks/telegram.py`, no bot registration, no
-  router. It's a reserved/aspirational field from early planning, not a supported
-  channel; don't rely on it. The two real, wired channels are **MAX** (Bot API,
+  Auth state as of the 2026-10-25 security patch: `/admin/*`, `/admin/ui/*` AND the
+  internal JSON APIs (`/orders`, `/kitchen`, `/delivery`) are argon2/HTTP-Basic-gated;
+  the MAX/Telegram webhook secrets fail closed (403 while unset); `/docs` is
+  DEBUG-only. Still missing: brute-force rate limiting on the Basic-auth endpoints
+  and on `/webhooks/*` — add a reverse proxy (nginx/Caddy/managed LB) with
+  `limit_req` (or equivalent) before any public deployment; this project doesn't
+  ship one.
+- **Telegram IS a wired channel now** (updated 2026-10-25 — this bullet used to
+  claim it was never built, which predated the telegram sprints): bot webhook
+  `app/webhooks/telegram.py` (secret-token verified, fail-closed), staff Mini App
+  `app/api/routes/telegram_miniapp.py` + `app/web/telegram_routes.py` (same shared
+  role ACL as MAX/Zalo via `app/services/staff_dispatch.py`), and storefront
+  checkout attribution via `X-Telegram-Init-Data` (same `validate_init_data`
+  HMAC as MAX, keyed with `TELEGRAM_BOT_TOKEN`). Deployment needs
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` in `.env` — see the
+  production-deploy section above. The other real channels — **MAX** (Bot API,
   `app/webhooks/max.py` — staff notifications with inline-keyboard action buttons,
   edit-in-place cards) and **Zalo** (`app/webhooks/zalo_events.py` +
   `app/api/routes/zalo_miniapp.py` — Mini App backend API for staff actions, storefront

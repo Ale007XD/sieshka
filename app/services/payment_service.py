@@ -17,6 +17,7 @@ from app.domains.orders.models import ORDER_TRANSITIONS, OrderEvent, OrderState
 from app.fsm.core.base import TransitionResult
 from app.repositories.order_repo import OrderRepository
 from app.repositories.payment_repo import PaymentRepository
+from app.services.customer_notify import notify_customer_order_state
 from app.services.idempotency import IdempotencyService
 from app.services.max_staff_notify import notify_admin_order_state, notify_staff_card
 from app.trace import trace
@@ -484,6 +485,10 @@ class PaymentService:
                     "PaymentService: START_COOKING failed for order %s: %s",
                     order_id, cooking.reason,
                 )
+            elif cooking.new_state is not None:
+                # sprint_customer_notify (2026-10-25): the paid customer's
+                # "готовится" push — fire-and-forget, no-ops without attribution.
+                await notify_customer_order_state(order_id, cooking.new_state)
 
         return result
 
@@ -564,5 +569,10 @@ class PaymentService:
                 "PaymentService: order %s transition on PAYMENT_FAILED failed: %s",
                 order_id, result.reason,
             )
+        else:
+            # sprint_customer_notify (2026-10-25): the order lands back in
+            # CONFIRMED, so the state alone can't tell the customer anything —
+            # push the PAYMENT_FAILED event label explicitly instead.
+            await notify_customer_order_state(order_id, "PAYMENT_FAILED")
 
         return result

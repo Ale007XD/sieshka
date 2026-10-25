@@ -44,6 +44,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import async_session_factory
 from app.domains.orders.models import CheckoutRequest, OrderEvent, OrderState
+from app.services.customer_notify import notify_customer_order_state
 from app.services.customer_service import CustomerService
 from app.services.idempotency import IdempotencyService
 from app.services.max_staff_notify import notify_admin_order_state, notify_staff_card
@@ -334,6 +335,10 @@ async def checkout(
             "checkout: START_COOKING failed for cash order %s: %s",
             order.id, cooking.reason,
         )
+    elif cooking.new_state is not None:
+        # sprint_customer_notify (2026-10-25): cash customer's "готовится"
+        # push — fire-and-forget, no-ops without Mini App attribution.
+        await notify_customer_order_state(str(order.id), cooking.new_state)
     await idempotency.update_payload(
         idem_key,
         {
