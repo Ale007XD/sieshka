@@ -242,3 +242,4 @@ deploy/backups/
 mypy_*.txt
 data/*.db-wal
 data/*.db-shm
+.zcode/

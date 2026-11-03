@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 nano = [
-    "llm-nano-vm>=0.8.8",
+    "llm-nano-vm>=0.8.6,<0.8.10",
     "nano-vm-mcp>=0.4.6",
     "litellm>=1.40.0,<1.98.0",
 ]
