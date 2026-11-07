@@ -56,12 +56,12 @@ from app.services.max_staff_notify import (
     notify_staff_card,
     refresh_order_payment_cards,
 )
+from app.services.order_service import OrderService
 from app.services.payment_display import (
     EVENT_MARK_PAID,
     KIND_PAYMENT,
     can_mark_cash_paid,
 )
-from app.services.order_service import OrderService
 from app.services.staff_dispatch import DENIED_MESSAGE, dispatch_kitchen, dispatch_order
 from app.services.staff_service import StaffService
 

@@ -1,7 +1,11 @@
 import json
 
 from app.services.payment_display import (
-    PAID, UNPAID, can_mark_cash_paid, payment_keyboard, payment_line,
+    PAID,
+    UNPAID,
+    can_mark_cash_paid,
+    payment_keyboard,
+    payment_line,
 )
 
 
