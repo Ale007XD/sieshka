@@ -37,6 +37,7 @@ from app.programs.order_programs import (
 from app.repositories.kitchen_repo import KitchenRepository
 from app.repositories.order_repo import OrderRepository
 from app.services.menu_service import MenuService
+from app.services.order_dedup import REUSE_WINDOW_HOURS, items_signature
 from app.tools.notification_tools import notify_staff_new_kitchen_ticket
 from app.tools.order_tools import (
     create_kitchen_ticket,
@@ -62,6 +63,15 @@ class _VMProtocol(Protocol):
     async def run(self, program: Program, context: dict[str, Any] | None = None) -> Trace: ...
 
     def register_tool(self, name: str, fn: Callable[..., Any]) -> None: ...
+
+
+@dataclass(frozen=True)
+class OrderPaymentInfo:
+    """Payment attribution of an order (see OrderService.get_payment_info)."""
+
+    total_rub: int | None
+    payment_method: str | None
+    payment_status: str  # "UNPAID" | "PAID"
 
 
 class PolicyProvider:
@@ -210,6 +220,135 @@ class OrderService:
                 discount_rub=discount_rub,
                 created_at=row._mapping.get("created_at"),
             )
+
+    async def find_reusable_order(
+        self,
+        customer_id: UUID,
+        items: list[OrderItem],
+        total_rub: int,
+        delivery_mode: str | None,
+        delivery_address: str,
+        zone_id: UUID | None,
+    ) -> OrderRead | None:
+        """Find a recent CONFIRMED order identical to the one being checked out.
+
+        An order sits in CONFIRMED when its YooKassa payment was canceled
+        (PAYMENT_FAILED -> CONFIRMED retry path) or START_COOKING failed. A
+        customer who retries checkout with the same cart must continue THAT
+        order, not create another one (2026-11-07 incident: six identical
+        orders per customer). Match = same customer, same total, same
+        delivery mode/address/zone, same item multiset (product, price, qty),
+        created within REUSE_WINDOW_HOURS. Read-only; returns None if no match.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id FROM orders "
+                    "WHERE customer_id = CAST(:customer_id AS uuid) "
+                    "AND state = :state "
+                    "AND total_rub = CAST(:total_rub AS integer) "
+                    "AND delivery_mode IS NOT DISTINCT FROM CAST(:delivery_mode AS varchar) "
+                    "AND delivery_address = :delivery_address "
+                    "AND zone_id IS NOT DISTINCT FROM CAST(:zone_id AS uuid) "
+                    "AND created_at > now() - make_interval(hours => CAST(:hours AS integer)) "
+                    "ORDER BY created_at DESC LIMIT 5"
+                ),
+                {
+                    "customer_id": str(customer_id),
+                    "state": OrderState.CONFIRMED.value,
+                    "total_rub": total_rub,
+                    "delivery_mode": delivery_mode,
+                    "delivery_address": delivery_address,
+                    "zone_id": str(zone_id) if zone_id is not None else None,
+                    "hours": REUSE_WINDOW_HOURS,
+                },
+            )
+            candidate_ids = [str(r._mapping["id"]) for r in result.fetchall()]
+
+        wanted = items_signature(items)
+        for candidate_id in candidate_ids:
+            candidate = await self.get_order(candidate_id)
+            if candidate is not None and items_signature(candidate.items) == wanted:
+                return candidate
+        return None
+
+    async def reuse_order_for_checkout(
+        self,
+        order_id: str,
+        payment_method: str,
+        comment: str | None,
+    ) -> None:
+        """Re-point a reused CONFIRMED order at the method/comment of the new attempt.
+
+        Metadata only (same category as clear_client_zalo_uid) — order state
+        is NOT touched here; the caller drives REQUEST_PAYMENT / START_COOKING
+        through the governed transition path.
+        """
+        async with self._session_factory() as session:
+            await session.execute(
+                text(
+                    "UPDATE orders SET payment_method = :payment_method, comment = :comment "
+                    "WHERE id = CAST(:order_id AS uuid)"
+                ),
+                {"payment_method": payment_method, "comment": comment, "order_id": order_id},
+            )
+            await session.commit()
+
+    async def get_payment_info(self, order_id: str) -> OrderPaymentInfo | None:
+        """Amount / method / paid-flag of an order, for staff cards."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT total_rub, payment_method, payment_status "
+                    "FROM orders WHERE id = CAST(:order_id AS uuid)"
+                ),
+                {"order_id": order_id},
+            )
+            row = result.fetchone()
+            if row is None:
+                return None
+            return OrderPaymentInfo(
+                total_rub=row._mapping["total_rub"],
+                payment_method=row._mapping["payment_method"],
+                payment_status=row._mapping["payment_status"],
+            )
+
+    async def mark_paid(
+        self,
+        order_id: str,
+        actor: str,
+        *,
+        cash_only: bool = False,
+    ) -> bool:
+        """Set payment_status UNPAID -> PAID (one-way, idempotent).
+
+        NOT an FSM transition: payment_status is a payment-attribution flag,
+        not order state (same category as client_zalo_uid). Audit trail is
+        paid_at + paid_by (actor: 'yookassa' or 'max:<uid>:<role>'). With
+        cash_only=True only cash orders may be flipped by a human — a YooKassa
+        order is marked by the verified webhook, never by a button. Returns
+        True iff this call changed the row (False: already paid / not found /
+        wrong method / cancelled).
+        """
+        sql = (
+            "UPDATE orders SET payment_status = 'PAID', paid_at = now(), paid_by = :actor "
+            "WHERE id = CAST(:order_id AS uuid) "
+            "AND payment_status = 'UNPAID' AND state <> 'CANCELLED'"
+        )
+        if cash_only:
+            sql += " AND payment_method = 'cash'"
+        async with self._session_factory() as session:
+            result = cast(
+                CursorResult[Any],
+                await session.execute(text(sql), {"order_id": order_id, "actor": actor}),
+            )
+            await session.commit()
+            changed = result.rowcount == 1
+        logger.info(
+            "OrderService.mark_paid: order=%s actor=%s cash_only=%s changed=%s",
+            order_id, actor, cash_only, changed,
+        )
+        return changed
 
     async def transition_order(
         self,

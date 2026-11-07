@@ -54,8 +54,14 @@ from app.services.max_staff_notify import (
     notify_courier_order_state,
     notify_kitchen_ticket_state,
     notify_staff_card,
+    refresh_order_payment_cards,
 )
 from app.services.order_service import OrderService
+from app.services.payment_display import (
+    EVENT_MARK_PAID,
+    KIND_PAYMENT,
+    can_mark_cash_paid,
+)
 from app.services.staff_dispatch import DENIED_MESSAGE, dispatch_kitchen, dispatch_order
 from app.services.staff_service import StaffService
 
@@ -170,10 +176,39 @@ async def max_webhook(
     kind = payload.get("kind")
     entity_id = payload.get("id")
     event_str = payload.get("event")
-    if kind not in ("kitchen", "order") or not entity_id or not event_str:
+    if kind not in ("kitchen", "order", KIND_PAYMENT) or not entity_id or not event_str:
         logger.warning("MAX webhook: incomplete payload=%r", payload)
         if callback_id:
             await client.answer_callback(callback_id, notification="Недостаточно данных")
+        return JSONResponse({"ok": True})
+
+    if kind == KIND_PAYMENT:
+        # Cash «НЕ ОПЛАЧЕНО» button (2026-11-07). Not an FSM transition — a
+        # payment-attribution flag; the audit trail is orders.paid_by/paid_at.
+        role_value = str(getattr(staff_member.role, "value", staff_member.role))
+        if not can_mark_cash_paid(role_value):
+            if callback_id:
+                await client.answer_callback(callback_id, notification=_DENIED)
+            return JSONResponse({"ok": True})
+        if str(event_str) != EVENT_MARK_PAID:  # green button: already paid
+            if callback_id:
+                await client.answer_callback(callback_id, notification="Уже оплачено")
+            return JSONResponse({"ok": True})
+        changed = await orders.mark_paid(
+            str(entity_id), f"max:{sender_id}:{role_value}", cash_only=True
+        )
+        if callback_id:
+            await client.answer_callback(
+                callback_id,
+                notification="✅ Оплачено" if changed else "Уже оплачено или недоступно",
+            )
+        if changed:
+            try:
+                await refresh_order_payment_cards(
+                    str(entity_id), staff_service=staff, client=client
+                )
+            except Exception:
+                logger.exception("MAX webhook: payment card refresh failed id=%s", entity_id)
         return JSONResponse({"ok": True})
 
     if kind == "kitchen":

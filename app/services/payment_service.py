@@ -475,6 +475,19 @@ class PaymentService:
 
         # Auto-advance to COOKING so the kitchen board picks up the order.
         if result.success:
+            # Mark PAID BEFORE any card is rendered: staff cards read
+            # payment_status. Only the verified webhook path gets here.
+            from app.services.order_service import OrderService as _OrderService
+
+            try:
+                await _OrderService(session_factory=self._session_factory).mark_paid(
+                    order_id, "yookassa",
+                )
+            except Exception:
+                logger.exception(
+                    "PaymentService: could not set payment_status=PAID for order %s "
+                    "(payment %s IS confirmed)", order_id, provider_id,
+                )
             await notify_admin_order_state(order_id, OrderState.PAID)
             await notify_staff_card(order_id, order_state=OrderState.PAID)
             from app.services.order_service import OrderService
@@ -489,6 +502,12 @@ class PaymentService:
                 # sprint_customer_notify (2026-10-25): the paid customer's
                 # "готовится" push — fire-and-forget, no-ops without attribution.
                 await notify_customer_order_state(order_id, cooking.new_state)
+                # Cards were last drawn at PAID (with ❌ Отменить). The cooking
+                # program's own notification reads the order state BEFORE this
+                # transition commits, so redraw both cards now at COOKING —
+                # CANCEL is not a COOKING transition and disappears.
+                await notify_admin_order_state(order_id, cooking.new_state)
+                await notify_staff_card(order_id, order_state=cooking.new_state)
 
         return result
 

@@ -238,14 +238,35 @@ async def checkout(
         items, body.delivery_mode, promo_effect, delivery_fee=zone_fee,
     )
 
-    order = await order_service.create_order_from_checkout(
-        data=body,
+    # Reuse: a customer retrying the same cart after a canceled/abandoned
+    # payment continues the CONFIRMED order instead of spawning a duplicate.
+    delivery_address = body.address or ""
+    order = await order_service.find_reusable_order(
         customer_id=customer.id,
         items=items,
         total_rub=total_rub,
-        promo_code=promo_effect.applied_code if promo_effect else None,
-        discount_rub=promo_effect.discount_rub if promo_effect else 0,
+        delivery_mode=body.delivery_mode,
+        delivery_address=delivery_address,
+        zone_id=body.zone_id,
     )
+    reused = order is not None
+    if order is not None:
+        logger.info(
+            "checkout: reusing CONFIRMED order %s for customer %s (retry of same cart)",
+            order.id, customer.id,
+        )
+        await order_service.reuse_order_for_checkout(
+            str(order.id), body.payment_method, body.comment,
+        )
+    else:
+        order = await order_service.create_order_from_checkout(
+            data=body,
+            customer_id=customer.id,
+            items=items,
+            total_rub=total_rub,
+            promo_code=promo_effect.applied_code if promo_effect else None,
+            discount_rub=promo_effect.discount_rub if promo_effect else 0,
+        )
 
     if body.payment_method in ("yookassa_sbp", "yookassa_sberbank"):
         # BUGFIX (2026-07-19): this branch created the order and requested a
@@ -258,8 +279,17 @@ async def checkout(
         # fails, the order correctly reflects "payment was requested" (safe
         # to retry) rather than silently reporting DRAFT with no record a
         # payment attempt was ever made.
-        await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
-        await order_service.transition_order(str(order.id), OrderEvent.REQUEST_PAYMENT)
+        if not reused:
+            await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
+        request_payment = await order_service.transition_order(
+            str(order.id), OrderEvent.REQUEST_PAYMENT,
+        )
+        if reused and not request_payment.success:
+            # Lost a race with a parallel retry (order already left CONFIRMED).
+            raise HTTPException(
+                status_code=409,
+                detail="order is already being processed",
+            )
         try:
             payment = await payment_service.create_payment(
                 order_id=str(order.id),
@@ -320,7 +350,8 @@ async def checkout(
         )
 
     # Cash: no external payment — confirm the order so the kitchen can proceed.
-    await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
+    if not reused:
+        await order_service.transition_order(str(order.id), OrderEvent.CONFIRM)
     # notify_admin_order_state fires HERE (state=CONFIRMED), not after
     # START_COOKING below: once START_COOKING succeeds the order is in
     # COOKING, where CANCEL is no longer a valid transition, so the same
@@ -339,6 +370,11 @@ async def checkout(
         # sprint_customer_notify (2026-10-25): cash customer's "готовится"
         # push — fire-and-forget, no-ops without Mini App attribution.
         await notify_customer_order_state(str(order.id), cooking.new_state)
+        # Redraw admin/staff cards at COOKING: they were last drawn at CONFIRMED
+        # (with ❌ Отменить) and the cooking program's own notification sees
+        # the pre-commit state, so the stale button stayed (2026-11-07).
+        await notify_admin_order_state(str(order.id), cooking.new_state)
+        await notify_staff_card(str(order.id), order_state=cooking.new_state)
     await idempotency.update_payload(
         idem_key,
         {
