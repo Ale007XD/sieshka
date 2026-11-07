@@ -66,6 +66,7 @@ from app.domains.orders.models import ORDER_TRANSITIONS, OrderEvent, OrderState
 from app.domains.staff.models import StaffRole
 from app.services.max_client import MaxClient, max_client
 from app.services.max_message_refs import get_message_ref, save_message_ref
+from app.services.payment_display import UNPAID, payment_keyboard, payment_line
 from app.services.staff_service import StaffService
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,7 @@ async def _fetch_order_details(order_id: str) -> str:
                 sql_text(
                     "SELECT o.items, o.delivery_address, o.comment, "
                     "o.payment_method, o.state AS order_state, "
+                    "o.total_rub, o.payment_status, "
                     "c.phone AS customer_phone "
                     "FROM orders o LEFT JOIN customers c ON c.id = o.customer_id "
                     "WHERE o.id = :id"
@@ -247,26 +249,45 @@ async def _fetch_order_details(order_id: str) -> str:
     if comment:
         lines.append(f"💬 {comment}")
 
+    # 2026-11-07: amount + method + paid flag on EVERY card, for every role.
+    # The flag is orders.payment_status (set by the verified YooKassa webhook,
+    # or by a cash-button press) — no longer inferred from the order state.
     payment_method = row._mapping.get("payment_method")
-    order_state_raw = row._mapping.get("order_state")
-    # sprint_yookassa_manual_integration (2026-08-19): payment_method values
-    # changed from "yookassa_card" to "yookassa_sbp"/"yookassa_sberbank" —
-    # both are still non-cash YooKassa payments, same paid/pending display.
-    if payment_method in ("yookassa_sbp", "yookassa_sberbank"):
-        try:
-            paid = (
-                OrderState(order_state_raw) in _PAID_OR_LATER_STATES
-                if order_state_raw
-                else False
+    if payment_method:
+        lines.append(
+            payment_line(
+                row._mapping.get("total_rub"),
+                payment_method,
+                str(row._mapping.get("payment_status") or UNPAID),
             )
-        except ValueError:
-            paid = False
-        method_label = "СБП" if payment_method == "yookassa_sbp" else "SberPay"
-        lines.append(f"💳 {method_label} — {'оплачено' if paid else 'ожидает оплаты'}")
-    elif payment_method == "cash":
-        lines.append("💵 Наличные — при получении")
+        )
 
     return ("\n" + "\n".join(lines)) if lines else ""
+
+
+async def _payment_keyboard_for(order_id: str, state: OrderState) -> list[dict[str, Any]]:
+    """Cash «paid» button attachment for an order card ([] if not cash / cancelled /
+    lookup failed). Only roles in payment_display.CASH_MARK_ROLES get it — the
+    caller decides which card it goes on; the webhook re-checks the role."""
+    if state == OrderState.CANCELLED:
+        return []
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                sql_text("SELECT payment_method, payment_status FROM orders WHERE id = :id"),
+                {"id": order_id},
+            )
+            row = result.fetchone()
+    except Exception:
+        logger.exception("_payment_keyboard_for: query failed order_id=%s", order_id)
+        return []
+    if row is None:
+        return []
+    return payment_keyboard(
+        order_id,
+        row._mapping.get("payment_method"),
+        str(row._mapping.get("payment_status") or UNPAID),
+    )
 
 
 _GetRefFn = Callable[[str, str, int], Awaitable["str | None"]]
@@ -364,7 +385,10 @@ async def notify_courier_order_state(
     Same fire-and-forget / always-send-or-edit contract as
     notify_kitchen_ticket_state (2026-08-09).
     """
-    keyboard = _order_keyboard(order_id, state, StaffRole.courier)
+    keyboard = _combine_keyboards(
+        _order_keyboard(order_id, state, StaffRole.courier),
+        await _payment_keyboard_for(order_id, state),
+    )
 
     staff = staff_service or StaffService()
     mc = client or max_client
@@ -467,7 +491,10 @@ async def _build_admin_card(
     from clobbering the order-status line and vice versa, since both writers
     target the same tracked message (entity_kind="order", entity_id=order_id).
     """
-    keyboard = _order_keyboard(order_id, order_state, StaffRole.admin)
+    keyboard = _combine_keyboards(
+        _order_keyboard(order_id, order_state, StaffRole.admin),
+        await _payment_keyboard_for(order_id, order_state),
+    )
     details = await _fetch_order_details(order_id)
     resolved_kitchen_state = kitchen_state
     if resolved_kitchen_state is None:
@@ -615,7 +642,9 @@ async def _build_staff_card(
     kitchen_kb: list[dict[str, Any]] = []
     if ticket_id is not None and kitchen_state is not None:
         kitchen_kb = _kitchen_keyboard(ticket_id, kitchen_state)
-    keyboard = _combine_keyboards(kitchen_kb, order_kb)
+    keyboard = _combine_keyboards(
+        kitchen_kb, order_kb, await _payment_keyboard_for(order_id, order_state)
+    )
 
     details = await _fetch_order_details(order_id)
     kitchen_line = ""
@@ -690,3 +719,48 @@ async def notify_staff_card(
             logger.exception(
                 "notify_staff_card: send failed for max_user_id=%s", member.max_user_id
             )
+
+
+# Courier cards exist only from PACKING on (see module docstring, point 2):
+# refreshing earlier would SEND a new card to couriers instead of editing one.
+_COURIER_CARD_STATES: frozenset[OrderState] = frozenset(
+    {
+        OrderState.PACKING,
+        OrderState.COURIER_ASSIGNED,
+        OrderState.DELIVERING,
+        OrderState.DELIVERED,
+    }
+)
+
+
+async def refresh_order_payment_cards(
+    order_id: str,
+    *,
+    staff_service: StaffService | None = None,
+    client: MaxClient | None = None,
+) -> None:
+    """Re-render every role's card for an order after its payment flag changed,
+    so ALL roles see the new status («статус все видят», 2026-11-07).
+
+    Reads the order's CURRENT state and kitchen ticket from the DB and edits
+    the existing cards in place (admin / staff / kitchen / courier). Each
+    notify_* is fire-and-forget on its own, so this never raises.
+    """
+    state = await _fetch_order_state(order_id)
+    if state is None:
+        return
+    await notify_admin_order_state(
+        order_id, state, staff_service=staff_service, client=client
+    )
+    await notify_staff_card(
+        order_id, order_state=state, staff_service=staff_service, client=client
+    )
+    ticket = await _fetch_kitchen_ticket_for_order(order_id)
+    if ticket is not None:
+        await notify_kitchen_ticket_state(
+            ticket[0], order_id, ticket[1], staff_service=staff_service, client=client
+        )
+    if state in _COURIER_CARD_STATES:
+        await notify_courier_order_state(
+            order_id, state, staff_service=staff_service, client=client
+        )
