@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка соединения — SieshKa</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --card: #ffffff;
+    --border: #e5e3dd;
+    --text: #1c1c1c;
+    --muted: #6b6a65;
+    --good: #0f766e;
+    --warn: #b45309;
+    --bad: #b91c1c;
+    --accent: #0f766e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 24px 16px 48px;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+  h1 {
+    font-size: 21px;
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  p.sub {
+    color: var(--muted);
+    margin: 0 0 20px;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px 16px;
+    margin: 14px 0;
+  }
+  .card h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin: 14px 0 2px;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    font-size: 16px;
+  }
+  .row:first-of-type { border-top: none; }
+  .label { color: var(--text); }
+  .val { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .good { color: var(--good); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  button {
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    margin-top: 10px;
+  }
+  button:active { opacity: 0.85; }
+  #status {
+    font-size: 14px;
+    color: var(--muted);
+    margin-top: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Проверка соединения</h1>
+<p class="sub">Откройте страницу, подождите пару секунд, пока цифры появятся, и сделайте скриншот всего экрана.</p>
+
+<div class="card">
+  <h2>Ваша сеть</h2>
+  <div id="network"><div class="row"><span class="label">Определяем…</span></div></div>
+</div>
+
+<div class="card">
+  <h2>Скорость загрузки этой страницы</h2>
+  <div id="timing"><div class="row"><span class="label">Измеряем…</span></div></div>
+</div>
+
+<button onclick="location.reload()">Повторить проверку</button>
+<div id="status">Собираем данные…</div>
+
+<script>
+  function row(label, value, cls) {
+    return '<div class="row"><span class="label">' + label + '</span><span class="val ' + (cls || '') + '">' + value + '</span></div>';
+  }
+  function ms(v) { return Math.round(v) + ' мс'; }
+  function grade(v, okMax, warnMax) {
+    if (v <= okMax) return 'good';
+    if (v <= warnMax) return 'warn';
+    return 'bad';
+  }
+
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      var nav = performance.getEntriesByType('navigation')[0];
+      var dns = nav.domainLookupEnd - nav.domainLookupStart;
+      var tcp = nav.connectEnd - nav.connectStart;
+      var tls = nav.secureConnectionStart > 0 ? (nav.connectEnd - nav.secureConnectionStart) : 0;
+      var ttfb = nav.responseStart - nav.requestStart;
+      var download = nav.responseEnd - nav.responseStart;
+      var total = nav.loadEventEnd - nav.startTime;
+
+      var html = '';
+      html += row('Поиск адреса сервера (DNS)', ms(dns), grade(dns, 50, 200));
+      html += row('Установка соединения', ms(tcp), grade(tcp, 100, 400));
+      if (tls) html += row('Шифрование (TLS)', ms(tls), grade(tls, 150, 500));
+      html += row('Ответ сервера', ms(ttfb), grade(ttfb, 300, 1000));
+      html += row('Загрузка содержимого', ms(download), grade(download, 200, 800));
+      html += row('Всего', ms(total), grade(total, 1500, 4000));
+      document.getElementById('timing').innerHTML = html;
+      document.getElementById('status').textContent = 'Готово. Сделайте скриншот и отправьте этот экран.';
+    }, 300);
+  });
+
+  fetch('https://ipapi.co/json/')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var html = '';
+      html += row('Оператор', d.org || '—');
+      html += row('Город', (d.city || '—') + (d.region ? ', ' + d.region : ''));
+      html += row('IP-адрес', d.ip || '—');
+      document.getElementById('network').innerHTML = html;
+    })
+    .catch(function () {
+      document.getElementById('network').innerHTML = row('Оператор', 'не удалось определить');
+    });
+</script>
+
+</body>
+</html>
+

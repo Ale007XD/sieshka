@@ -5,8 +5,8 @@ ids below assume numeric-string ids ("024" -> "025"). Adjust if 024 uses hashes.
 """
 from alembic import op
 
-revision = "025"
-down_revision = "024"
+revision = "025_orders_payment_status"
+down_revision = "024_products_sort"
 branch_labels = None
 depends_on = None
 

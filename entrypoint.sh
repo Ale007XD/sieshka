@@ -25,7 +25,7 @@
 set -e
 
 echo "[entrypoint] alembic upgrade head..."
-alembic upgrade head
+python -m alembic upgrade head
 echo "[entrypoint] migrations OK, starting app"
 
 exec "$@"
