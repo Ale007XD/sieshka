@@ -373,8 +373,8 @@ async def checkout(
         # Redraw admin/staff cards at COOKING: they were last drawn at CONFIRMED
         # (with ❌ Отменить) and the cooking program's own notification sees
         # the pre-commit state, so the stale button stayed (2026-11-07).
-        await notify_admin_order_state(str(order.id), cooking.new_state)
-        await notify_staff_card(str(order.id), order_state=cooking.new_state)
+        await notify_admin_order_state(str(order.id), OrderState.COOKING)
+        await notify_staff_card(str(order.id), order_state=OrderState.COOKING)
     await idempotency.update_payload(
         idem_key,
         {

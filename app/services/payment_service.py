@@ -506,8 +506,8 @@ class PaymentService:
                 # program's own notification reads the order state BEFORE this
                 # transition commits, so redraw both cards now at COOKING —
                 # CANCEL is not a COOKING transition and disappears.
-                await notify_admin_order_state(order_id, cooking.new_state)
-                await notify_staff_card(order_id, order_state=cooking.new_state)
+                await notify_admin_order_state(order_id, OrderState.COOKING)
+                await notify_staff_card(order_id, order_state=OrderState.COOKING)
 
         return result
 
